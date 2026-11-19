@@ -132,6 +132,8 @@ pub struct Assessment {
     pub days_since_planned_start: Option<i64>,
     /// Day of waiting, the first day being 1 (「3日目」). 待ち only.
     pub waiting_day: Option<i64>,
+    /// Days since the follow-up date (0 = 「確認日が今日」). 要確認 only.
+    pub days_since_follow_up: Option<i64>,
 }
 
 pub fn assess(todo: &Todo, today: NaiveDate, soon_days: u32) -> Assessment {
@@ -152,6 +154,10 @@ pub fn assess(todo: &Todo, today: NaiveDate, soon_days: u32) -> Assessment {
             .waiting_since
             .filter(|_| todo.status == Status::Waiting)
             .map(|since| waiting_day(since, today)),
+        days_since_follow_up: todo
+            .follow_up_date
+            .filter(|_| urgency == Some(Urgency::FollowUp))
+            .map(|f| days_between(f, today)),
     }
 }
 
@@ -595,6 +601,7 @@ mod tests {
                 days_until_due: Some(8),
                 days_since_planned_start: None,
                 waiting_day: Some(3),
+                days_since_follow_up: Some(0),
             }
         );
 
@@ -631,6 +638,7 @@ mod tests {
                 days_until_due: None,
                 days_since_planned_start: None,
                 waiting_day: None,
+                days_since_follow_up: None,
             }
         );
     }

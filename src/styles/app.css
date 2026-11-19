@@ -498,3 +498,199 @@ body,
 input[type="date"][data-empty="true"]:not(:focus) {
   color: var(--text-subtle);
 }
+
+/* ---------- Dashboard ---------- */
+.count-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
+  gap: var(--space-4);
+}
+
+.count-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  padding: var(--space-4) var(--space-5);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.count-card__value {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.count-card__number {
+  font-size: 24px;
+  line-height: 34px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.dash-section__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.section-title {
+  margin: 0;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+}
+
+.dash-strong {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.dash-nowrap {
+  white-space: nowrap;
+}
+
+.dash-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+  gap: var(--space-6);
+  align-items: start;
+}
+
+.dash-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.dash-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dash-row:last-child {
+  padding-bottom: 0;
+}
+
+.dash-row:hover .dash-strong {
+  color: var(--primary-text);
+}
+
+.dash-row:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+}
+
+.dash-row__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.progress-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.progress-item__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+}
+
+.progress-bar {
+  height: 8px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-subtle);
+  overflow: hidden;
+}
+
+.progress-bar__fill {
+  height: 100%;
+  background: var(--primary);
+}
+
+/* ---------- Reminder dialog ---------- */
+.reminder-list {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+}
+
+.reminder-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--border);
+}
+
+.reminder-row__badge {
+  flex: 0 0 88px;
+  display: flex;
+}
+
+.reminder-row__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.reminder-row__side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.reminder-row__detail {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.reminder-row__detail.is-strong {
+  font-weight: 500;
+}
+
+/* ---------- Settings cards ---------- */
+.settings-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.settings-card__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: var(--space-4);
+}

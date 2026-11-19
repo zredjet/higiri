@@ -95,6 +95,8 @@ SQLite(アプリのデータフォルダ内の todo.db)
 - 詳細パネルの項目は `useTodoDraft` で入力が止まって1秒後に `update_todo` で保存する。閉じるときと別のTODOに切り替えるときにも保存する。ステータスを変える前にも保存してから `change_status` を呼ぶ。
 - Markdown の編集は CodeMirror 6(`src/components/markdown/MarkdownEditor.tsx`)、表示は react-markdown + remark-gfm + rehype-sanitize(`MarkdownView.tsx`)。表示のリンクはアプリ内で開かず、http/https だけを opener プラグインの `openUrl` で既定のブラウザに渡す。
 - CSP: CodeMirror が実行時に `<style>` を差し込むため、`style-src` だけ `'unsafe-inline'` を許し、`dangerousDisableAssetCspModification: ["style-src"]` で Tauri の nonce 付与を止めている。`script-src` は厳しいまま。opener の権限は `capabilities/default.json` で http/https に絞る。
+- ダッシュボードの集計(日限注意の一覧と件数、今日の作業、待ち、進捗)と起動時リマインドの判定は `domain/dashboard.rs`。サイドナビのダッシュボードのバッジは `get_dashboard` の `attention_total` を使う。
+- 起動時リマインドは起動時に1回 `get_startup_reminder` を呼び、閉じたら(どの閉じ方でも)`ack_reminder`。ウィンドウが前面に来たときに日付が変わっていれば、すべての一覧を取り直して判定をやり直す(`src/app/useStartupReminder.ts`)。
 - プロジェクトの作成はサイドナビの「プロジェクトを追加」、編集・アーカイブ・削除はプロジェクトのページの「プロジェクトを編集」から行う。アーカイブしたプロジェクトは設定画面のカードで一覧し、元に戻す・削除する。削除は確認ダイアログを挟む。
 - `bundle.css` の先頭にある Google Fonts の `@import` は外し、IBM Plex Sans JP と IBM Plex Mono をアプリに同梱する。このアプリは外部と通信しない。
 - Aizome にない部品(ガント、詳細パネル、Markdownエディタ、タイムライン)は同じトークンで作る。

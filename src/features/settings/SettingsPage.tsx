@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Alert, Button, Card, RadioGroup, Table } from "../../components/aizome";
+import { Alert, Button, Card, RadioGroup, Table, TextField } from "../../components/aizome";
 import { PageHeader } from "../../components/PageHeader";
-import type { ProjectSummary, Theme } from "../../lib/bindings";
+import type { ProjectSummary, ReminderFrequency, Settings, SettingsInput, Theme } from "../../lib/bindings";
 import { formatTimestampDate } from "../../lib/date";
 import { errorMessage } from "../../lib/errors";
 import { useArchiveProject, useProjects, useSettings, useUpdateSettings } from "../../lib/queries";
@@ -13,14 +13,93 @@ const THEME_OPTIONS: Array<{ value: Theme; label: string }> = [
   { value: "system", label: "OSの設定に合わせる" },
 ];
 
-/** 設定. The リマインド and データ cards come in phases 5 and 8. */
+const REMINDER_OPTIONS: Array<{ value: ReminderFrequency; label: string; description: string }> = [
+  {
+    value: "every_launch",
+    label: "起動のたびに表示",
+    description: "日限注意が1件でもあれば、起動するたびにダイアログを出します。",
+  },
+  { value: "once_per_day", label: "1日1回だけ表示", description: "その日最初の起動のときだけダイアログを出します。" },
+];
+
+function inputOf(s: Settings): SettingsInput {
+  return {
+    reminder_frequency: s.reminder_frequency,
+    soon_days: s.soon_days,
+    follow_up_days: s.follow_up_days,
+    theme: s.theme,
+  };
+}
+
+/** 設定 (docs/ui-mock/Settings.dc.html). The データ card comes in phase 8. */
 export function SettingsPage() {
+  const settings = useSettings();
   return (
     <div className="settings-page">
       <PageHeader title="設定" actions={<span className="text-caption">変更はすぐに保存されます</span>} />
+      {settings.data ? <ReminderCard key={settings.dataUpdatedAt} settings={settings.data} /> : null}
       <DisplayCard />
       <ArchivedProjectsCard />
     </div>
+  );
+}
+
+/** リマインド: frequency (D-2), 「間近」の日数 and the default follow-up (D-4). */
+function ReminderCard({ settings }: { settings: Settings }) {
+  const update = useUpdateSettings();
+  const [soon, setSoon] = useState(String(settings.soon_days));
+  const [followUp, setFollowUp] = useState(String(settings.follow_up_days));
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  /** Saves the number fields when they hold a changed whole number. */
+  function saveDays() {
+    if (!/^\d+$/.test(soon.trim()) || !/^\d+$/.test(followUp.trim())) {
+      setLocalError("日数は数字で入力してください。");
+      return;
+    }
+    setLocalError(null);
+    const next = { ...inputOf(settings), soon_days: Number(soon), follow_up_days: Number(followUp) };
+    if (next.soon_days === settings.soon_days && next.follow_up_days === settings.follow_up_days) return;
+    update.mutate(next);
+  }
+
+  const error = localError ?? (update.error ? errorMessage(update.error) : null);
+
+  return (
+    <Card title="リマインド" description="日限注意を知らせる頻度と、区分の基準を決めます。">
+      <div className="settings-card__body">
+        {error ? <Alert tone="danger">{error}</Alert> : null}
+        <RadioGroup
+          label="起動時リマインドの表示"
+          name="reminder-frequency"
+          options={REMINDER_OPTIONS}
+          value={settings.reminder_frequency}
+          onChange={(value) =>
+            update.mutate({ ...inputOf(settings), reminder_frequency: value as ReminderFrequency })
+          }
+        />
+        <div className="settings-card__grid">
+          <TextField
+            label="「間近」とみなす日数"
+            inputMode="numeric"
+            suffix="日以内"
+            description="日限がこの日数以内に来るTODOを「間近」に出します。"
+            value={soon}
+            onChange={(e) => setSoon(e.target.value)}
+            onBlur={saveDays}
+          />
+          <TextField
+            label="確認日の初期値"
+            inputMode="numeric"
+            suffix="日後"
+            description="「待ち」にした日から数えます。TODOごとに変えられます。"
+            value={followUp}
+            onChange={(e) => setFollowUp(e.target.value)}
+            onBlur={saveDays}
+          />
+        </div>
+      </div>
+    </Card>
   );
 }
 
@@ -39,14 +118,7 @@ function DisplayCard() {
           orientation="horizontal"
           options={THEME_OPTIONS}
           value={s.theme}
-          onChange={(value) =>
-            update.mutate({
-              reminder_frequency: s.reminder_frequency,
-              soon_days: s.soon_days,
-              follow_up_days: s.follow_up_days,
-              theme: value as Theme,
-            })
-          }
+          onChange={(value) => update.mutate({ ...inputOf(s), theme: value as Theme })}
         />
       ) : null}
     </Card>

@@ -127,3 +127,54 @@ export function waitingMessage(t: Todo, a: Assessment): string | null {
   if (!a.waiting_day) return `${t.waiting_on}を待っています。`;
   return `${t.waiting_on}を待っています。${day}${due}`;
 }
+
+/** 状況 on the dashboard (「2日超過」「あと1日 ・ 待ち」「確認日が今日」「予定開始から2日経過」). */
+export function situationText(t: Todo, a: Assessment): string {
+  const waiting = t.status === "waiting" ? " ・ 待ち" : "";
+  const days = a.days_until_due ?? 0;
+  switch (a.urgency) {
+    case "overdue":
+      return `${-days}日超過${waiting}`;
+    case "due_today":
+      return `今日が日限${waiting}`;
+    case "due_soon":
+      return `あと${days}日${waiting}`;
+    case "follow_up":
+      return (a.days_since_follow_up ?? 0) > 0 ? `確認日から${a.days_since_follow_up}日経過` : "確認日が今日";
+    case "late_start":
+      return `予定開始から${a.days_since_planned_start ?? 0}日経過`;
+    default:
+      return "";
+  }
+}
+
+/** Right side of a reminder row: the date it is about, and how it stands. */
+export function reminderSide(t: Todo, a: Assessment): { label: string; detail: string; color: string; strong: boolean } {
+  const waiting = t.status === "waiting" ? " ・ 待ち" : "";
+  const days = a.days_until_due ?? 0;
+  const due = t.due_date ? `日限 ${monthDay(t.due_date)}` : "日限 なし";
+  switch (a.urgency) {
+    case "overdue":
+      return { label: due, detail: `${-days}日超過${waiting}`, color: "var(--danger)", strong: true };
+    case "due_today":
+      return { label: due, detail: `今日が日限${waiting}`, color: "var(--warning)", strong: true };
+    case "due_soon":
+      return { label: due, detail: `あと${days}日${waiting}`, color: "var(--text-muted)", strong: false };
+    case "follow_up":
+      return {
+        label: t.follow_up_date ? `確認日 ${monthDay(t.follow_up_date)}` : "確認日",
+        detail: a.waiting_day ? `待ち${a.waiting_day}日目` : "待ち",
+        color: "var(--warning)",
+        strong: true,
+      };
+    case "late_start":
+      return {
+        label: t.planned_start ? `予定開始 ${monthDay(t.planned_start)}` : "予定開始",
+        detail: `${a.days_since_planned_start ?? 0}日経過`,
+        color: "var(--text-muted)",
+        strong: false,
+      };
+    default:
+      return { label: due, detail: "", color: "var(--text-muted)", strong: false };
+  }
+}

@@ -6,6 +6,7 @@
 //! call directly.
 
 pub mod clock;
+pub mod dashboard;
 pub mod error;
 pub mod projects;
 pub mod settings;
@@ -43,6 +44,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             work_logs::delete_work_log,
             settings::get_settings,
             settings::update_settings,
+            dashboard::get_dashboard,
+            dashboard::get_startup_reminder,
+            dashboard::ack_reminder,
         ])
         .typ::<error::AppError>()
         // IDs and counts are i64; they stay far below 2^53 in this app.
@@ -92,7 +96,7 @@ mod tests {
             .collect();
         allowed.sort();
         assert_eq!(allowed, commands_in_bindings());
-        assert_eq!(allowed.len(), 16);
+        assert_eq!(allowed.len(), 19);
     }
 
     /// Regenerates `src/lib/bindings.ts` and fails when the committed file was

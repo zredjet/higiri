@@ -20,6 +20,8 @@ export const queryKeys = {
   todoList: (query: TodoQuery) => ["todos", "list", query] as const,
   todo: (id: number) => ["todos", "item", id] as const,
   timeline: (id: number) => ["todos", "timeline", id] as const,
+  // Under "todos" so every TODO change refreshes it too.
+  dashboard: ["todos", "dashboard"] as const,
   settings: ["settings"] as const,
 };
 
@@ -90,6 +92,12 @@ export function useUpdateSettings() {
       ]);
     },
   });
+}
+
+// ---- Dashboard -----------------------------------------------------------------
+
+export function useDashboard() {
+  return useQuery({ queryKey: queryKeys.dashboard, queryFn: () => commands.getDashboard() });
 }
 
 // ---- TODOs -------------------------------------------------------------------

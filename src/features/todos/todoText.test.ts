@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Assessment, Todo } from "../../lib/bindings";
-import { dueNote, periodText, subLine, waitingMessage, warningTexts } from "./todoText";
+import { dueNote, periodText, reminderSide, situationText, subLine, waitingMessage, warningTexts } from "./todoText";
 
 function assessment(over: Partial<Assessment> = {}): Assessment {
   return {
@@ -9,6 +9,7 @@ function assessment(over: Partial<Assessment> = {}): Assessment {
     days_until_due: null,
     days_since_planned_start: null,
     waiting_day: null,
+    days_since_follow_up: null,
     ...over,
   };
 }
@@ -108,5 +109,46 @@ describe("waitingMessage", () => {
       "認証担当の回答を待っています。待ち2日目で、日限を3日過ぎています。",
     );
     expect(waitingMessage(todo(), assessment())).toBeNull();
+  });
+});
+
+describe("dashboard and reminder texts", () => {
+  it("words 状況 as the dashboard mock does", () => {
+    expect(situationText(todo(), assessment({ urgency: "overdue", days_until_due: -2 }))).toBe("2日超過");
+    expect(situationText(todo(), assessment({ urgency: "due_today", days_until_due: 0 }))).toBe("今日が日限");
+    expect(
+      situationText(todo({ status: "waiting" }), assessment({ urgency: "due_soon", days_until_due: 1 })),
+    ).toBe("あと1日 ・ 待ち");
+    expect(situationText(todo(), assessment({ urgency: "follow_up", days_since_follow_up: 0 }))).toBe("確認日が今日");
+    expect(situationText(todo(), assessment({ urgency: "follow_up", days_since_follow_up: 2 }))).toBe(
+      "確認日から2日経過",
+    );
+    expect(situationText(todo(), assessment({ urgency: "late_start", days_since_planned_start: 2 }))).toBe(
+      "予定開始から2日経過",
+    );
+  });
+
+  it("words the reminder rows as the reminder mock does", () => {
+    expect(
+      reminderSide(todo({ due_date: "2026-11-17" }), assessment({ urgency: "overdue", days_until_due: -2 })),
+    ).toEqual({ label: "日限 11/17", detail: "2日超過", color: "var(--danger)", strong: true });
+    expect(
+      reminderSide(
+        todo({ status: "waiting", due_date: "2026-11-20" }),
+        assessment({ urgency: "due_soon", days_until_due: 1 }),
+      ),
+    ).toEqual({ label: "日限 11/20", detail: "あと1日 ・ 待ち", color: "var(--text-muted)", strong: false });
+    expect(
+      reminderSide(
+        todo({ status: "waiting", follow_up_date: "2026-11-19" }),
+        assessment({ urgency: "follow_up", waiting_day: 3 }),
+      ),
+    ).toEqual({ label: "確認日 11/19", detail: "待ち3日目", color: "var(--warning)", strong: true });
+    expect(
+      reminderSide(
+        todo({ planned_start: "2026-11-17" }),
+        assessment({ urgency: "late_start", days_since_planned_start: 2 }),
+      ).detail,
+    ).toBe("2日経過");
   });
 });

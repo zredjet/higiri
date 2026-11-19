@@ -19,6 +19,9 @@ const APP_COMMANDS: &[&str] = &[
     "delete_work_log",
     "get_settings",
     "update_settings",
+    "get_dashboard",
+    "get_startup_reminder",
+    "ack_reminder",
 ];
 
 fn main() {

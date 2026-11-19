@@ -33,6 +33,9 @@
     "allow-save-work-log",
     "allow-delete-work-log",
     "allow-get-settings",
-    "allow-update-settings"
+    "allow-update-settings",
+    "allow-get-dashboard",
+    "allow-get-startup-reminder",
+    "allow-ack-reminder"
   ]
 }

@@ -36,6 +36,12 @@ describe("buildNavSections", () => {
     expect(sections[1].items[1].badge).toBeUndefined();
   });
 
+  it("shows the total 日限注意 on the dashboard item", () => {
+    expect(buildNavSections([], 5)[0].items[0]).toMatchObject({ id: "dashboard", badge: "5" });
+    expect(buildNavSections([], 0)[0].items[0].badge).toBeUndefined();
+    expect(buildNavSections([])[0].items[0].badge).toBeUndefined();
+  });
+
   it("still offers to add a project when there is none", () => {
     const sections = buildNavSections([]);
     expect(sections[1].items.map((i) => i.label)).toEqual(["プロジェクトを追加"]);

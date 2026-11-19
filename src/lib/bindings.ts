@@ -36,6 +36,14 @@ export const commands = {
 	deleteWorkLog: (id: number, options?: InvokeOptions) => __TAURI_INVOKE<null>("delete_work_log", { id }, options),
 	getSettings: (options?: InvokeOptions) => __TAURI_INVOKE<Settings>("get_settings", undefined, options),
 	updateSettings: (input: SettingsInput, options?: InvokeOptions) => __TAURI_INVOKE<Settings>("update_settings", { input }, options),
+	getDashboard: (options?: InvokeOptions) => __TAURI_INVOKE<Dashboard>("get_dashboard", undefined, options),
+	/**
+	 *  The reminder to show at startup (or when the date changed while the app
+	 *  was open), or null when there is nothing to show.
+	 */
+	getStartupReminder: (options?: InvokeOptions) => __TAURI_INVOKE<StartupReminder | null>("get_startup_reminder", undefined, options),
+	/**  Records that today's reminder was seen (closing the dialog). */
+	ackReminder: (options?: InvokeOptions) => __TAURI_INVOKE<null>("ack_reminder", undefined, options),
 };
 
 /* Types */
@@ -60,6 +68,25 @@ export type Assessment = {
 	days_since_planned_start: number | null,
 	/**  Day of waiting, the first day being 1 (「3日目」). 待ち only. */
 	waiting_day: number | null,
+	/**  Days since the follow-up date (0 = 「確認日が今日」). 要確認 only. */
+	days_since_follow_up: number | null,
+};
+
+export type Dashboard = {
+	today: string,
+	/**  「N日以内に日限が来ます」. */
+	soon_days: number,
+	counts: UrgencyCounts,
+	/**  All 日限注意 (the side-nav badge of the dashboard). */
+	attention_total: number,
+	/**  日限注意, most severe category first, then oldest due date. */
+	attention: TodoItem[],
+	/**  今日の作業: doing, then not-started TODOs whose planned period contains today. */
+	today_work: TodoItem[],
+	/**  待ち: next follow-up date first. */
+	waiting: TodoItem[],
+	/**  プロジェクトの進捗 (active projects). */
+	projects: ProjectSummary[],
 };
 
 /**  The 日限 filter of the list. */
@@ -188,6 +215,14 @@ export type SettingsInput = {
 	soon_days: number,
 	follow_up_days: number,
 	theme: Theme,
+};
+
+/**  What the startup reminder dialog shows. */
+export type StartupReminder = {
+	today: string,
+	frequency: ReminderFrequency,
+	/**  日限注意 in display order (never empty). */
+	items: TodoItem[],
 };
 
 /**  TODO status (`todos.status`). The stored value is [`Status::as_str`]. */
@@ -365,6 +400,15 @@ export type Urgency =
 "follow_up" | 
 /**  着手遅れ: not started, and the planned start is before today. */
 "late_start";
+
+/**  Number of TODOs in each 日限注意 category. */
+export type UrgencyCounts = {
+	overdue: number,
+	due_today: number,
+	due_soon: number,
+	follow_up: number,
+	late_start: number,
+};
 
 /**  The two small warning icons shown in the list and the Gantt chart. */
 export type Warnings = {

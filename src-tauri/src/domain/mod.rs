@@ -3,6 +3,7 @@
 //! Nothing in here reads the clock or touches the database: `today` (local date)
 //! and `now` (UTC timestamp) are always passed in by the caller (`commands/`).
 
+pub mod dashboard;
 pub mod date;
 pub mod events;
 pub mod listing;

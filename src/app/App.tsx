@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Alert, SideNav } from "../components/aizome";
 import { DashboardPage } from "../features/dashboard/DashboardPage";
+import { ReminderDialog } from "../features/dashboard/ReminderDialog";
 import { GanttPage } from "../features/gantt/GanttPage";
 import { DeleteProjectDialog } from "../features/projects/DeleteProjectDialog";
 import { ProjectFormDialog } from "../features/projects/ProjectFormDialog";
@@ -10,10 +11,11 @@ import { TodoDetailPanel } from "../features/todos/detail/TodoDetailPanel";
 import { TodosPage } from "../features/todos/TodosPage";
 import type { ProjectSummary } from "../lib/bindings";
 import { errorMessage } from "../lib/errors";
-import { useProjects, useSettings } from "../lib/queries";
+import { useDashboard, useProjects, useSettings } from "../lib/queries";
 import { buildNavSections } from "./nav";
 import { NEW_PROJECT_NAV_ID, navIdToRoute, routeToNavId, type Route } from "./routes";
 import { useAppliedTheme } from "./theme";
+import { useStartupReminder } from "./useStartupReminder";
 
 const ALL_TODOS: Route = { page: "todos", projectId: null };
 
@@ -35,6 +37,8 @@ export default function App() {
 
   const projects = useProjects(false);
   const settings = useSettings();
+  const dashboard = useDashboard();
+  const { reminder, acknowledge } = useStartupReminder();
   useAppliedTheme(settings.data?.theme);
 
   // Leave a project's page once it is archived or deleted.
@@ -71,7 +75,7 @@ export default function App() {
         <SideNav
           header="Higiri"
           label="メインナビゲーション"
-          sections={buildNavSections(projects.data ?? [])}
+          sections={buildNavSections(projects.data ?? [], dashboard.data?.attention_total)}
           activeId={routeToNavId(route)}
           onSelect={select}
         />
@@ -79,7 +83,7 @@ export default function App() {
 
       <main className="app__main">
         {projects.error ? <Alert tone="danger">{errorMessage(projects.error)}</Alert> : null}
-        {route.page === "dashboard" && <DashboardPage />}
+        {route.page === "dashboard" && <DashboardPage onOpenTodo={setOpenTodoId} />}
         {route.page === "todos" && (
           <TodosPage
             projectId={route.projectId}
@@ -96,6 +100,8 @@ export default function App() {
       {openTodoId !== null && PANEL_PAGES.includes(route.page) ? (
         <TodoDetailPanel key={openTodoId} todoId={openTodoId} onClose={closeTodo} />
       ) : null}
+
+      {reminder ? <ReminderDialog reminder={reminder} onClose={acknowledge} /> : null}
 
       <ProjectFormDialog
         target={formTarget}

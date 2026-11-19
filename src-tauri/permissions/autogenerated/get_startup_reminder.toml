@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-startup-reminder"
+description = "Enables the get_startup_reminder command without any pre-configured scope."
+commands.allow = ["get_startup_reminder"]
+
+[[permission]]
+identifier = "deny-get-startup-reminder"
+description = "Denies the get_startup_reminder command without any pre-configured scope."
+commands.deny = ["get_startup_reminder"]
