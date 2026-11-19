@@ -59,23 +59,25 @@ DB のテーブル定義は変えない(マイグレーションは足さない)
 - `domain/notify.rs`(純粋関数)
   - `pending_slot(now_local, times, last_notified_local)`: 今日の時刻のうち、今以前で、まだ通知していない最も遅い1つを返す。
   - `next_wake(now_local, times)`: 次の時刻までの待ち時間を返す。最長10分で区切り、スリープ明けに時計を見直す。DB は読まない。
-  - `message(counts)`: 通知の題名と本文を作る。
+  - `message(counts)`: 通知の題名と本文を作る。本文は1件以上の区分だけを、区分の順に「・」でつなぐ(0件の区分は出さない)。
 - `notifier.rs`: tokio のタスクで、時刻が来たら次の順に動く。
   1. `commands::clock` で時計を読む。
   2. ダッシュボードと同じ集計(`domain::dashboard`)で件数を出す。
   3. 1件以上なら通知する。0件でも、その時刻は済んだものとして `last_notified_at` を保存する。
+  - 起きるたびに日付を見て、変わっていたら `backup::run_daily` でその日のバックアップを取る(起動時と同じく1日1個で、7個残す)。
   - 設定が変わったら `tokio::sync::Notify` で起こして、待ち時間を計算し直す。
-  - 通知のクリックでウィンドウを出す(`on_action`。入れる版のデスクトップで動くかを確かめる)。
+  - 通知のクリックでウィンドウを出す(`on_action`。入れる版のデスクトップで動くかを確かめる)。動かなければ、クリックでは何もしない(ウィンドウはトレイから開く)。
 - `tray.rs`
   - トレイのアイコンとメニュー(「Higiri を開く」「終了」)。Windows は左クリックでも開く。
   - ウィンドウを出すときは `unminimize` → `show` → `set_focus`。
 - `lib.rs`
   - `tauri.conf.json` の main ウィンドウを `visible: false` にし、setup で `--autostart` の引数がなければ出す。
   - `CloseRequested` で `close_to_tray` なら閉じずに隠す。値は `AtomicBool` で持ち、設定の保存時に更新する。トレイを作れなかったときは、隠さずに終了する。
-  - 初めて隠したときに1回だけ案内の通知を出し、`tray_hint_shown` を保存する。
+  - 初めて隠したときに1回だけ案内の通知を出し、`tray_hint_shown` を保存する。`notify_enabled` がオフでも出す。
   - macOS の `RunEvent::Reopen`(Dock のクリック)でウィンドウを出す。
   - single-instance のコールバックは、`--autostart` つきの2つ目の起動ならウィンドウを出さない。
   - 復元(`restore_backup`)で settings が入れ替わったときも、`#[tauri::command]` の層でタイマーと×ボタンの動きに反映する。
+- 復元(`restore_backup`)では、`autostart`、`last_notified_at`、`tray_hint_shown`、`last_reminded_on` を今の値のまま残す。フェーズ15の取り込みも同じ仕組みを使う。
 - `autostart.rs`: 配布版の起動時に、`autostart` の値を OS に反映する。
   - 登録には `--autostart` の引数を付ける(macOS は引数を渡せる `MacosLauncher::LaunchAgent` を使う)。
   - ZIP を置き直すと exe の場所が変わるので、毎回登録し直す。
@@ -83,7 +85,7 @@ DB のテーブル定義は変えない(マイグレーションは足さない)
   - macOS で App Translocation の場所から動いていたら登録せず、設計書の文のエラーを返す。
 - `win_toast.rs`(Windows の配布版だけ): 起動時に `HKCU\Software\Classes\AppUserModelId\com.redjet.higiri` へ表示名とアイコンのパスを書く。アイコンはデータフォルダに PNG で書き出す。
 - settings に `notify_enabled`、`notify_times`、`last_notified_at`、`close_to_tray`、`autostart`、`tray_hint_shown` を足す。`update_settings` で時刻を検証する(形式、1〜5個、重複なし)。OS 側への反映(自動起動の登録、タイマーの計算し直し、`AtomicBool` の更新)は `#[tauri::command]` の層で行う。
-- `test_notification` のコマンドを足す。
+- `test_notification` のコマンドを足す。`notify_enabled` がオフでも出す。
 
 **画面**
 
@@ -104,29 +106,33 @@ DB のテーブル定義は変えない(マイグレーションは足さない)
   - 13:00 の起動(12:55 の1回だけ)
   - 日付の変わり目、前日に通知済み
   - 時刻の重複と順不同
+  - 本文に0件の区分を出さないこと
 - settings の読み書きと、`update_settings` の検証(時刻の形式、1〜5個、重複なし)
+- 常駐中に日付をまたぐと、その日のバックアップが1個でき、同じ日には2個目を作らないこと
+- 復元のあとも、`autostart`、`last_notified_at`、`tray_hint_shown`、`last_reminded_on` が復元前の値のまま残ること
 
 **実機での確認**
 
 - macOS の開発ビルドでは、通知が「ターミナル」から届く(開発ビルドの仕様)。
 - macOS の配布版(ad-hoc 署名)で通知が届くか。
 - Windows の ZIP 版で次を確かめる。ビルドは `windows.yml` で作る(push とワークフローの実行は、その時点で利用者に確認してから行う)。ZIP から取り出した exe で試す(`target\release` の中の exe をそのまま動かすと、プラグインは PowerShell の名前で通知する)。
-  - トーストが Higiri の名前で届き、クリックでウィンドウが出るか。
+  - トーストが Higiri の名前で届き、クリックでウィンドウが出るか(プラグインがクリックに対応していなければ、何も起きないことを確かめる)。
   - ログインし直したらトレイで起動するか。
   - × で隠れ、トレイの「終了」で終わるか。
 - レジストリで通知が出なければ、スタートメニューのショートカット(`IShellLinkW` + `PKEY_AppUserModel_ID`)に切り替える。
 
-完了条件: `domain/notify.rs` と settings のテストが通る。macOS の配布版と Windows の ZIP 版で、決まった時刻に Higiri の名前で通知が届く。× で隠れてトレイから開き直せ、トレイの「終了」で終わる。自動起動をオンにしてログインし直すと、ウィンドウを出さずにトレイだけで起動する。要件 D-6、D-7。
+完了条件: `domain/notify.rs`、settings、常駐中のバックアップ、復元で残す値のテストが通る。macOS の配布版と Windows の ZIP 版で、決まった時刻に Higiri の名前で通知が届く。× で隠れてトレイから開き直せ、トレイの「終了」で終わる。自動起動をオンにしてログインし直すと、ウィンドウを出さずにトレイだけで起動する。常駐したまま日付をまたぐと、その日のバックアップができる。要件 D-6、D-7、C-1(常駐中のバックアップ)。
 
 ## フェーズ11 営業日
 
 **Rust**
 
 - `domain/holidays.rs`: 日本の祝日を規則から計算する。
-  - 固定日、ハッピーマンデー、春分・秋分(1980〜2099年の式)、振替休日、国民の休日。
+  - 今の祝日法の規則(2020年以降のもの)で計算する。2019年以前の改正の歴史は入れない。
+  - 固定日、ハッピーマンデー、春分・秋分(2020〜2099年で使える式)、振替休日、国民の休日。
   - 2020・2021年の五輪による移動も入れる。
   - 内閣府の祝日一覧(2020〜2027年)と一致することをテストで確かめる。一覧は実装時に内閣府のページで確かめる。
-  - 計算するのは1980〜2099年だけ。その外の年は祝日なしとする。
+  - 計算するのは2020〜2099年だけ。その外の年は祝日なしとする(土日だけが休み)。
 - `domain/calendar.rs` の `WorkCalendar { mode, custom }` に次を持たせる。
   - `is_business_day`
   - `add_business_days`
@@ -256,7 +262,7 @@ DB のテーブル定義は変えない(マイグレーションは足さない)
   3. 作業用の DB にマイグレーションを当て、行を入れる。外部キーと CHECK 制約で中身を検査する。
   4. `before-restore-<UTC>.db` に今のデータを退避する。
   5. `backup.rs` の `copy_rows`(ATTACH して1トランザクションで入れ替える)で置き換える。
-  - 自動起動の値は今の PC のまま残す。
+  - `autostart`、`last_notified_at`、`tray_hint_shown`、`last_reminded_on` は、フェーズ10の復元と同じ仕組みで今の値のまま残す。
   - 取り込みで settings が入れ替わるので、復元と同じく `#[tauri::command]` の層でタイマーと×ボタンの動きに反映する。
 - 退避の一覧での表示名を「復元・取り込みの前の状態」にする。復元のダイアログと案内の文にある「復元する前の状態」も合わせて直す。
 - 画面
@@ -269,6 +275,7 @@ DB のテーブル定義は変えない(マイグレーションは足さない)
 - サンプルデータで、書き出し → 空の DB に取り込み → 全テーブルの行が一致する。
 - 新しい版の形式、壊れた JSON、制約違反は断り、データが変わらない。
 - 退避が作られる。
+- 取り込みのあとも、`autostart`、`last_notified_at`、`tray_hint_shown`、`last_reminded_on` が今の値のまま残る。
 
 完了条件: 上のテストが通る。画面で JSON に書き出し、取り込むと、すべての一覧が取り込んだ内容になる。取り込む前の状態が復元の一覧に「復元・取り込みの前の状態」として出て、そこから戻せる。要件 C-2。
 
