@@ -1,119 +1,109 @@
-// Temporary check screen for phase 2: calls the commands through the generated
-// bindings and shows the raw results. Replaced by the real layout in phase 3.
 import { useEffect, useState } from "react";
-import {
-  commands,
-  type AppError,
-  type ProjectSummary,
-  type Status,
-  type TodoItem,
-  type Urgency,
-} from "../lib/bindings";
+import { Alert, SideNav } from "../components/aizome";
+import { DashboardPage } from "../features/dashboard/DashboardPage";
+import { GanttPage } from "../features/gantt/GanttPage";
+import { DeleteProjectDialog } from "../features/projects/DeleteProjectDialog";
+import { ProjectFormDialog } from "../features/projects/ProjectFormDialog";
+import { ReportPage } from "../features/report/ReportPage";
+import { SettingsPage } from "../features/settings/SettingsPage";
+import { TodosPage } from "../features/todos/TodosPage";
+import type { ProjectSummary } from "../lib/bindings";
+import { errorMessage } from "../lib/errors";
+import { useProjects, useSettings } from "../lib/queries";
+import { buildNavSections } from "./nav";
+import { NEW_PROJECT_NAV_ID, navIdToRoute, routeToNavId, type Route } from "./routes";
+import { useAppliedTheme } from "./theme";
 
-const STATUS_LABEL: Record<Status, string> = {
-  todo: "未着手",
-  doing: "作業中",
-  waiting: "待ち",
-  hold: "保留",
-  done: "完了",
-  cancelled: "中止",
-};
-
-const URGENCY_LABEL: Record<Urgency, string> = {
-  overdue: "超過",
-  due_today: "本日",
-  due_soon: "間近",
-  follow_up: "要確認",
-  late_start: "着手遅れ",
-};
-
-function errorText(e: unknown): string {
-  if (typeof e === "object" && e !== null && "message" in e) {
-    return (e as AppError).message;
-  }
-  return String(e);
-}
+const ALL_TODOS: Route = { page: "todos", projectId: null };
 
 export default function App() {
-  const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
-  const [todos, setTodos] = useState<TodoItem[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [route, setRoute] = useState<Route>({ page: "dashboard" });
+  /** Project dialog: closed, creating, or editing the project with this id. */
+  const [projectForm, setProjectForm] = useState<null | "new" | number>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ProjectSummary | null>(null);
 
+  const projects = useProjects(false);
+  const settings = useSettings();
+  useAppliedTheme(settings.data?.theme);
+
+  // Leave a project's page once it is archived or deleted.
   useEffect(() => {
-    Promise.all([
-      commands.listProjects(false),
-      commands.listTodos({ project_id: null, statuses: null }),
-    ])
-      .then(([p, t]) => {
-        setProjects(p);
-        setTodos(t);
-      })
-      .catch((e: unknown) => setError(errorText(e)));
-  }, []);
+    if (
+      route.page === "todos" &&
+      route.projectId !== null &&
+      projects.data &&
+      !projects.data.some((p) => p.project.id === route.projectId)
+    ) {
+      setRoute(ALL_TODOS);
+    }
+  }, [route, projects.data]);
+
+  function select(id: string) {
+    if (id === NEW_PROJECT_NAV_ID) {
+      setProjectForm("new");
+      return;
+    }
+    const next = navIdToRoute(id);
+    if (next) setRoute(next);
+  }
+
+  const formTarget =
+    projectForm === null
+      ? null
+      : projectForm === "new"
+        ? "new"
+        : (projects.data?.find((p) => p.project.id === projectForm) ?? null);
 
   return (
-    <main>
-      <h1>Higiri</h1>
-      {error && <p role="alert">{error}</p>}
-      {!error && (projects === null || todos === null) && <p>読み込んでいます。</p>}
+    <div className="app">
+      <div className="app__nav">
+        <SideNav
+          header="Higiri"
+          label="メインナビゲーション"
+          sections={buildNavSections(projects.data ?? [])}
+          activeId={routeToNavId(route)}
+          onSelect={select}
+        />
+      </div>
 
-      {projects && (
-        <section>
-          <h2>list_projects</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>プロジェクト</th>
-                <th>完了 / 総数(中止を除く)</th>
-                <th>日限注意</th>
-              </tr>
-            </thead>
-            <tbody>
-              {projects.map((p) => (
-                <tr key={p.project.id}>
-                  <td>{p.project.name}</td>
-                  <td>
-                    {p.progress_done} / {p.progress_total}
-                  </td>
-                  <td>{p.attention_count}件</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
+      <main className="app__main">
+        {projects.error ? <Alert tone="danger">{errorMessage(projects.error)}</Alert> : null}
+        {route.page === "dashboard" && <DashboardPage />}
+        {route.page === "todos" && (
+          <TodosPage
+            projectId={route.projectId}
+            onEditProject={(s) => setProjectForm(s.project.id)}
+          />
+        )}
+        {route.page === "gantt" && <GanttPage />}
+        {route.page === "report" && <ReportPage />}
+        {route.page === "settings" && <SettingsPage />}
+      </main>
 
-      {todos && (
-        <section>
-          <h2>list_todos</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>プロジェクト</th>
-                <th>TODO</th>
-                <th>ステータス</th>
-                <th>日限</th>
-                <th>区分</th>
-                <th>日限まで(日)</th>
-                <th>待ち(日目)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {todos.map(({ todo, project_name, assessment }) => (
-                <tr key={todo.id}>
-                  <td>{project_name}</td>
-                  <td>{todo.title}</td>
-                  <td>{STATUS_LABEL[todo.status]}</td>
-                  <td>{todo.due_date ?? "なし"}</td>
-                  <td>{assessment.urgency ? URGENCY_LABEL[assessment.urgency] : "なし"}</td>
-                  <td>{assessment.days_until_due ?? "-"}</td>
-                  <td>{assessment.waiting_day ?? "-"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
-    </main>
+      <ProjectFormDialog
+        target={formTarget}
+        onClose={() => setProjectForm(null)}
+        onCreated={(p) => {
+          setProjectForm(null);
+          setRoute({ page: "todos", projectId: p.id });
+        }}
+        onArchived={() => {
+          setProjectForm(null);
+          setRoute(ALL_TODOS);
+        }}
+        onDeleteRequest={(s) => {
+          setProjectForm(null);
+          setDeleteTarget(s);
+        }}
+      />
+      <DeleteProjectDialog
+        target={deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onDeleted={() => {
+          setDeleteTarget(null);
+          setRoute(ALL_TODOS);
+        }}
+      />
+    </div>
   );
 }

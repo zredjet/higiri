@@ -1,0 +1,175 @@
+/* Aizome tokens — tokens.json の値をそのまま CSS 変数にしたもの。
+   ライトが既定。ルート要素に data-theme="dark" を付けるとダークになる。 */
+:root {
+  /* 原色パレット:藍 */
+  --ai-50: #eef6fe;
+  --ai-100: #daecfd;
+  --ai-200: #bad8f8;
+  --ai-300: #91bbed;
+  --ai-400: #6294d8;
+  --ai-500: #3d72c1;
+  --ai-600: #2958a5;
+  --ai-700: #1d448a;
+  --ai-800: #13316d;
+  --ai-900: #0e2351;
+  --ai-950: #081636;
+  /* 原色パレット:墨 */
+  --sumi-0: #ffffff;
+  --sumi-50: #f6f7fa;
+  --sumi-100: #eef0f4;
+  --sumi-200: #dfe3ea;
+  --sumi-300: #c5cbd4;
+  --sumi-400: #89909a;
+  --sumi-500: #6e7581;
+  --sumi-600: #59616d;
+  --sumi-700: #434b58;
+  --sumi-800: #2e3644;
+  --sumi-850: #202837;
+  --sumi-900: #161e2d;
+  --sumi-950: #0d1523;
+  --sumi-975: #070d1a;
+  /* 原色パレット:緑 */
+  --midori-50: #e4f9f1;
+  --midori-100: #c5f0df;
+  --midori-300: #6fd5b0;
+  --midori-600: #098260;
+  --midori-700: #086b4e;
+  --midori-900: #083628;
+  --midori-950: #08251c;
+  /* 原色パレット:琥珀 */
+  --kohaku-50: #fff6e4;
+  --kohaku-100: #ffe9bc;
+  --kohaku-300: #fcbe54;
+  --kohaku-600: #b46d10;
+  --kohaku-700: #985611;
+  --kohaku-900: #4a2a0b;
+  --kohaku-950: #311c09;
+  /* 原色パレット:朱 */
+  --shu-50: #fef2f0;
+  --shu-100: #fee0db;
+  --shu-200: #febaaf;
+  --shu-300: #f8907f;
+  --shu-500: #da452c;
+  --shu-600: #c52f15;
+  --shu-700: #a32418;
+  --shu-900: #551914;
+  --shu-950: #391411;
+
+  /* セマンティックトークン(ライト) */
+  --bg: var(--sumi-50);
+  --bg-subtle: var(--sumi-100);
+  --surface: var(--sumi-0);
+  --surface-raised: var(--sumi-0);
+  --surface-hover: var(--sumi-100);
+  --border: var(--sumi-200);
+  --border-strong: var(--sumi-400);
+  --text: var(--sumi-900);
+  --text-muted: var(--sumi-600);
+  --text-subtle: var(--sumi-500);
+  --text-disabled: var(--sumi-400);
+  --primary: var(--ai-800);
+  --primary-hover: var(--ai-700);
+  --primary-active: var(--ai-900);
+  --on-primary: var(--sumi-0);
+  --primary-soft: var(--ai-50);
+  --primary-text: var(--ai-700);
+  --link: var(--primary-text);
+  --focus: var(--ai-500);
+  --success: var(--midori-700);
+  --success-soft: var(--midori-50);
+  --warning: var(--kohaku-700);
+  --warning-soft: var(--kohaku-50);
+  --danger: var(--shu-600);
+  --danger-hover: var(--shu-700);
+  --on-danger: var(--sumi-0);
+  --danger-soft: var(--shu-50);
+  --nav-bg: var(--ai-900);
+  --nav-hover: var(--ai-800);
+  --nav-active: var(--ai-700);
+  --nav-text: var(--ai-50);
+  --nav-text-muted: var(--ai-300);
+  --nav-border: var(--ai-800);
+  --overlay: #0816368c;
+
+  /* 書体 */
+  --font-sans: "IBM Plex Sans JP", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* 余白 */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* 角丸 */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-full: 9999px;
+
+  /* 影(ライト) */
+  --shadow-sm: 0 1px 2px #0816360d, 0 1px 3px #08163614;
+  --shadow-md: 0 2px 4px #0816360d, 0 8px 16px -4px #0816361f;
+  --shadow-lg: 0 4px 8px #08163612, 0 24px 48px -12px #08163640;
+  --focus-ring: 0 0 0 2px #ffffff, 0 0 0 4px #3d72c1;
+
+  /* サイズ */
+  --control-sm: 28px;
+  --control-md: 36px;
+  --control-lg: 44px;
+  --sidenav-width: 240px;
+  --content-max: 1200px;
+
+  /* 重なり順 */
+  --z-sticky: 100;
+  --z-dropdown: 1000;
+  --z-overlay: 1100;
+  --z-toast: 1200;
+}
+
+[data-theme="dark"] {
+  --bg: var(--sumi-950);
+  --bg-subtle: var(--sumi-900);
+  --surface: var(--sumi-900);
+  --surface-raised: var(--sumi-850);
+  --surface-hover: var(--sumi-850);
+  --border: var(--sumi-800);
+  --border-strong: var(--sumi-500);
+  --text: var(--sumi-50);
+  --text-muted: var(--sumi-300);
+  --text-subtle: var(--sumi-400);
+  --text-disabled: var(--sumi-600);
+  --primary: var(--ai-300);
+  --primary-hover: var(--ai-200);
+  --primary-active: var(--ai-400);
+  --on-primary: var(--ai-950);
+  --primary-soft: var(--ai-900);
+  --primary-text: var(--ai-300);
+  --focus: var(--ai-300);
+  --success: var(--midori-300);
+  --success-soft: var(--midori-950);
+  --warning: var(--kohaku-300);
+  --warning-soft: var(--kohaku-950);
+  --danger: var(--shu-300);
+  --danger-hover: var(--shu-200);
+  --on-danger: var(--shu-950);
+  --danger-soft: var(--shu-950);
+  --nav-bg: var(--sumi-975);
+  --nav-hover: var(--sumi-900);
+  --nav-active: var(--ai-900);
+  --nav-text: var(--sumi-100);
+  --nav-text-muted: var(--sumi-400);
+  --nav-border: var(--sumi-850);
+  --overlay: #000000b3;
+  --shadow-sm: 0 1px 2px #00000080;
+  --shadow-md: 0 8px 20px -4px #000000a6;
+  --shadow-lg: 0 0 0 1px #2e3644, 0 24px 48px -12px #000000cc;
+  --focus-ring: 0 0 0 2px #0d1523, 0 0 0 4px #91bbed;
+}

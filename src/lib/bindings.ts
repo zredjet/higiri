@@ -132,6 +132,8 @@ export type ProjectInput = {
 export type ProjectSummary = {
 	project: Project,
 	counts: StatusCounts,
+	/**  All TODOs, 中止 included (the 「すべて」 tab, delete confirmation). */
+	todo_count: number,
 	/**  Denominator of the progress: all TODOs except 中止. */
 	progress_total: number,
 	/**  Numerator of the progress: 完了. */

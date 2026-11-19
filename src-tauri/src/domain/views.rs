@@ -42,6 +42,8 @@ impl StatusCounts {
 pub struct ProjectSummary {
     pub project: Project,
     pub counts: StatusCounts,
+    /// All TODOs, 中止 included (the 「すべて」 tab, delete confirmation).
+    pub todo_count: i64,
     /// Denominator of the progress: all TODOs except 中止.
     pub progress_total: i64,
     /// Numerator of the progress: 完了.
@@ -71,6 +73,7 @@ pub fn project_summaries(
         .map(|project| {
             let (c, attention) = counts.get(&project.id).copied().unwrap_or_default();
             ProjectSummary {
+                todo_count: c.total(),
                 progress_total: c.total() - c.cancelled,
                 progress_done: c.done,
                 attention_count: attention,
@@ -153,6 +156,7 @@ mod tests {
         let s = &out[0];
         assert_eq!(s.project.name, "基幹システム更改");
         assert_eq!(s.counts.total(), 6);
+        assert_eq!(s.todo_count, 6);
         assert_eq!((s.progress_done, s.progress_total), (1, 5));
         assert_eq!(s.counts.cancelled, 1);
         assert_eq!(s.attention_count, 3);

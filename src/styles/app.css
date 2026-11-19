@@ -1,0 +1,142 @@
+/* App layout on top of Aizome. Colours, spacing and radii come from tokens
+   (var(--…)); only sizes that have no token (widths, type sizes) are literal. */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/* ---------- Shell: side nav + content (+ detail panel) ---------- */
+.app {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app__nav {
+  flex: 0 0 var(--sidenav-width);
+  display: flex;
+  background: var(--nav-bg);
+}
+
+.app__main {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: var(--space-6) var(--space-8) var(--space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.app__detail {
+  flex: 0 1 440px;
+  max-width: 440px;
+  min-width: 0;
+  overflow-y: auto;
+  box-sizing: border-box;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  padding: var(--space-4) var(--space-6) var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.detail-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+/* ---------- Page header ---------- */
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.page-header__titles {
+  display: flex;
+  flex-direction: column;
+}
+
+.page-header__title-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.page-header__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.page-title {
+  margin: 0;
+  font-size: 24px;
+  line-height: 34px;
+  font-weight: 600;
+}
+
+.page-header__meta {
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Text ---------- */
+.text-caption {
+  font-size: 12px;
+  line-height: 18px;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.text-muted {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+/* ---------- Settings ---------- */
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  max-width: 760px;
+}
+
+.settings-page .page-header {
+  align-items: baseline;
+}
+
+/* ---------- Dialog forms ---------- */
+.dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* Destructive actions on the left of a dialog footer, the rest on the right. */
+.dialog-footer__start {
+  display: flex;
+  gap: var(--space-2);
+  margin-right: auto;
+}
+
+/* ---------- Tables ---------- */
+.table-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-1);
+}

@@ -1,11 +1,27 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig, type Plugin } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 const host = process.env.TAURI_DEV_HOST;
 
+/**
+ * Fontsource CSS lists a .woff fallback after every .woff2 source. The
+ * WebViews this app runs in (WebView2, WKWebView) all read .woff2, so drop
+ * the fallback and keep about 11 MB of unused font files out of the bundle.
+ */
+function woff2Only(): Plugin {
+  return {
+    name: "higiri:woff2-only",
+    enforce: "pre",
+    transform(code, id) {
+      if (!/@fontsource\/[^/]+\/[^/]+\.css$/.test(id)) return null;
+      return code.replace(/,\s*url\([^)]+\.woff\)\s*format\('woff'\)/g, "");
+    },
+  };
+}
+
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [woff2Only(), react()],
 
   // Options for `tauri dev` / `tauri build`
   // 1. keep Rust errors visible
@@ -32,5 +48,7 @@ export default defineConfig({
     include: ["src/**/*.test.{ts,tsx}"],
     environment: "node",
     passWithNoTests: true,
+    // Fixed time zone so date-format tests do not depend on the machine.
+    env: { TZ: "Asia/Tokyo" },
   },
 });
