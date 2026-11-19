@@ -15,6 +15,14 @@ export function isPrimaryModifier(e: { ctrlKey: boolean; metaKey: boolean }, mac
   return mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
 }
 
+/**
+ * A shortcut as on-screen text: 「Ctrl+E」, or 「Command+E」 on macOS (the
+ * editors' Mod- keys and the app shortcuts take Command there).
+ */
+export function shortcutText(key: string, mac: boolean = IS_MAC): string {
+  return `${mac ? "Command" : "Ctrl"}+${key}`;
+}
+
 /** A dialog or menu is open: Esc and shortcuts belong to it. */
 export function overlayOpen(): boolean {
   return document.querySelector(".az-dialog__overlay, .menu__popover") !== null;

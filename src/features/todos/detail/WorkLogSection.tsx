@@ -5,6 +5,7 @@ import { MarkdownView } from "../../../components/markdown/MarkdownView";
 import type { TimelineEntry, WorkLog } from "../../../lib/bindings";
 import { formatDate, formatDateWithWeekday, monthDay, todayYmd } from "../../../lib/date";
 import { errorMessage } from "../../../lib/errors";
+import { shortcutText } from "../../../lib/keys";
 import { useDeleteWorkLog, useSaveWorkLog } from "../../../lib/queries";
 import { ConfirmDelete } from "./ConfirmDelete";
 import { MarkdownField } from "./MarkdownField";
@@ -69,7 +70,7 @@ export function WorkLogSection({ todoId, timeline }: { todoId: number; timeline:
         preview={preview}
         onTogglePreview={() => setPreview((p) => !p)}
         onSubmit={submit}
-        description="Markdownで書けます。Ctrl+E でプレビューに切り替わります。Ctrl+Enter で保存します。"
+        description={`Markdownで書けます。${shortcutText("E")} でプレビューに切り替わります。${shortcutText("Enter")} で保存します。`}
         emptyPreview="まだ何も書いていません。"
       />
       {error ? <Alert tone="danger">{error}</Alert> : null}

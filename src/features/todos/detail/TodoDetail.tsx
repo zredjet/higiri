@@ -3,6 +3,7 @@ import { Alert, Select, Tabs, TextField } from "../../../components/aizome";
 import { DateField } from "../../../components/DateField";
 import type { Priority, Status, TodoItem } from "../../../lib/bindings";
 import { errorMessage } from "../../../lib/errors";
+import { shortcutText } from "../../../lib/keys";
 import { useChangeStatus, useTimeline } from "../../../lib/queries";
 import { PRIORITIES, PRIORITY_LABEL, STATUSES, STATUS_LABEL, waitingMessage } from "../todoText";
 import { MarkdownField } from "./MarkdownField";
@@ -155,7 +156,7 @@ export function TodoDetail({ item }: { item: TodoItem }) {
                   onChange={(v) => set("memo_md", v)}
                   preview={memoPreview}
                   onTogglePreview={() => setMemoPreview((p) => !p)}
-                  description="今の作業状況や概要を書きます。Markdownで書けます。Ctrl+E でプレビューに切り替わります。入力が止まってから1秒後に保存します。"
+                  description={`今の作業状況や概要を書きます。Markdownで書けます。${shortcutText("E")} でプレビューに切り替わります。入力が止まってから1秒後に保存します。`}
                   emptyPreview="メモはまだありません。「編集に戻る」から書けます。"
                   minLines={8}
                 />
