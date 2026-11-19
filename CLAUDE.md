@@ -14,17 +14,22 @@
 | 場所 | 中身 |
 | --- | --- |
 | `docs/README.md` | 資料の一覧、優先順位、写しを作るときに分かっている注意点 |
-| `docs/requirements-design.md` | 要件41件、非機能要件、リリース段階、アーキテクチャ、DDL、主要ロジック、画面構成、コマンド一覧、未決事項。v1.1 の詳細(「v1.1の詳細」の節) |
+| `docs/requirements-design.md` | 要件45件、非機能要件、リリース段階、アーキテクチャ、DDL、主要ロジック、画面構成、コマンド一覧、未決事項。v1.1 の詳細(「v1.1の詳細」の節)と v0.3.0 の詳細(「v0.3.0の詳細」の節) |
 | `docs/implementation-plan.md` | MVPまでのフェーズ分けと、各フェーズの完了条件 |
 | `docs/implementation-plan-v1.1.md` | v1.1 のフェーズ分け(フェーズ10〜16)と、各フェーズの完了条件。進め方(オーケストレーター方式) |
+| `docs/implementation-plan-v0.3.0.md` | v0.3.0 のフェーズ分け(フェーズ17〜24)と、各フェーズの完了条件。進め方は v1.1 と同じ(作業のブランチは `dev-0.3.0`) |
 | `docs/ui-mock/` | 6画面のモック。見た目は `screenshots/`、正確な値と文言は `.dc.html` |
 | `docs/aizome/` | デザインシステム Aizome の方針、トークン、部品のCSS・型定義・参考実装 |
 
 ## 作る範囲
 
-v1.1 までを作る。設計書の「段階」が将来(v2)のものは作らない。データ構造の備え(`todos.parent_id`、`reports.kind`)は設計書どおり入れたままにする。
+v0.3.0 までを作る。設計書の「段階」が「将来」のもの(時間管理、月報)は作らない。データ構造の備え(`reports.kind` の `monthly`)は設計書どおり入れたままにする。
 
-MVP(v1.0)は完成している。v1.1 も `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作った。仕様は設計書の「v1.1の詳細」、決めごとは下の「v1.1 の決めごと」にある。
+MVP(v1.0。公開した版は v0.1.0)と v1.1(v0.2.0)は完成している。v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作った。仕様は設計書の「v1.1の詳細」、決めごとは下の「v1.1 の決めごと」にある。
+
+v0.3.0(サブTODO、TODOテンプレート、繰り返しTODO、TODO間の依存関係、週報)は `docs/implementation-plan-v0.3.0.md` のフェーズ17〜24で作る。仕様は設計書の「v0.3.0の詳細」、決めごとは下の「v0.3.0 の決めごと」にある。
+
+段階は、v0.3.0 からアプリの版番号(v0.3.0 など)で呼ぶ。「v2」の呼び名は使わない(利用者が決定)。「MVP」「v1.1」は、これまでの資料のまま使う。
 
 設計書の「未決事項」6点のうち、残り日数の数え方は v1.1 で利用者が決めた(設定で暦日と営業日を切り替え、初期値は暦日)。残る5点は、書いてある仮定のまま進める。仮定を変える判断は利用者がする。
 
@@ -57,13 +62,13 @@ SQLite(アプリのデータフォルダ内の todo.db)
 
 ## データの決めごと
 
-- テーブル定義は設計書のDDLをそのまま `src-tauri/migrations/0001_init.sql` にする。列や制約を変えたいときは先に相談する。
+- テーブル定義は設計書のDDLをそのまま `src-tauri/migrations/0001_init.sql` にする。列や制約を変えたいときは先に相談する。v0.3.0 で足す3つの表(`todo_templates`、`todo_repeats`、`todo_dependencies`)は、設計書の DDL のとおり `0002_v0_3_0.sql` にする(フェーズ18)。
 - 日付は `YYYY-MM-DD` の文字列(PCのローカル日付)、日時は UTC の ISO 8601 文字列。日時は `2026-11-19T01:30:00.000Z` の形(ミリ秒つき、末尾 `Z`)で保存し、文字列の大小が時刻の前後と一致するようにする。
 - `todo_events` の値の形:
   - `status` の行の `old_value` / `new_value` は、ステータス名の文字列(`todo`、`doing`、`waiting`、`hold`、`done`、`cancelled`)。JSON にしない。
   - `due_date` と `follow_up` の行は `YYYY-MM-DD`。空にしたときは NULL。
   - `planned` と `actual` の行は `{"start": 日付または null, "end": 日付または null}` の JSON。
-  - `created` の行は、`old_value` が NULL、`new_value` が作成時のステータス名。
+  - `created` の行は、`old_value` が NULL、`new_value` が作成時のステータス名。繰り返しで作った次の回(と子)の行は、`note` に `repeated_from` が入る(v0.3.0)。
   - 1回のステータス変更は1行で記録する。自動で入れた日付や空に戻した項目は、その行の `note` の `auto` に入れる。
 - `todo_events.note` は、すべての行で JSON のオブジェクトにする。補足がなければ `{}`。使うキーは次の表のものだけ。
 
@@ -72,11 +77,12 @@ SQLite(アプリのデータフォルダ内の todo.db)
   | `waiting_on` | 文字列 | 待ちにした `status` の行 | 入力された、待っている相手 |
   | `follow_up_date` | `YYYY-MM-DD` | 待ちにした `status` の行 | 入力された確認日 |
   | `reason` | 文字列 | 中止にした `status` の行 | 入力された中止の理由 |
+  | `repeated_from` | 数値 | 繰り返しで作った次の回(と子)の `created` の行(v0.3.0) | 前の回のTODO(子は前の回の子)の id |
   | `auto` | オブジェクト | `status` の行すべて(変えた列がなければ `{}`) | 遷移で自動的に変えた `todos` の列。キーは列名(`actual_start`、`actual_end`、`waiting_since`、`closed_at`、`waiting_on`、`follow_up_date`、`close_reason`)、値は変えた後の値(日付は `YYYY-MM-DD`、`closed_at` は上の日時の形)。空に戻した列は `null` |
 
   - 入力をそのまま入れる列(`waiting_on`、`follow_up_date`、`close_reason`)は、空に戻したときだけ `auto` に入る。入力した値は `waiting_on` / `follow_up_date` / `reason` のキーに入る。
   - 例: 作業中から待ちにした行は `{"waiting_on":"認証担当の回答","follow_up_date":"2026-11-20","auto":{"waiting_since":"2026-11-19"}}`。完了から再開した行は `{"auto":{"actual_end":null,"closed_at":null}}`。
-- `settings` は1キー1行で、値は JSON。キーは `reminder_frequency`(`"every_launch"` / `"once_per_day"`)、`soon_days`(数値)、`follow_up_days`(数値)、`last_reminded_on`(`"YYYY-MM-DD"` か `null`)、`theme`(`"light"` / `"dark"` / `"system"`)。読めない値は既定値として扱う。v1.1 で足したキーは「v1.1 の決めごと」にある。
+- `settings` は1キー1行で、値は JSON。キーは `reminder_frequency`(`"every_launch"` / `"once_per_day"`)、`soon_days`(数値)、`follow_up_days`(数値)、`last_reminded_on`(`"YYYY-MM-DD"` か `null`)、`theme`(`"light"` / `"dark"` / `"system"`)。読めない値は既定値として扱う。v1.1 で足したキーは「v1.1 の決めごと」に、v0.3.0 で足したキー(`weekly_report_template`)は「v0.3.0 の決めごと」にある。
 - 接続のたびに外部キー制約を有効にし、WALモードにする。
 - 適用済みのマイグレーションファイルは書き換えない。変更は新しいファイルを足す。
 - DBへの接続なしで `cargo build` が通る構成にする(`query!` 系マクロを使うなら `cargo sqlx prepare` の成果物をコミットする)。
@@ -252,6 +258,37 @@ v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作った�
     - 退避の表示名は「復元・取り込みの前の状態(日時)」(`backupText.ts`)。復元のダイアログと案内の文も合わせた。
     - perf(`perf.rs`): 5,000件・作業ログ20,000件で、書き出し(約9.5 MB)と、それを同じ DB に取り込む時間を測る。
 
+## v0.3.0 の決めごと
+
+v0.3.0 は `docs/implementation-plan-v0.3.0.md` のフェーズ17〜24で作る。仕様の詳細は設計書の「v0.3.0の詳細」にある。フェーズごとに作ったもの(ファイルの場所と細かい決めごと)は、各フェーズの終わりにここへ足す。
+
+- 作業のブランチは `dev-0.3.0`(リリースのタグ `v0.3.0` と同じ名前にしない)。
+- 表を3つ足す(`todo_templates`、`todo_repeats`、`todo_dependencies`。`0002_v0_3_0.sql`)。既存の表の列と制約は変えない。`todo_templates.body` と `todo_repeats.rule` の JSON の形は設計書にある。JSON の書き出しでは、`todo_events.note` と同じく JSON の値として埋め込む。
+- v0.3.0 で足すコマンドは次の9つで、コマンドは全部で41個(v1.1 までの32個と合わせて)。週報は日報のコマンドが `kind: "weekly"` を受け付ける形にし、コマンドを足さない。
+
+  | コマンド | フェーズ | 用途 |
+  | --- | --- | --- |
+  | `set_todo_parent` | 19 | 親を付ける・付け替える・外す。子を作るのは `create_todo` の `parent_id` |
+  | `list_todo_templates` | 20 | テンプレートの一覧 |
+  | `save_todo_template` | 20 | 親のないTODOと子からテンプレートを保存する(同じ名前の置き換えは `replace`) |
+  | `rename_todo_template` | 20 | テンプレートの名前を変える |
+  | `delete_todo_template` | 20 | テンプレートを消す。テンプレートから作るのは `create_todo` の `template_id` |
+  | `set_todo_repeat` | 21 | 繰り返しの周期を付ける・変える・外す。次の回は `change_status` が作る |
+  | `add_dependency` | 22 | 「先に終わらせるTODO」を結ぶ |
+  | `remove_dependency` | 22 | 依存を外す |
+  | `list_dependencies` | 22 | 先に終わらせるTODOと、これを待っているTODOの一覧 |
+
+- `settings` に足すキー
+
+  | キー | 値 | 既定値 | フェーズ |
+  | --- | --- | --- | --- |
+  | `weekly_report_template` | 週報テンプレートの構造(設計書の「週報(R-6)」) | 既定の週報の形 | 23 |
+
+- 親子は1段だけ。親と子は同じプロジェクト。どちらもアプリ側で守る。
+- `change_status` は、子が残っている親を閉じると子も閉じ(子ごとに1行記録)、周期のあるTODOを閉じると次の回を作る。どちらも同じトランザクション。
+- 判定(`classify`)は子にもそのまま使う。依存関係では日限注意の区分を増やさない。依存は止めずに知らせるだけ(作業中にするときの確認は画面側)。
+- 子・テンプレート・繰り返し・依存の検査は Rust 側。画面は返ってきた `AppError.message` を出す。
+
 ## 品質の決めごと
 
 - `domain/` は単体テストを書く。日付の境界(当日、N日後ちょうど、月またぎ・年またぎ)と、遷移表の全行を押さえる。
@@ -263,8 +300,8 @@ v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作った�
 
 ## 進め方
 
-- `docs/implementation-plan.md`(MVP、フェーズ0〜8)と `docs/implementation-plan-v1.1.md`(v1.1、フェーズ10〜16)のフェーズ順に進め、フェーズの終わりにテスト結果と、利用者に画面で確認してほしい操作の一覧を報告して止まる。
-- v1.1 はオーケストレーター方式で進める。フェーズごとにサブセッションが作業してコミットし、オーケストレーターが差分を確かめてから利用者に報告する(`implementation-plan-v1.1.md` の「進め方」)。
+- `docs/implementation-plan.md`(MVP、フェーズ0〜8)、`docs/implementation-plan-v1.1.md`(v1.1、フェーズ10〜16)、`docs/implementation-plan-v0.3.0.md`(v0.3.0、フェーズ17〜24)のフェーズ順に進め、フェーズの終わりにテスト結果と、利用者に画面で確認してほしい操作の一覧を報告して止まる。
+- v1.1 と v0.3.0 はオーケストレーター方式で進める。フェーズごとにサブセッションが作業してコミットし、オーケストレーターが差分を確かめてから利用者に報告する(`implementation-plan-v1.1.md`、`implementation-plan-v0.3.0.md` の「進め方」)。
 - 設計書と違う実装にしたいとき、設計書に書いていないことを決める必要があるときは、理由と選択肢を添えて先に相談する。
 - 利用者への報告とUIの文言は日本語。コード内の識別子は英語。
 
