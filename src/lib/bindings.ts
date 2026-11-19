@@ -50,6 +50,21 @@ export const commands = {
 	 *  the screen draws the days it shows.
 	 */
 	getGantt: (query: GanttQuery, options?: InvokeOptions) => __TAURI_INVOKE<Gantt>("get_gantt", { query }, options),
+	/**
+	 *  Builds the report from that day's records. The 所感・連絡事項 part is taken
+	 *  from `current_md` (the text being edited) when given, otherwise from the
+	 *  saved report. Nothing is saved.
+	 */
+	generateReport: (key: ReportKey, currentMd: string | null, options?: InvokeOptions) => __TAURI_INVOKE<string>("generate_report", { key, currentMd }, options),
+	/**  Saves the full text; its 所感・連絡事項 part is stored apart as well. */
+	saveReport: (key: ReportKey, bodyMd: string, options?: InvokeOptions) => __TAURI_INVOKE<Report>("save_report", { key, bodyMd }, options),
+	/**  The saved report of that day, or null. */
+	getReport: (key: ReportKey, options?: InvokeOptions) => __TAURI_INVOKE<Report | null>("get_report", { key }, options),
+	/**
+	 *  Asks where to save (the save dialog opens on the Rust side) and writes the
+	 *  text as a .md file. Returns the path, or null when the user cancelled.
+	 */
+	exportReportFile: (key: ReportKey, bodyMd: string, options?: InvokeOptions) => __TAURI_INVOKE<string | null>("export_report_file", { key, bodyMd }, options),
 };
 
 /* Types */
@@ -238,6 +253,28 @@ export type ReminderFrequency =
 "every_launch" | 
 /**  1日1回 */
 "once_per_day";
+
+/**
+ *  A saved report (`reports` row). `body_md` is the full text as saved;
+ *  `note_md` is its 所感・連絡事項 part, kept apart so regenerating keeps it.
+ */
+export type Report = {
+	kind: ReportKind,
+	period_start: string,
+	period_end: string,
+	body_md: string,
+	note_md: string,
+	updated_at: string,
+};
+
+/**  Which report: kind and the first day of its period. */
+export type ReportKey = {
+	kind: ReportKind,
+	date: string,
+};
+
+/**  Report kinds (`reports.kind`). The MVP makes daily reports only. */
+export type ReportKind = "daily" | "weekly" | "monthly";
 
 export type Settings = {
 	reminder_frequency: ReminderFrequency,

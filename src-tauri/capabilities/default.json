@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window: Tauri core defaults, the app's own commands, and opening http(s) links in the default browser.",
+  "description": "Capability for the main window: Tauri core defaults, the app's own commands, opening http(s) links in the default browser, and writing text to the clipboard.",
   "windows": [
     "main"
   ],
@@ -18,6 +18,7 @@
         }
       ]
     },
+    "clipboard-manager:allow-write-text",
     "allow-list-projects",
     "allow-create-project",
     "allow-update-project",
@@ -37,6 +38,10 @@
     "allow-get-dashboard",
     "allow-get-startup-reminder",
     "allow-ack-reminder",
-    "allow-get-gantt"
+    "allow-get-gantt",
+    "allow-generate-report",
+    "allow-save-report",
+    "allow-get-report",
+    "allow-export-report-file"
   ]
 }

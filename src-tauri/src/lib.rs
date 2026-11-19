@@ -21,6 +21,10 @@ pub fn run() {
     tauri::Builder::default()
         // Markdown links open in the default browser (http/https only; see capabilities).
         .plugin(tauri_plugin_opener::init())
+        // Save dialog for .md export (opened from Rust; no frontend permission).
+        .plugin(tauri_plugin_dialog::init())
+        // Copying a report (frontend permission: write text only).
+        .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(specta.invoke_handler())
         .setup(move |app| {
             specta.mount_events(app);

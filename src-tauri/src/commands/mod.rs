@@ -10,6 +10,7 @@ pub mod dashboard;
 pub mod error;
 pub mod gantt;
 pub mod projects;
+pub mod reports;
 pub mod settings;
 pub mod todos;
 mod validate;
@@ -49,6 +50,10 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             dashboard::get_startup_reminder,
             dashboard::ack_reminder,
             gantt::get_gantt,
+            reports::generate_report,
+            reports::save_report,
+            reports::get_report,
+            reports::export_report_file,
         ])
         .typ::<error::AppError>()
         // IDs and counts are i64; they stay far below 2^53 in this app.
@@ -98,7 +103,7 @@ mod tests {
             .collect();
         allowed.sort();
         assert_eq!(allowed, commands_in_bindings());
-        assert_eq!(allowed.len(), 20);
+        assert_eq!(allowed.len(), 24);
     }
 
     /// Regenerates `src/lib/bindings.ts` and fails when the committed file was

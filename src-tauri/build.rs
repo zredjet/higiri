@@ -23,6 +23,10 @@ const APP_COMMANDS: &[&str] = &[
     "get_startup_reminder",
     "ack_reminder",
     "get_gantt",
+    "generate_report",
+    "save_report",
+    "get_report",
+    "export_report_file",
 ];
 
 fn main() {

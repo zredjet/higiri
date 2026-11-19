@@ -6,6 +6,7 @@ import {
   type GanttQuery,
   type NewTodoInput,
   type ProjectInput,
+  type ReportKey,
   type SettingsInput,
   type StatusChange,
   type TodoFields,
@@ -25,6 +26,7 @@ export const queryKeys = {
   dashboard: ["todos", "dashboard"] as const,
   gantt: (query: GanttQuery) => ["todos", "gantt", query] as const,
   settings: ["settings"] as const,
+  report: (key: ReportKey) => ["reports", key] as const,
 };
 
 export function useProjects(includeArchived = false) {
@@ -185,5 +187,48 @@ export function useDeleteWorkLog() {
   return useMutation({
     mutationFn: (id: number) => commands.deleteWorkLog(id),
     onSuccess: () => changed(),
+  });
+}
+
+/**
+ * The saved report of the day, or a freshly generated one when none is saved
+ * (R-4). Opening a day does not save anything. Loaded once per visit: the
+ * screen keeps its own copy while editing, so later refetches never replace it.
+ */
+export function useReportSource(key: ReportKey) {
+  return useQuery({
+    queryKey: queryKeys.report(key),
+    queryFn: async (): Promise<string> => {
+      const saved = await commands.getReport(key);
+      return saved ? saved.body_md : commands.generateReport(key, null);
+    },
+    staleTime: Infinity,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+  });
+}
+
+/** Rebuilds the report from the day's records, keeping the 所感・連絡事項 of `currentMd`. */
+export function useGenerateReport() {
+  return useMutation({
+    mutationFn: ({ key, currentMd }: { key: ReportKey; currentMd: string }) =>
+      commands.generateReport(key, currentMd),
+  });
+}
+
+export function useSaveReport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ key, bodyMd }: { key: ReportKey; bodyMd: string }) => commands.saveReport(key, bodyMd),
+    // Keep a cached copy of that day in step with what was saved.
+    onSuccess: (saved, { key }) => qc.setQueryData(queryKeys.report(key), saved.body_md),
+  });
+}
+
+/** Opens the save dialog (Rust side) and writes the .md file. Resolves to the path, or null when cancelled. */
+export function useExportReport() {
+  return useMutation({
+    mutationFn: ({ key, bodyMd }: { key: ReportKey; bodyMd: string }) =>
+      commands.exportReportFile(key, bodyMd),
   });
 }

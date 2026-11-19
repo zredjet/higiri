@@ -17,18 +17,27 @@ const highlight = HighlightStyle.define([
   { tag: [tags.processingInstruction, tags.list, tags.quote, tags.contentSeparator], color: "var(--text-muted)" },
 ]);
 
-const theme = EditorView.theme({
-  "&": { backgroundColor: "transparent", color: "var(--text)", fontSize: "14px", width: "100%" },
-  "&.cm-focused": { outline: "none" },
-  ".cm-scroller": { fontFamily: "var(--font-sans)", lineHeight: "22px" },
-  ".cm-content": { padding: "0", caretColor: "var(--text)" },
-  ".cm-line": { padding: "0" },
-  ".cm-placeholder": { color: "var(--text-subtle)" },
-  ".cm-cursor": { borderLeftColor: "var(--text)" },
-  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
-    backgroundColor: "var(--primary-soft)",
-  },
-});
+/** Text metrics per font: notes and memos use the sans font; the report editor is monospaced (mock: 13px/20px). */
+const FONTS = {
+  sans: { family: "var(--font-sans)", size: "14px", lineHeight: 22 },
+  mono: { family: "var(--font-mono)", size: "13px", lineHeight: 20 },
+} as const;
+
+function theme(font: keyof typeof FONTS, minLines: number) {
+  const f = FONTS[font];
+  return EditorView.theme({
+    "&": { backgroundColor: "transparent", color: "var(--text)", fontSize: f.size, width: "100%" },
+    "&.cm-focused": { outline: "none" },
+    ".cm-scroller": { fontFamily: f.family, lineHeight: `${f.lineHeight}px` },
+    ".cm-content": { padding: "0", caretColor: "var(--text)", minHeight: `${minLines * f.lineHeight}px` },
+    ".cm-line": { padding: "0" },
+    ".cm-placeholder": { color: "var(--text-subtle)" },
+    ".cm-cursor": { borderLeftColor: "var(--text)" },
+    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
+      backgroundColor: "var(--primary-soft)",
+    },
+  });
+}
 
 export interface MarkdownEditorProps {
   value: string;
@@ -42,6 +51,12 @@ export interface MarkdownEditorProps {
   onTogglePreview?: () => void;
   /** Minimum height of the text area in lines. Default 4. */
   minLines?: number;
+  /** "mono" for text edited as Markdown source (the report). Default "sans". */
+  font?: keyof typeof FONTS;
+  /** false drops Aizome's input frame (the editor fills a card instead). Default true. */
+  framed?: boolean;
+  /** false shows the source as plain text, without Markdown colouring. Default true. */
+  highlightSyntax?: boolean;
   autoFocus?: boolean;
   className?: string;
 }
@@ -58,6 +73,9 @@ export function MarkdownEditor({
   onSubmit,
   onTogglePreview,
   minLines = 4,
+  font = "sans",
+  framed = true,
+  highlightSyntax = true,
   autoFocus,
   className,
 }: MarkdownEditorProps) {
@@ -94,12 +112,11 @@ export function MarkdownEditor({
             ...historyKeymap,
           ]),
           markdown(),
-          syntaxHighlighting(highlight),
+          highlightSyntax ? syntaxHighlighting(highlight) : [],
           EditorView.lineWrapping,
-          theme,
+          theme(font, minLines),
           placeholder ? placeholderExt(placeholder) : [],
           EditorView.contentAttributes.of({ "aria-label": label, "aria-multiline": "true" }),
-          EditorView.theme({ ".cm-content": { minHeight: `${minLines * 22}px` } }),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) handlers.current.onChange(u.state.doc.toString());
           }),
@@ -124,7 +141,7 @@ export function MarkdownEditor({
 
   return (
     <div
-      className={cx("az-input", "az-input--multiline", "md-editor", className)}
+      className={cx(framed && "az-input", framed && "az-input--multiline", "md-editor", className)}
       onClick={() => view.current?.focus()}
     >
       <div ref={host} className="md-editor__host" />

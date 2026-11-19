@@ -394,12 +394,11 @@ body,
   padding-left: var(--space-5);
 }
 
-.markdown ul.contains-task-list {
-  padding-left: var(--space-1);
-}
-
+/* A checkbox item sits where the bullet would be (as in the report mock), so
+   a list that mixes bullets and checkboxes keeps one indentation. */
 .markdown li.task-list-item {
   list-style: none;
+  margin-left: calc(-1 * var(--space-5));
 }
 
 .markdown li.task-list-item input {
@@ -1004,4 +1003,70 @@ input[type="date"][data-empty="true"]:not(:focus) {
 
 .gantt-today-cell {
   fill: var(--primary-soft);
+}
+
+/* ---------- 日報 ---------- */
+.report-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.report-toolbar__dates {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+
+.report-toolbar__date {
+  width: 170px;
+}
+
+.report-toolbar__regen {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* Two columns from the default window size (1280px); one column when narrower. */
+.report-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(460px, 100%), 1fr));
+  gap: var(--space-6);
+  align-items: start;
+}
+
+.report-panel {
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+/* The editor has no input frame of its own; the card shows the focus. */
+.report-panel--editor:focus-within {
+  border-color: var(--focus);
+}
+
+.report-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: calc(var(--space-2) + 2px) var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+
+.report-panel__title {
+  margin: 0;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+}
+
+.report-panel__body {
+  padding: var(--space-4) var(--space-5) var(--space-5);
 }

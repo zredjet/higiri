@@ -8,6 +8,7 @@
 pub mod db;
 pub mod events;
 pub mod projects;
+pub mod reports;
 pub mod settings;
 pub mod todos;
 pub mod work_logs;
