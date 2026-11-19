@@ -451,7 +451,9 @@ mod tests {
         assert_eq!(t.title, "日報 {日付}");
         assert_eq!(heading(&t, SectionKind::Waiting), "待ち状況");
         // A # that is part of the text stays.
-        let t = with_heading(SectionKind::Work, "#1 作業").checked().unwrap();
+        let t = with_heading(SectionKind::Work, "#1 作業")
+            .checked()
+            .unwrap();
         assert_eq!(heading(&t, SectionKind::Work), "#1 作業");
     }
 
@@ -468,7 +470,10 @@ mod tests {
             Err(TemplateError::TitleTooLong)
         );
         assert!(titled(&"題".repeat(60)).checked().is_ok());
-        assert_eq!(titled("日報\n{日付}").checked(), Err(TemplateError::LineBreak));
+        assert_eq!(
+            titled("日報\n{日付}").checked(),
+            Err(TemplateError::LineBreak)
+        );
 
         assert_eq!(
             with_heading(SectionKind::Tomorrow, "  ").checked(),

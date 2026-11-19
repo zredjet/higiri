@@ -126,10 +126,7 @@ pub async fn update(pool: &SqlitePool, input: SettingsInput) -> CmdResult<Settin
         .iter()
         .map(|h| h.checked().map_err(|e| holiday_error(h, e)))
         .collect::<CmdResult<Vec<_>>>()?;
-    let report_template = input
-        .report_template
-        .checked()
-        .map_err(template_error)?;
+    let report_template = input.report_template.checked().map_err(template_error)?;
     let mut tx = pool.begin().await?;
     let current = repo::settings::load(&mut tx).await?;
     let next = Settings {

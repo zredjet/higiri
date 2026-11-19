@@ -262,8 +262,16 @@ mod tests {
             .unwrap();
         let files = tempfile::tempdir().unwrap();
         let cases: [(&str, &str, &str); 6] = [
-            ("broken.json", "{\"format\": \"higiri-", "JSONとして読めない"),
-            ("other.json", "{\"name\": \"x\"}", "Higiriで書き出したJSONではない"),
+            (
+                "broken.json",
+                "{\"format\": \"higiri-",
+                "JSONとして読めない",
+            ),
+            (
+                "other.json",
+                "{\"name\": \"x\"}",
+                "Higiriで書き出したJSONではない",
+            ),
             (
                 "newer.json",
                 "{\"format\":\"higiri-export\",\"format_version\":2}",
@@ -299,7 +307,10 @@ mod tests {
                 .unwrap_err();
             assert_eq!(err.kind, ErrorKind::Validation, "{name}");
             assert!(err.message.contains(says), "{name}: {}", err.message);
-            assert!(err.message.contains("今のデータは変わっていません"), "{name}");
+            assert!(
+                err.message.contains("今のデータは変わっていません"),
+                "{name}"
+            );
         }
         let missing = import(
             &pool,

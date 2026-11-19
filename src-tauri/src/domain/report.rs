@@ -193,7 +193,13 @@ fn work_line(t: &Todo, minutes: i64, o: &WorkOptions, lk: &Lookup) -> String {
 
 /// 本日の作業: logs grouped by project (or not, without project headings),
 /// then by TODO (priority, then order).
-fn work_section(input: &ReportInput, lk: &Lookup, heading: &str, o: &WorkOptions, out: &mut String) {
+fn work_section(
+    input: &ReportInput,
+    lk: &Lookup,
+    heading: &str,
+    o: &WorkOptions,
+    out: &mut String,
+) {
     out.push_str("\n## ");
     out.push_str(heading);
     out.push('\n');
@@ -466,9 +472,7 @@ pub fn generate_body(input: &ReportInput, template: &ReportTemplate) -> String {
             SectionBody::Work(o) => work_section(input, &lk, heading, o, &mut out),
             SectionBody::Closed(o) => section(&mut out, heading, closed_section(input, &lk, o)),
             SectionBody::Waiting(o) => section(&mut out, heading, waiting_section(input, &lk, o)),
-            SectionBody::Tomorrow(o) => {
-                section(&mut out, heading, tomorrow_section(input, &lk, o))
-            }
+            SectionBody::Tomorrow(o) => section(&mut out, heading, tomorrow_section(input, &lk, o)),
             SectionBody::Attention(o) => {
                 section(&mut out, heading, attention_section(input, &lk, o))
             }
@@ -520,13 +524,10 @@ fn note_line(lines: &[&str], template: &ReportTemplate) -> Option<usize> {
         .filter(|s| s.enabled)
         .map(|s| s.heading.as_str())
         .collect();
-    let notes: Vec<&str> = [
-        template.note_heading(),
-        SectionKind::Note.default_heading(),
-    ]
-    .into_iter()
-    .filter(|h| !shown.contains(h))
-    .collect();
+    let notes: Vec<&str> = [template.note_heading(), SectionKind::Note.default_heading()]
+        .into_iter()
+        .filter(|h| !shown.contains(h))
+        .collect();
     let mut known: Vec<&str> = sections.map(|s| s.heading.as_str()).collect();
     for kind in SectionKind::ALL {
         if kind != SectionKind::Note {
@@ -642,7 +643,10 @@ mod tests {
     #[test]
     fn an_older_note_heading_is_found_among_the_section_headings() {
         // Made when the note was 「連絡」; now it is 「メモ」.
-        let t = template_with(&[(SectionKind::Note, "メモ"), (SectionKind::Waiting, "待ち状況")]);
+        let t = template_with(&[
+            (SectionKind::Note, "メモ"),
+            (SectionKind::Waiting, "待ち状況"),
+        ]);
         let full = "# 日報\n\n## 本日の作業\n\n- なし\n\n## 待ち\n- なし\n\n## 連絡\n- 連絡\n\n## 補足\n- 補足\n";
         assert_eq!(split_note(full, &t), "- 連絡\n\n## 補足\n- 補足");
         // A section heading changed since: more is kept, nothing is lost.
@@ -668,7 +672,8 @@ mod tests {
 
     #[test]
     fn a_note_that_writes_the_default_heading_again_is_kept_whole() {
-        let full = "# 日報\n\n## 待ち\n- なし\n\n## 所感・連絡事項\n- 前半\n\n## 所感・連絡事項\n- 後半\n";
+        let full =
+            "# 日報\n\n## 待ち\n- なし\n\n## 所感・連絡事項\n- 前半\n\n## 所感・連絡事項\n- 後半\n";
         assert_eq!(
             split_note(full, &default_template()),
             "- 前半\n\n## 所感・連絡事項\n- 後半"
@@ -756,7 +761,9 @@ mod tests {
             }
         }
         assert!(
-            generate_body(&input, &flat).starts_with("# 日報 2026-11-19(木)\n\n## 本日の作業\n- なし\n\n## 本日完了・中止\n")
+            generate_body(&input, &flat).starts_with(
+                "# 日報 2026-11-19(木)\n\n## 本日の作業\n- なし\n\n## 本日完了・中止\n"
+            )
         );
     }
 

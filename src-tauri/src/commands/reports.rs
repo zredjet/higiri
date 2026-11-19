@@ -275,7 +275,9 @@ mod tests {
         // 日限注意 first, 本日の作業 last; 待ち not shown.
         t.sections.swap(0, 4);
         edit(&mut t, SectionKind::Waiting, |s| s.enabled = false);
-        edit(&mut t, SectionKind::Closed, |s| s.heading = "完了・中止".into());
+        edit(&mut t, SectionKind::Closed, |s| {
+            s.heading = "完了・中止".into()
+        });
         use_template(&pool, t).await;
         let text = generate(&pool, key("2026-11-19"), None).await.unwrap();
         assert_eq!(
@@ -370,24 +372,37 @@ mod tests {
             t
         };
         let first = generate(&pool, k, None).await.unwrap();
-        save(&pool, k, &format!("{first}- 所感を書いた。\n"), ts(2026, 11, 19, 10, 0))
-            .await
-            .unwrap();
+        save(
+            &pool,
+            k,
+            &format!("{first}- 所感を書いた。\n"),
+            ts(2026, 11, 19, 10, 0),
+        )
+        .await
+        .unwrap();
 
         // 所感・連絡事項 → 連絡: found by the default heading.
         use_template(&pool, with_note("連絡")).await;
         let saved = get(&pool, k).await.unwrap().unwrap();
         assert_eq!(saved.note_md, "- 所感を書いた。");
         let second = generate(&pool, k, Some(&saved.body_md)).await.unwrap();
-        assert!(second.ends_with("\n\n## 連絡\n- 所感を書いた。\n"), "{second}");
-        save(&pool, k, &second, ts(2026, 11, 19, 11, 0)).await.unwrap();
+        assert!(
+            second.ends_with("\n\n## 連絡\n- 所感を書いた。\n"),
+            "{second}"
+        );
+        save(&pool, k, &second, ts(2026, 11, 19, 11, 0))
+            .await
+            .unwrap();
 
         // 連絡 → メモ: neither the heading nor the default is in the text,
         // but 「## 連絡」 is not a section's heading.
         use_template(&pool, with_note("メモ")).await;
         let saved = get(&pool, k).await.unwrap().unwrap();
         let third = generate(&pool, k, Some(&saved.body_md)).await.unwrap();
-        assert!(third.ends_with("\n\n## メモ\n- 所感を書いた。\n"), "{third}");
+        assert!(
+            third.ends_with("\n\n## メモ\n- 所感を書いた。\n"),
+            "{third}"
+        );
         // Saving with the heading not found keeps the note apart as well.
         let saved = save(&pool, k, &saved.body_md, ts(2026, 11, 19, 12, 0))
             .await

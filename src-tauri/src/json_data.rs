@@ -327,14 +327,22 @@ pub async fn export_json(
                 cells,
             })?);
         }
-        put(if rows.rows.is_empty() { "],\n" } else { "\n  ],\n" });
+        put(if rows.rows.is_empty() {
+            "],\n"
+        } else {
+            "\n  ],\n"
+        });
     }
     put("  \"settings\": {");
     for (i, (key, value)) in settings.iter().enumerate() {
         put(if i == 0 { "\n    " } else { ",\n    " });
         put(&format!("{}: {}", json_str(key), value.get()));
     }
-    put(if settings.is_empty() { "}\n" } else { "\n  }\n" });
+    put(if settings.is_empty() {
+        "}\n"
+    } else {
+        "\n  }\n"
+    });
     put("}\n");
     Ok(out)
 }
@@ -544,7 +552,10 @@ async fn insert_rows(
         let mut end = start;
         while end < rows.len()
             && end - start < per_statement
-            && rows[end].keys().map(String::as_str).eq(columns.iter().copied())
+            && rows[end]
+                .keys()
+                .map(String::as_str)
+                .eq(columns.iter().copied())
         {
             for (name, raw) in &rows[end] {
                 // An unknown column is not this schema version's export.
@@ -885,7 +896,10 @@ mod tests {
         assert!(src_rows.len() > 30);
         assert_eq!(dst_rows, src_rows);
         // Every setting but the kept ones, unknown and unreadable ones included.
-        assert_eq!(without_kept(dst_settings.clone()), without_kept(src_settings));
+        assert_eq!(
+            without_kept(dst_settings.clone()),
+            without_kept(src_settings)
+        );
         assert_eq!(dst_settings["future_key"], r#"{"b":1,"a":[2]}"#);
         assert_eq!(dst_settings["soon_days"], "\"abc\"");
         let read = cmd_settings::get(&dst).await.unwrap();
@@ -982,12 +996,11 @@ mod tests {
             assert_eq!(new.0, max.0 + 1, "{table}");
         }
         // No table uses AUTOINCREMENT (no sqlite_sequence to carry over).
-        let seq: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM sqlite_master WHERE name = 'sqlite_sequence'",
-        )
-        .fetch_one(&dst)
-        .await
-        .unwrap();
+        let seq: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE name = 'sqlite_sequence'")
+                .fetch_one(&dst)
+                .await
+                .unwrap();
         assert_eq!(seq.0, 0);
     }
 
@@ -1058,8 +1071,10 @@ mod tests {
         // 1,200 rows of 8 columns: three statements of up to 500 rows, with
         // a row of fewer columns in between.
         let mut projects: Vec<Value> = (1..=700).map(full).collect();
-        projects.push(json!({"id": 701, "name": "short", "created_at": "2026-11-19T00:00:00.000Z",
-                             "updated_at": "2026-11-19T00:00:00.000Z"}));
+        projects.push(
+            json!({"id": 701, "name": "short", "created_at": "2026-11-19T00:00:00.000Z",
+                             "updated_at": "2026-11-19T00:00:00.000Z"}),
+        );
         projects.extend((702..=1_200).map(full));
         let file = json!({
             "format": "higiri-export", "format_version": 1, "schema_version": 1,
@@ -1140,10 +1155,22 @@ mod tests {
         let cases: Vec<Edit> = vec![
             Box::new(|v| v["format_version"] = json!(0)),
             Box::new(|v| v["format_version"] = json!("1")),
-            Box::new(|v| v.as_object_mut().unwrap().remove("format_version").map(drop).unwrap()),
+            Box::new(|v| {
+                v.as_object_mut()
+                    .unwrap()
+                    .remove("format_version")
+                    .map(drop)
+                    .unwrap()
+            }),
             Box::new(|v| v["schema_version"] = json!(0)),
             Box::new(|v| v["schema_version"] = json!(1.5)),
-            Box::new(|v| v.as_object_mut().unwrap().remove("work_logs").map(drop).unwrap()),
+            Box::new(|v| {
+                v.as_object_mut()
+                    .unwrap()
+                    .remove("work_logs")
+                    .map(drop)
+                    .unwrap()
+            }),
             Box::new(|v| v["settings"] = json!([])),
             Box::new(|v| v["todos"][0]["id"] = json!("1")),
             Box::new(|v| v["todos"][0]["title"] = json!(1)),
