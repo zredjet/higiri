@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use super::model::{Project, Status, Todo};
 use super::settings::{ReminderFrequency, Settings};
-use super::urgency::{Urgency, attention_order};
+use super::urgency::{Rules, Urgency, attention_order};
 use super::views::{ProjectSummary, TodoItem, project_summaries, todo_item};
 
 /// Number of TODOs in each 日限注意 category.
@@ -38,6 +38,8 @@ pub struct Dashboard {
     pub today: NaiveDate,
     /// 「N日以内に日限が来ます」.
     pub soon_days: u32,
+    /// Day counts are business days (「N営業日以内」).
+    pub business_days: bool,
     pub counts: UrgencyCounts,
     /// All 日限注意 (the side-nav badge of the dashboard).
     pub attention_total: i64,
@@ -74,13 +76,13 @@ fn items(
     todos: &[Todo],
     names: &HashMap<i64, String>,
     today: NaiveDate,
-    soon_days: u32,
+    rules: &Rules,
 ) -> Vec<TodoItem> {
     todos
         .iter()
         .map(|t| {
             let name = names.get(&t.project_id).cloned().unwrap_or_default();
-            todo_item(t.clone(), name, today, soon_days)
+            todo_item(t.clone(), name, today, rules)
         })
         .collect()
 }
@@ -103,14 +105,9 @@ pub fn attention_list(items: &[TodoItem]) -> Vec<TodoItem> {
 
 /// Builds the dashboard from the active projects and their TODOs (in the
 /// repository's order: project order, then TODO order).
-pub fn build(
-    projects: Vec<Project>,
-    todos: &[Todo],
-    today: NaiveDate,
-    soon_days: u32,
-) -> Dashboard {
+pub fn build(projects: Vec<Project>, todos: &[Todo], today: NaiveDate, rules: &Rules) -> Dashboard {
     let names: HashMap<i64, String> = projects.iter().map(|p| (p.id, p.name.clone())).collect();
-    let all = items(todos, &names, today, soon_days);
+    let all = items(todos, &names, today, rules);
 
     let attention = attention_list(&all);
     let mut counts = UrgencyCounts::default();
@@ -146,13 +143,14 @@ pub fn build(
 
     Dashboard {
         today,
-        soon_days,
+        soon_days: rules.soon_days,
+        business_days: rules.business(),
         attention_total: attention.len() as i64,
         counts,
         attention,
         today_work,
         waiting,
-        projects: project_summaries(projects, todos, today, soon_days),
+        projects: project_summaries(projects, todos, today, rules),
     }
 }
 
@@ -193,7 +191,7 @@ pub fn startup_reminder(
 mod tests {
     use super::*;
     use crate::domain::model::Priority;
-    use crate::domain::testing::{d, todo, ts};
+    use crate::domain::testing::{business_rules, d, rules, todo, ts};
 
     fn project(id: i64, name: &str) -> Project {
         Project {
@@ -352,8 +350,33 @@ mod tests {
             ],
             &mock_todos(),
             d("2026-11-19"),
-            3,
+            &rules(3),
         )
+    }
+
+    #[test]
+    fn business_days_keep_the_mock_counts_on_its_day() {
+        let calendar = mock_dashboard();
+        assert!(!calendar.business_days);
+        let business = build(
+            vec![
+                project(1, "基幹システム更改"),
+                project(2, "社内ツール整備"),
+                project(3, "採用サイト改修"),
+            ],
+            &mock_todos(),
+            d("2026-11-19"),
+            &business_rules(3, vec![]),
+        );
+        assert!(business.business_days);
+        assert_eq!(business.soon_days, 3);
+        assert_eq!(business.counts, calendar.counts);
+        assert!(
+            business
+                .attention
+                .iter()
+                .all(|i| i.assessment.business_days)
+        );
     }
 
     fn titles(items: &[TodoItem]) -> Vec<&str> {

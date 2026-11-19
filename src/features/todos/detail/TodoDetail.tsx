@@ -2,9 +2,8 @@ import { useState } from "react";
 import { Alert, Select, Tabs, TextField } from "../../../components/aizome";
 import { DateField } from "../../../components/DateField";
 import type { Priority, Status, TodoItem } from "../../../lib/bindings";
-import { addDaysYmd, todayYmd } from "../../../lib/date";
 import { errorMessage } from "../../../lib/errors";
-import { useChangeStatus, useSettings, useTimeline } from "../../../lib/queries";
+import { useChangeStatus, useTimeline } from "../../../lib/queries";
 import { PRIORITIES, PRIORITY_LABEL, STATUSES, STATUS_LABEL, waitingMessage } from "../todoText";
 import { MarkdownField } from "./MarkdownField";
 import { CancelDialog, WaitDialog } from "./StatusDialogs";
@@ -16,7 +15,6 @@ export function TodoDetail({ item }: { item: TodoItem }) {
   const { todo, assessment } = item;
   const { draft, set, save, error, saving } = useTodoDraft(item);
   const status = useChangeStatus();
-  const settings = useSettings();
   const timeline = useTimeline(todo.id);
   const [asking, setAsking] = useState<null | "waiting" | "cancelled">(null);
   const [tab, setTab] = useState<"log" | "memo">("log");
@@ -34,7 +32,6 @@ export function TodoDetail({ item }: { item: TodoItem }) {
 
   const waiting = waitingMessage(todo, assessment);
   const logCount = (timeline.data ?? []).filter((e) => e.type === "work_log").length;
-  const followUpDays = settings.data?.follow_up_days ?? 3;
 
   return (
     <>
@@ -170,7 +167,7 @@ export function TodoDetail({ item }: { item: TodoItem }) {
 
       {asking === "waiting" ? (
         <WaitDialog
-          defaultFollowUp={addDaysYmd(todayYmd(), followUpDays)}
+          defaultFollowUp={item.follow_up_default}
           pending={status.isPending}
           error={status.error}
           onClose={() => setAsking(null)}

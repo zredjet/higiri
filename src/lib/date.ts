@@ -46,7 +46,7 @@ export function todayYmd(now: Date = new Date()): string {
   return toYmd(now);
 }
 
-/** "YYYY-MM-DD" + n calendar days (default value of date fields). */
+/** "YYYY-MM-DD" + n calendar days (the report's previous and next day). */
 export function addDaysYmd(ymd: string, days: number): string {
   const [y, m, d] = ymd.split("-").map(Number);
   return toYmd(new Date(y, m - 1, d + days));

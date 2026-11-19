@@ -31,6 +31,7 @@ const APP_COMMANDS: &[&str] = &[
     "restore_backup",
     "open_data_folder",
     "test_notification",
+    "list_holidays",
 ];
 
 fn main() {

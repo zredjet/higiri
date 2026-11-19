@@ -2,8 +2,10 @@
 
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 
+use super::calendar::{CustomHoliday, DayCount, WorkCalendar};
 use super::date::parse_date;
 use super::model::{Priority, Status, Todo};
+use super::urgency::Rules;
 
 /// `"YYYY-MM-DD"` -> `NaiveDate` (panics on bad input; tests only).
 pub fn d(s: &str) -> NaiveDate {
@@ -39,5 +41,33 @@ pub fn todo(status: Status) -> Todo {
         sort_order: 0,
         created_at: created,
         updated_at: created,
+    }
+}
+
+/// 暦日 rules (the MVP's judgement) with this many 「間近」 days.
+pub fn rules(soon_days: u32) -> Rules {
+    Rules {
+        soon_days,
+        follow_up_days: 3,
+        calendar: WorkCalendar::default(),
+    }
+}
+
+/// 営業日 rules with this many 「間近」 days and these custom holidays.
+pub fn business_rules(soon_days: u32, custom: Vec<CustomHoliday>) -> Rules {
+    Rules {
+        soon_days,
+        follow_up_days: 3,
+        calendar: WorkCalendar::new(DayCount::Business, custom),
+    }
+}
+
+/// 年末年始 (12/29〜1/3), every year from 2026.
+pub fn year_end_holiday() -> CustomHoliday {
+    CustomHoliday {
+        name: "年末年始".into(),
+        start: d("2026-12-29"),
+        end: d("2027-01-03"),
+        yearly: true,
     }
 }

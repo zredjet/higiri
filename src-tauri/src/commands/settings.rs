@@ -11,8 +11,9 @@ use tauri::{AppHandle, State};
 
 use super::error::{AppError, CmdResult};
 use super::validate;
+use crate::domain::calendar::{CUSTOM_DAYS_MAX, CUSTOM_NAME_MAX, CustomHolidayError};
 use crate::domain::notify::{self, TimesError};
-use crate::domain::settings::{ReminderFrequency, Settings, Theme};
+use crate::domain::settings::{CustomHoliday, DayCount, ReminderFrequency, Settings, Theme};
 use crate::{autostart, repo, resident};
 
 /// Days accepted for 「間近」とみなす日数 and 確認日の初期値.
@@ -32,6 +33,9 @@ pub struct SettingsInput {
     pub notify_times: Vec<String>,
     pub close_to_tray: bool,
     pub autostart: bool,
+    pub day_count: DayCount,
+    /// Names 1 to 30 characters, `start <= end`, at most 31 days each.
+    pub custom_holidays: Vec<CustomHoliday>,
 }
 
 impl From<&Settings> for SettingsInput {
@@ -45,6 +49,8 @@ impl From<&Settings> for SettingsInput {
             notify_times: s.notify_times.clone(),
             close_to_tray: s.close_to_tray,
             autostart: s.autostart,
+            day_count: s.day_count,
+            custom_holidays: s.custom_holidays.clone(),
         }
     }
 }
@@ -89,21 +95,30 @@ pub async fn get(pool: &SqlitePool) -> CmdResult<Settings> {
 }
 
 pub async fn update(pool: &SqlitePool, input: SettingsInput) -> CmdResult<Settings> {
+    let unit = match input.day_count {
+        DayCount::Calendar => "日",
+        DayCount::Business => "営業日",
+    };
     validate::in_range(
         i64::from(input.soon_days),
         DAYS_MIN,
         DAYS_MAX,
         "「間近」とみなす日数",
-        "日",
+        unit,
     )?;
     validate::in_range(
         i64::from(input.follow_up_days),
         DAYS_MIN,
         DAYS_MAX,
         "確認日の初期値",
-        "日",
+        unit,
     )?;
     let notify_times = notify::normalize_times(&input.notify_times).map_err(times_error)?;
+    let custom_holidays = input
+        .custom_holidays
+        .iter()
+        .map(|h| h.checked().map_err(|e| holiday_error(h, e)))
+        .collect::<CmdResult<Vec<_>>>()?;
     let mut tx = pool.begin().await?;
     let current = repo::settings::load(&mut tx).await?;
     let next = Settings {
@@ -115,11 +130,29 @@ pub async fn update(pool: &SqlitePool, input: SettingsInput) -> CmdResult<Settin
         notify_times,
         close_to_tray: input.close_to_tray,
         autostart: input.autostart,
+        day_count: input.day_count,
+        custom_holidays,
         ..current
     };
     repo::settings::save_user_settings(&mut tx, &next).await?;
     tx.commit().await?;
     Ok(next)
+}
+
+fn holiday_error(h: &CustomHoliday, e: CustomHolidayError) -> AppError {
+    let name = h.name.trim();
+    AppError::validation(match e {
+        CustomHolidayError::EmptyName => "独自の休日の名前を入力してください。".to_owned(),
+        CustomHolidayError::NameTooLong => {
+            format!("独自の休日の名前は{CUSTOM_NAME_MAX}字までにしてください。")
+        }
+        CustomHolidayError::Reversed => format!(
+            "独自の休日「{name}」の開始日が終了日より後になっています。日付を直してください。"
+        ),
+        CustomHolidayError::TooLong => format!(
+            "独自の休日は1件{CUSTOM_DAYS_MAX}日までです。「{name}」の期間を短くするか、分けて登録してください。"
+        ),
+    })
 }
 
 fn times_error(e: TimesError) -> AppError {
@@ -245,6 +278,93 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(s.notify_times.len(), 5);
+    }
+
+    fn holidays(list: Vec<CustomHoliday>) -> SettingsInput {
+        SettingsInput {
+            day_count: DayCount::Business,
+            custom_holidays: list,
+            ..SettingsInput::from(&Settings::default())
+        }
+    }
+
+    fn holiday(name: &str, start: &str, end: &str) -> CustomHoliday {
+        CustomHoliday {
+            name: name.into(),
+            start: d(start),
+            end: d(end),
+            yearly: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn day_count_and_custom_holidays_are_saved() {
+        let pool = db::open_in_memory().await.unwrap();
+        let s = update(
+            &pool,
+            holidays(vec![holiday(" 年末年始 ", "2026-12-29", "2027-01-03")]),
+        )
+        .await
+        .unwrap();
+        assert_eq!(s.day_count, DayCount::Business);
+        assert_eq!(
+            s.custom_holidays,
+            vec![holiday("年末年始", "2026-12-29", "2027-01-03")]
+        );
+        assert_eq!(get(&pool).await.unwrap(), s);
+    }
+
+    #[tokio::test]
+    async fn custom_holidays_are_checked() {
+        let pool = db::open_in_memory().await.unwrap();
+        let message = |list| {
+            let pool = pool.clone();
+            async move { update(&pool, holidays(list)).await.unwrap_err().message }
+        };
+        assert_eq!(
+            message(vec![holiday(" ", "2026-12-29", "2026-12-29")]).await,
+            "独自の休日の名前を入力してください。"
+        );
+        assert_eq!(
+            message(vec![holiday(&"休".repeat(31), "2026-12-29", "2026-12-29")]).await,
+            "独自の休日の名前は30字までにしてください。"
+        );
+        assert_eq!(
+            message(vec![holiday("夏季休業", "2026-08-14", "2026-08-12")]).await,
+            "独自の休日「夏季休業」の開始日が終了日より後になっています。日付を直してください。"
+        );
+        assert_eq!(
+            message(vec![holiday("夏季休業", "2026-08-01", "2026-09-01")]).await,
+            "独自の休日は1件31日までです。「夏季休業」の期間を短くするか、分けて登録してください。"
+        );
+        assert_eq!(get(&pool).await.unwrap(), Settings::default());
+        // 31 days and 30 characters are fine.
+        assert!(
+            update(
+                &pool,
+                holidays(vec![holiday(&"休".repeat(30), "2026-08-01", "2026-08-31")])
+            )
+            .await
+            .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn day_errors_name_business_days() {
+        let pool = db::open_in_memory().await.unwrap();
+        let e = update(
+            &pool,
+            SettingsInput {
+                soon_days: 31,
+                ..holidays(vec![])
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            e.message,
+            "「間近」とみなす日数は1〜30営業日の範囲で入力してください。"
+        );
     }
 
     #[tokio::test]

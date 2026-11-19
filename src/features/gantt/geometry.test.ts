@@ -5,6 +5,8 @@ import {
   dayCenter,
   dayIndex,
   headerRows,
+  holidayLabels,
+  holidayNames,
   layoutRows,
   rangeEnd,
   spanRect,
@@ -70,6 +72,68 @@ describe("bars (positions from the mock)", () => {
       [160, 64],
       [384, 64],
       [608, 64],
+    ]);
+  });
+
+  it("shades holidays with the weekends", () => {
+    // 11/23 (Monday) is 勤労感謝の日: the weekend run grows to three days.
+    expect(weekendRuns(MOCK, ["2026-11-23"]).map((r) => [r.index * W, r.length * W])).toEqual([
+      [160, 64],
+      [384, 96],
+      [608, 64],
+    ]);
+    // A holiday on a weekday by itself, and dates outside the range.
+    expect(weekendRuns(MOCK, ["2026-11-03", "2026-11-26"]).map((r) => [r.index, r.length])).toEqual([
+      [5, 2],
+      [12, 2],
+      [17, 1],
+      [19, 2],
+    ]);
+  });
+});
+
+describe("holidays", () => {
+  const h = (date: string, name: string, custom = false) => ({ date, name, custom });
+
+  it("names a date by its national holiday, or its custom holidays", () => {
+    const names = holidayNames([
+      h("2027-01-01", "元日"),
+      h("2027-01-01", "年末年始", true),
+      h("2027-01-02", "年末年始", true),
+      h("2027-01-02", "冬季休業", true),
+    ]);
+    expect([...names.entries()].sort()).toEqual([
+      ["2027-01-01", "元日"],
+      ["2027-01-02", "年末年始・冬季休業"],
+    ]);
+  });
+
+  it("puts names in the header's top row where they fit", () => {
+    const names = holidayNames([h("2026-11-23", "勤労感謝の日")]);
+    expect(holidayLabels(MOCK, "day", names, 832)).toEqual([{ index: 14, label: "勤労感謝の日" }]);
+    // No room left at the right edge.
+    expect(holidayLabels(MOCK, "day", names, 500)).toEqual([]);
+  });
+
+  it("leaves out names that would overlap a month label or another name", () => {
+    const gw = holidayNames([
+      h("2026-04-29", "昭和の日"),
+      h("2026-05-03", "憲法記念日"),
+      h("2026-05-04", "みどりの日"),
+      h("2026-05-05", "こどもの日"),
+      h("2026-05-06", "振替休日"),
+    ]);
+    // 4/29 sits right after 「2026年4月」; 5/4 and 5/6 would touch the name before.
+    expect(holidayLabels({ start: "2026-04-27", days: 26 }, "day", gw, 832)).toEqual([
+      { index: 6, label: "憲法記念日" },
+      { index: 8, label: "こどもの日" },
+    ]);
+    // A run of days with the same name gets one label.
+    const yearEnd = holidayNames(
+      ["2026-12-29", "2026-12-30", "2026-12-31"].map((date) => h(date, "年末年始", true)),
+    );
+    expect(holidayLabels({ start: "2026-12-21", days: 26 }, "day", yearEnd, 832)).toEqual([
+      { index: 8, label: "年末年始" },
     ]);
   });
 });

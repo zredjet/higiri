@@ -1,5 +1,8 @@
 //! Performance check (非機能要件「性能」): 5,000 TODOs and 20,000 work logs.
 //!
+//! Every command is measured twice: with the default 暦日 setting, then with
+//! 営業日 and a yearly custom holiday (年末年始).
+//!
 //! Not part of the normal test run. Run it optimized:
 //!
 //! ```text
@@ -15,11 +18,12 @@ use std::time::{Duration, Instant};
 use chrono::{Days, NaiveDate, TimeZone, Utc};
 use sqlx::SqlitePool;
 
-use crate::commands::{dashboard, gantt, projects, reports, todos};
+use crate::commands::{dashboard, gantt, projects, reports, settings, todos};
 use crate::domain::date::{format_date, format_timestamp};
 use crate::domain::listing::{DueFilter, TodoSort};
 use crate::domain::model::{Priority, Status};
 use crate::domain::report::ReportKind;
+use crate::domain::settings::{CustomHoliday, DayCount, Settings};
 use crate::repo::db;
 
 pub const PROJECTS: usize = 20;
@@ -198,6 +202,81 @@ fn ms(d: Duration) -> String {
     format!("{:>7.1} ms", d.as_secs_f64() * 1000.0)
 }
 
+/// The median time of each measured command.
+async fn measure(pool: &SqlitePool, today: NaiveDate) -> Vec<(&'static str, Duration)> {
+    let all = todos::TodoQuery {
+        project_id: None,
+        statuses: None,
+        priority: None,
+        due: None,
+        sort: None,
+    };
+    let filtered = todos::TodoQuery {
+        project_id: Some(3),
+        statuses: Some(vec![Status::Doing, Status::Waiting]),
+        priority: Some(Priority::High),
+        due: Some(DueFilter::WithinWeek),
+        sort: Some(TodoSort::DueDate),
+    };
+    let until_today = todos::TodoQuery {
+        due: Some(DueFilter::UntilToday),
+        ..all.clone()
+    };
+    let gantt_all = gantt::GanttQuery {
+        project_id: None,
+        include_done: true,
+        include_cancelled: false,
+    };
+    let gantt_one = gantt::GanttQuery {
+        project_id: Some(3),
+        ..gantt_all.clone()
+    };
+    let report = reports::ReportKey {
+        kind: ReportKind::Daily,
+        date: today,
+    };
+
+    let runs = 7;
+    vec![
+        (
+            "get_dashboard",
+            median(runs, || dashboard::get(pool, today)).await,
+        ),
+        (
+            "get_startup_reminder",
+            median(runs, || dashboard::reminder(pool, today)).await,
+        ),
+        (
+            "list_projects",
+            median(runs, || projects::list(pool, false, today)).await,
+        ),
+        (
+            "list_todos (all 5,000)",
+            median(runs, || todos::list(pool, &all, today)).await,
+        ),
+        (
+            "list_todos (filtered)",
+            median(runs, || todos::list(pool, &filtered, today)).await,
+        ),
+        (
+            "list_todos (until today)",
+            median(runs, || todos::list(pool, &until_today, today)).await,
+        ),
+        (
+            "get_gantt (all)",
+            median(runs, || gantt::get(pool, &gantt_all, today)).await,
+        ),
+        (
+            "get_gantt (1 project)",
+            median(runs, || gantt::get(pool, &gantt_one, today)).await,
+        ),
+        (
+            "generate_report",
+            median(runs, || reports::generate(pool, report, None)).await,
+        ),
+    ]
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "performance check; run with --release -- --ignored --nocapture"]
 async fn perf_5000_todos_20000_logs() {
@@ -223,6 +302,38 @@ async fn perf_5000_todos_20000_logs() {
     let pool = db::open(&path).await.unwrap();
     println!("open + migrations check      {}", ms(t.elapsed()));
 
+    let calendar = measure(&pool, today).await;
+
+    // 営業日, with 年末年始 (12/29〜1/3) every year.
+    let base = settings::get(&pool).await.unwrap();
+    settings::update(
+        &pool,
+        settings::SettingsInput {
+            day_count: DayCount::Business,
+            custom_holidays: vec![CustomHoliday {
+                name: "年末年始".into(),
+                start: NaiveDate::from_ymd_opt(2026, 12, 29).unwrap(),
+                end: NaiveDate::from_ymd_opt(2027, 1, 3).unwrap(),
+                yearly: true,
+            }],
+            ..settings::SettingsInput::from(&base)
+        },
+    )
+    .await
+    .unwrap();
+    let business = measure(&pool, today).await;
+
+    println!(
+        "{:<28} {:>10} {:>10}",
+        "command (ms)", "calendar", "business"
+    );
+    for ((name, c), (_, b)) in calendar.iter().zip(&business) {
+        println!("{name:<28} {} {}", ms(*c), ms(*b));
+    }
+    settings::update(&pool, settings::SettingsInput::from(&Settings::default()))
+        .await
+        .unwrap();
+
     let all = todos::TodoQuery {
         project_id: None,
         statuses: None,
@@ -230,65 +341,11 @@ async fn perf_5000_todos_20000_logs() {
         due: None,
         sort: None,
     };
-    let filtered = todos::TodoQuery {
-        project_id: Some(3),
-        statuses: Some(vec![Status::Doing, Status::Waiting]),
-        priority: Some(Priority::High),
-        due: Some(DueFilter::WithinWeek),
-        sort: Some(TodoSort::DueDate),
-    };
     let gantt_all = gantt::GanttQuery {
         project_id: None,
         include_done: true,
         include_cancelled: false,
     };
-    let gantt_one = gantt::GanttQuery {
-        project_id: Some(3),
-        ..gantt_all.clone()
-    };
-    let report = reports::ReportKey {
-        kind: ReportKind::Daily,
-        date: today,
-    };
-
-    let runs = 7;
-    let rows: Vec<(&str, Duration)> = vec![
-        (
-            "get_dashboard",
-            median(runs, || dashboard::get(&pool, today)).await,
-        ),
-        (
-            "get_startup_reminder",
-            median(runs, || dashboard::reminder(&pool, today)).await,
-        ),
-        (
-            "list_projects",
-            median(runs, || projects::list(&pool, false, today)).await,
-        ),
-        (
-            "list_todos (all 5,000)",
-            median(runs, || todos::list(&pool, &all, today)).await,
-        ),
-        (
-            "list_todos (filtered)",
-            median(runs, || todos::list(&pool, &filtered, today)).await,
-        ),
-        (
-            "get_gantt (all)",
-            median(runs, || gantt::get(&pool, &gantt_all, today)).await,
-        ),
-        (
-            "get_gantt (1 project)",
-            median(runs, || gantt::get(&pool, &gantt_one, today)).await,
-        ),
-        (
-            "generate_report",
-            median(runs, || reports::generate(&pool, report, None)).await,
-        ),
-    ];
-    for (name, d) in &rows {
-        println!("{name:<28} {}", ms(*d));
-    }
     let items = todos::list(&pool, &all, today).await.unwrap();
     let g = gantt::get(&pool, &gantt_all, today).await.unwrap();
     println!(

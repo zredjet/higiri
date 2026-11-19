@@ -15,6 +15,7 @@ use crate::domain::events;
 use crate::domain::listing::{DueFilter, TodoSort, due_matches, sort_todos};
 use crate::domain::model::{Priority, Status, Todo};
 use crate::domain::status::{StatusChange, StatusFields, transition};
+use crate::domain::urgency::Rules;
 use crate::domain::views::{StatusCounts, TodoItem, TodoList, todo_item};
 use crate::repo;
 use crate::repo::todos::{NewTodo, TodoFilter};
@@ -121,19 +122,19 @@ pub async fn delete_todo(pool: State<'_, SqlitePool>, id: i64) -> CmdResult<()> 
 
 // ---- implementation ----------------------------------------------------------
 
-async fn soon_days(conn: &mut SqliteConnection) -> CmdResult<u32> {
-    Ok(repo::settings::load(conn).await?.soon_days)
+async fn rules(conn: &mut SqliteConnection) -> CmdResult<Rules> {
+    Ok(Rules::from_settings(&repo::settings::load(conn).await?))
 }
 
 async fn item(conn: &mut SqliteConnection, todo: Todo, today: NaiveDate) -> CmdResult<TodoItem> {
     let project = repo::projects::get(conn, todo.project_id).await?;
-    let soon = soon_days(conn).await?;
-    Ok(todo_item(todo, project.name, today, soon))
+    let rules = rules(conn).await?;
+    Ok(todo_item(todo, project.name, today, &rules))
 }
 
 pub async fn list(pool: &SqlitePool, query: &TodoQuery, today: NaiveDate) -> CmdResult<TodoList> {
     let mut conn = pool.acquire().await?;
-    let soon = soon_days(&mut conn).await?;
+    let rules = rules(&mut conn).await?;
     let names: HashMap<i64, String> = repo::projects::list(&mut conn, true)
         .await?
         .into_iter()
@@ -151,7 +152,7 @@ pub async fn list(pool: &SqlitePool, query: &TodoQuery, today: NaiveDate) -> Cmd
     .await?
     .into_iter()
     .filter(|t| query.priority.is_none_or(|p| t.priority == p))
-    .filter(|t| due_matches(t, due, today, soon))
+    .filter(|t| due_matches(t, due, today, &rules))
     .collect();
 
     // Tab counts: every filter except the status one.
@@ -169,7 +170,7 @@ pub async fn list(pool: &SqlitePool, query: &TodoQuery, today: NaiveDate) -> Cmd
         })
         .map(|t| {
             let name = names.get(&t.project_id).cloned().unwrap_or_default();
-            todo_item(t, name, today, soon)
+            todo_item(t, name, today, &rules)
         })
         .collect();
     sort_todos(&mut items, query.sort.unwrap_or_default(), |i| &i.todo);

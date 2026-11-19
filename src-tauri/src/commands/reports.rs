@@ -9,6 +9,7 @@ use tauri_plugin_dialog::DialogExt;
 use super::clock;
 use super::error::{AppError, CmdResult, ErrorKind};
 use crate::domain::report::{self, Report, ReportInput, ReportKind};
+use crate::domain::urgency::Rules;
 use crate::repo;
 use crate::repo::todos::TodoFilter;
 
@@ -131,7 +132,7 @@ pub async fn generate(
     };
     let body = report::generate_body(&ReportInput {
         date: key.date,
-        soon_days: settings.soon_days,
+        rules: &Rules::from_settings(&settings),
         projects: &projects,
         todos: &todos,
         logs: &logs,

@@ -1,7 +1,7 @@
 // Gantt geometry: dates -> x, rows -> y, header labels, visible range.
 // Pure functions (tested in geometry.test.ts). Sizes are the mock's
 // (docs/ui-mock/README.md「ガントの寸法」) and the design's day widths.
-import type { DaySpan } from "../../lib/bindings";
+import type { DaySpan, Holiday } from "../../lib/bindings";
 
 export type Scale = "day" | "week" | "month";
 
@@ -90,17 +90,82 @@ export function dayCenter(r: Range, date: string, dayWidth: number): number | nu
   return i * dayWidth + dayWidth / 2;
 }
 
-/** Day indexes falling on Saturday or Sunday, merged into runs. */
-export function weekendRuns(r: Range): Array<{ index: number; length: number }> {
+/**
+ * Day indexes falling on Saturday, Sunday or one of `holidays` (national and
+ * custom holidays, "YYYY-MM-DD"), merged into runs.
+ */
+export function weekendRuns(r: Range, holidays: Iterable<string> = []): Array<{ index: number; length: number }> {
+  const off = new Set(holidays);
   const runs: Array<{ index: number; length: number }> = [];
   for (let i = 0; i < r.days; i++) {
-    const wd = weekday(addDays(r.start, i));
-    if (wd !== 0 && wd !== 6) continue;
+    const date = addDays(r.start, i);
+    const wd = weekday(date);
+    if (wd !== 0 && wd !== 6 && !off.has(date)) continue;
     const last = runs[runs.length - 1];
     if (last && last.index + last.length === i) last.length += 1;
     else runs.push({ index: i, length: 1 });
   }
   return runs;
+}
+
+/**
+ * One name per date: the national holiday's when there is one, otherwise the
+ * custom holidays' names joined with 「・」.
+ */
+export function holidayNames(holidays: Holiday[]): Map<string, string> {
+  const national = new Map<string, string>();
+  const custom = new Map<string, string[]>();
+  for (const h of holidays) {
+    if (!h.custom) national.set(h.date, h.name);
+    else custom.set(h.date, [...(custom.get(h.date) ?? []), h.name]);
+  }
+  const out = new Map<string, string>();
+  for (const [date, names] of custom) out.set(date, names.join("・"));
+  for (const [date, name] of national) out.set(date, name);
+  return out;
+}
+
+/** Rough width of header text: full-width characters are square, others about 0.6 em. */
+export function textWidth(text: string, fontSize: number): number {
+  let w = 0;
+  for (const ch of text) w += (ch.codePointAt(0) ?? 0) > 0xff ? fontSize : fontSize * 0.6;
+  return w;
+}
+
+/** Font size of the holiday names in the header's top row. */
+export const HOLIDAY_LABEL_SIZE = 11;
+const MONTH_LABEL_SIZE = 12;
+const LABEL_GAP = 8;
+
+/**
+ * Holiday names placed in the header's top row, next to the month labels:
+ * one label per run of days with the same name, at the run's first day,
+ * left out where it would overlap a month label or the previous name.
+ * Every holiday still has its name in `names` (tooltips).
+ */
+export function holidayLabels(
+  r: Range,
+  scale: Scale,
+  names: Map<string, string>,
+  width: number,
+): Array<{ index: number; label: string }> {
+  const w = DAY_WIDTH[scale];
+  const { top } = headerRows(r, scale, r.start);
+  const taken: Array<[number, number]> = top
+    .filter((s) => s.length * w >= 40)
+    .map((s) => [s.index * w + 8, s.index * w + 8 + textWidth(s.label, MONTH_LABEL_SIZE)]);
+  const out: Array<{ index: number; label: string }> = [];
+  for (let i = 0; i < r.days; i++) {
+    const name = names.get(addDays(r.start, i));
+    if (!name || (i > 0 && names.get(addDays(r.start, i - 1)) === name)) continue;
+    const from = i * w + 4;
+    const to = from + textWidth(name, HOLIDAY_LABEL_SIZE);
+    if (to > width) continue;
+    if (taken.some(([a, b]) => from < b + LABEL_GAP && a < to + LABEL_GAP)) continue;
+    taken.push([from, to]);
+    out.push({ index: i, label: name });
+  }
+  return out;
 }
 
 export interface Segment {

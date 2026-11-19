@@ -4,16 +4,20 @@
 //! 「日報の生成」) to the character. 本日の作業 and 本日完了・中止 come from that
 //! day's records; 待ち, 明日の予定 and 日限注意 judge the TODOs' current state
 //! with the target date as "today" (decided for past dates).
+//!
+//! In 営業日 (v1.1), 明日の予定 is for the next business day, the day counts of
+//! 日限注意 read 「あとN営業日」「N営業日超過」, and a due date moved off a
+//! holiday gets 「休日のため前倒し」. In 暦日 the text is the MVP's.
 
 use std::collections::HashMap;
 
-use chrono::{Datelike, Days, NaiveDate};
+use chrono::{Datelike, NaiveDate};
 use serde::{Deserialize, Serialize};
 
 use super::date::{format_date, month_day_slash};
 use super::events::{EventKind, TodoEvent};
 use super::model::{Project, Status, Todo, WorkLog};
-use super::urgency::{Urgency, assess, attention_order, waiting_day};
+use super::urgency::{Assessment, Rules, Urgency, assess, attention_order, waiting_day};
 
 /// Report kinds (`reports.kind`). The MVP makes daily reports only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, specta::Type)]
@@ -57,6 +61,9 @@ pub const NOTE_HEADING: &str = "## 所感・連絡事項";
 
 const NONE_LINE: &str = "- なし";
 
+/// Added to a due date that falls on a holiday, in 営業日.
+const SHIFTED: &str = "休日のため前倒し";
+
 const WEEKDAYS: [&str; 7] = ["月", "火", "水", "木", "金", "土", "日"];
 
 /// 「# 日報 2026-11-19(木)」
@@ -73,7 +80,7 @@ pub fn hours(minutes: i64) -> String {
 /// What a report is made from.
 pub struct ReportInput<'a> {
     pub date: NaiveDate,
-    pub soon_days: u32,
+    pub rules: &'a Rules,
     /// All projects (archived included), in display order.
     pub projects: &'a [Project],
     /// All TODOs, in display order.
@@ -279,12 +286,10 @@ fn waiting_section(input: &ReportInput, lk: &Lookup) -> Vec<String> {
         .collect()
 }
 
-/// 明日の予定: 作業中, and 未着手 starting by tomorrow (active projects, display order).
+/// 明日の予定: 作業中, and 未着手 starting by tomorrow (the next business day in
+/// 営業日). Active projects, display order.
 fn tomorrow_section(input: &ReportInput, lk: &Lookup) -> Vec<String> {
-    let tomorrow = input
-        .date
-        .checked_add_days(Days::new(1))
-        .unwrap_or(input.date);
+    let tomorrow = input.rules.next_day(input.date);
     input
         .todos
         .iter()
@@ -307,15 +312,15 @@ fn tomorrow_section(input: &ReportInput, lk: &Lookup) -> Vec<String> {
 
 /// 日限注意: 超過・本日・間近 with the target date as today.
 fn attention_section(input: &ReportInput, lk: &Lookup) -> Vec<String> {
-    let mut items: Vec<(&Todo, Urgency, Option<i64>)> = input
+    let mut items: Vec<(&Todo, Urgency, Assessment)> = input
         .todos
         .iter()
         .filter(|t| lk.is_active(t))
         .filter_map(|t| {
-            let a = assess(t, input.date, input.soon_days);
+            let a = assess(t, input.date, input.rules);
             match a.urgency {
                 Some(u @ (Urgency::Overdue | Urgency::DueToday | Urgency::DueSoon)) => {
-                    Some((t, u, a.days_until_due))
+                    Some((t, u, a))
                 }
                 _ => None,
             }
@@ -324,15 +329,19 @@ fn attention_section(input: &ReportInput, lk: &Lookup) -> Vec<String> {
     items.sort_by(|a, b| attention_order((a.0, a.1), (b.0, b.1)));
     items
         .into_iter()
-        .map(|(t, u, days)| {
+        .map(|(t, u, a)| {
             let mut parts = vec![format!(
                 "日限 {}",
                 t.due_date.map(month_day_slash).unwrap_or_default()
             )];
-            let days = days.unwrap_or(0);
+            if a.due_shifted {
+                parts.push(SHIFTED.to_owned());
+            }
+            let days = a.days_until_due.unwrap_or(0);
+            let unit = if a.business_days { "営業日" } else { "日" };
             match u {
-                Urgency::Overdue => parts.push(format!("{}日超過", -days)),
-                Urgency::DueSoon => parts.push(format!("あと{days}日")),
+                Urgency::Overdue => parts.push(format!("{}{unit}超過", -days)),
+                Urgency::DueSoon => parts.push(format!("あと{days}{unit}")),
                 _ => {}
             }
             if t.status == Status::Waiting {
@@ -392,7 +401,7 @@ pub fn split_note(full: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::testing::{d, todo, ts};
+    use crate::domain::testing::{business_rules, d, rules, todo, ts};
 
     #[test]
     fn title_has_the_weekday() {
@@ -441,7 +450,7 @@ mod tests {
         };
         let input = ReportInput {
             date: d("2026-11-19"),
-            soon_days: 3,
+            rules: &rules(3),
             projects: &[p],
             todos: &[],
             logs: &[],
@@ -483,7 +492,7 @@ mod tests {
         };
         let input = ReportInput {
             date: d("2026-11-19"),
-            soon_days: 3,
+            rules: &rules(3),
             projects: std::slice::from_ref(&p),
             todos: std::slice::from_ref(&t),
             logs: std::slice::from_ref(&log),
@@ -520,7 +529,7 @@ mod tests {
         let on = |date: &str| {
             generate_body(&ReportInput {
                 date: d(date),
-                soon_days: 3,
+                rules: &rules(3),
                 projects: std::slice::from_ref(&p),
                 todos: std::slice::from_ref(&t),
                 logs: &[],
@@ -530,6 +539,88 @@ mod tests {
         assert!(on("2026-11-18").contains("## 待ち\n- なし\n"));
         assert!(
             on("2026-11-19").contains("## 待ち\n- P / T(相手の回答待ち、1日目、確認日 11/20)\n")
+        );
+    }
+
+    #[test]
+    fn business_days_change_tomorrow_and_the_day_counts() {
+        let p = Project {
+            id: 1,
+            name: "P".into(),
+            color: "#3B6FD4".into(),
+            description: String::new(),
+            sort_order: 1,
+            archived_at: None,
+            created_at: ts(2026, 11, 1, 0, 0),
+            updated_at: ts(2026, 11, 1, 0, 0),
+        };
+        let mk = |id, title: &str, status, due: &str, planned: Option<(&str, &str)>| Todo {
+            id,
+            project_id: 1,
+            title: title.into(),
+            due_date: Some(d(due)),
+            planned_start: planned.map(|p| d(p.0)),
+            planned_end: planned.map(|p| d(p.1)),
+            ..todo(status)
+        };
+        let todos = [
+            mk(1, "A", Status::Doing, "2026-11-22", None), // Sunday
+            mk(
+                2,
+                "B",
+                Status::Todo,
+                "2026-11-24",
+                Some(("2026-11-24", "2026-11-25")),
+            ),
+            mk(3, "C", Status::Todo, "2026-11-18", None),
+            mk(
+                4,
+                "D",
+                Status::Todo,
+                "2026-12-10",
+                Some(("2026-11-23", "2026-11-23")),
+            ),
+        ];
+        // Friday 11/20; 11/21–11/23 are off, so the next business day is 11/24.
+        let body = |r: &Rules| {
+            generate_body(&ReportInput {
+                date: d("2026-11-20"),
+                rules: r,
+                projects: std::slice::from_ref(&p),
+                todos: &todos,
+                logs: &[],
+                events: &[],
+            })
+        };
+        let business = body(&business_rules(3, vec![]));
+        assert!(
+            business.contains(
+                "## 明日の予定\n- P / A\n- P / B(予定 11/24〜11/25)\n- P / D(予定 11/23〜11/23)\n"
+            ),
+            "{business}"
+        );
+        assert!(
+            business.contains(concat!(
+                "## 日限注意\n",
+                "- 【超過】P / C(日限 11/18、2営業日超過)\n",
+                "- 【本日】P / A(日限 11/22、休日のため前倒し)\n",
+                "- 【間近】P / B(日限 11/24、あと1営業日)\n",
+            )),
+            "{business}"
+        );
+
+        let calendar = body(&rules(3));
+        assert!(
+            calendar.contains("## 明日の予定\n- P / A\n\n"),
+            "{calendar}"
+        );
+        assert!(
+            calendar.contains(concat!(
+                "## 日限注意\n",
+                "- 【超過】P / C(日限 11/18、2日超過)\n",
+                "- 【間近】P / A(日限 11/22、あと2日)\n",
+            )),
+            "{calendar}"
         );
     }
 

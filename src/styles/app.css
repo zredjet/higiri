@@ -780,6 +780,27 @@ input[type="date"][data-empty="true"]:not(:focus) {
   width: 120px;
 }
 
+/* 日数の数え方: the custom holidays. */
+.holiday-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.holiday-form__add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.holiday-form__add .az-field {
+  width: 180px;
+}
+
 /* ---------- Gantt ---------- */
 /* The chart fills the rest of the page and scrolls its own rows. */
 .app__main--fill {
@@ -1052,6 +1073,13 @@ input[type="date"][data-empty="true"]:not(:focus) {
   font-weight: 600;
 }
 
+/* 「休日のため前倒し」 next to a due marker judged as today. */
+.gantt-due-note {
+  fill: var(--warning);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .gantt-today {
   stroke: var(--primary-text);
   stroke-width: 2;
@@ -1073,6 +1101,21 @@ input[type="date"][data-empty="true"]:not(:focus) {
 .gantt-header-day.is-today {
   fill: var(--primary-text);
   font-weight: 600;
+}
+
+/* Holiday names in the header's top row (font size: HOLIDAY_LABEL_SIZE in geometry.ts). */
+.gantt-header-holiday {
+  fill: var(--text-subtle);
+  font-size: 11px;
+}
+
+/* Hover target of a holiday's day number (its name shows as a tooltip). */
+.gantt-header-hit {
+  fill: transparent;
+}
+
+.gantt-header-day {
+  pointer-events: none;
 }
 
 .gantt-today-cell {

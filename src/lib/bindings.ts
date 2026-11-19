@@ -81,6 +81,11 @@ export const commands = {
 	 *  notifications are turned on (it checks that the OS shows them at all).
 	 */
 	testNotification: (options?: InvokeOptions) => __TAURI_INVOKE<null>("test_notification", undefined, options),
+	/**
+	 *  Holidays from `start` to `end` (both included, at most 3 years), in date
+	 *  order. Listed whatever the day count setting is.
+	 */
+	listHolidays: (start: string, end: string, options?: InvokeOptions) => __TAURI_INVOKE<Holiday[]>("list_holidays", { start, end }, options),
 };
 
 /* Types */
@@ -98,15 +103,35 @@ export type Assessment = {
 	warnings: Warnings,
 	/**
 	 *  Days from today to the due date; negative when overdue (「2日超過」 is -2,
-	 *  「あと1日」 is 1). Open TODOs with a due date only.
+	 *  「あと1日」 is 1). Open TODOs with a due date only. Business days when
+	 *  `business_days`.
 	 */
 	days_until_due: number | null,
-	/**  Days since the planned start (「予定開始から2日経過」). 着手遅れ only. */
+	/**
+	 *  Days since the planned start (「予定開始から2日経過」). 着手遅れ only.
+	 *  Business days when `business_days`.
+	 */
 	days_since_planned_start: number | null,
-	/**  Day of waiting, the first day being 1 (「3日目」). 待ち only. */
+	/**
+	 *  Day of waiting, the first day being 1 (「3日目」). 待ち only. Always
+	 *  calendar days.
+	 */
 	waiting_day: number | null,
-	/**  Days since the follow-up date (0 = 「確認日が今日」). 要確認 only. */
+	/**
+	 *  Days since the follow-up date (0 = 「確認日が今日」). 要確認 only.
+	 *  Always calendar days.
+	 */
 	days_since_follow_up: number | null,
+	/**
+	 *  `days_until_due` and `days_since_planned_start` count business days
+	 *  (「あと1営業日」「2営業日超過」).
+	 */
+	business_days: boolean,
+	/**
+	 *  The due date falls on a holiday and was judged as the business day
+	 *  before it (「休日のため前倒し」). Open TODOs in 営業日 only.
+	 */
+	due_shifted: boolean,
 };
 
 /**  A backup file as the settings screen lists it. */
@@ -127,10 +152,24 @@ export type BackupKind =
 /**  復元する前の状態 (taken just before a restore). */
 "before_restore";
 
+/**
+ *  A holiday of the user's own (年末年始 and the like), one entry of
+ *  `custom_holidays`. `start` and `end` are the dates in the first year; a
+ *  yearly holiday repeats every year from then on and may cross the new year.
+ */
+export type CustomHoliday = {
+	name: string,
+	start: string,
+	end: string,
+	yearly: boolean,
+};
+
 export type Dashboard = {
 	today: string,
 	/**  「N日以内に日限が来ます」. */
 	soon_days: number,
+	/**  Day counts are business days (「N営業日以内」). */
+	business_days: boolean,
 	counts: UrgencyCounts,
 	/**  All 日限注意 (the side-nav badge of the dashboard). */
 	attention_total: number,
@@ -144,6 +183,13 @@ export type Dashboard = {
 	projects: ProjectSummary[],
 };
 
+/**  How day counts are made (`day_count`). */
+export type DayCount = 
+/**  暦日 (default): every day counts. */
+"calendar" | 
+/**  営業日: weekends, national holidays and custom holidays do not count. */
+"business";
+
 /**  Days `start..=end`. */
 export type DaySpan = {
 	start: string,
@@ -156,9 +202,12 @@ export type DueFilter =
 "all" | 
 /**  日限注意だけ (any category of `classify`) */
 "attention" | 
-/**  今日まで: due today or earlier */
+/**
+ *  今日まで: due today or earlier (in 営業日, a due date on a holiday
+ *  counts as the business day before it)
+ */
 "until_today" | 
-/**  7日後まで: due within 7 days from today, or earlier */
+/**  7日後まで: due within 7 calendar days from today, or earlier */
 "within_week" | 
 /**  日限なし */
 "no_due";
@@ -228,6 +277,14 @@ export type GanttRow = {
 	actual: DaySpan | null,
 	/**  待ち spans inside the actual bar (G-7). */
 	waiting: DaySpan[],
+};
+
+/**  A holiday with its name, as `list_holidays` returns it. */
+export type Holiday = {
+	date: string,
+	name: string,
+	/**  A custom holiday (false: a national holiday). */
+	custom: boolean,
 };
 
 export type NewTodoInput = {
@@ -334,6 +391,10 @@ export type Settings = {
 	autostart: boolean,
 	/**  The tray hint was shown (written by the app, not by update_settings). */
 	tray_hint_shown: boolean,
+	/**  暦日 or 営業日 (v1.1). */
+	day_count: DayCount,
+	/**  The user's own holidays (v1.1). */
+	custom_holidays: CustomHoliday[],
 };
 
 /**
@@ -350,6 +411,9 @@ export type SettingsInput = {
 	notify_times: string[],
 	close_to_tray: boolean,
 	autostart: boolean,
+	day_count: DayCount,
+	/**  Names 1 to 30 characters, `start <= end`, at most 31 days each. */
+	custom_holidays: CustomHoliday[],
 };
 
 /**  What the startup reminder dialog shows. */
@@ -481,6 +545,11 @@ export type TodoItem = {
 	 *  select offers only these).
 	 */
 	next_statuses: Status[],
+	/**
+	 *  The follow-up date offered when this TODO goes 待ち today: the
+	 *  setting's days (business days in 営業日) after today.
+	 */
+	follow_up_default: string,
 };
 
 /**

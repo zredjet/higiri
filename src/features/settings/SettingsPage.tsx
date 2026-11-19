@@ -1,12 +1,23 @@
 import { useState } from "react";
-import { Alert, Button, Card, RadioGroup, Switch, Table, TextField } from "../../components/aizome";
+import { Alert, Button, Card, Checkbox, RadioGroup, Switch, Table, TextField } from "../../components/aizome";
+import { DateField } from "../../components/DateField";
 import { PageHeader } from "../../components/PageHeader";
-import type { ProjectSummary, ReminderFrequency, Settings, SettingsInput, Theme } from "../../lib/bindings";
-import { formatTimestampDate } from "../../lib/date";
+import type {
+  CustomHoliday,
+  DayCount,
+  Holiday,
+  ProjectSummary,
+  ReminderFrequency,
+  Settings,
+  SettingsInput,
+  Theme,
+} from "../../lib/bindings";
+import { formatDate, formatDateWithWeekday, formatTimestampDate, todayYmd } from "../../lib/date";
 import { errorMessage } from "../../lib/errors";
 import { isComposing } from "../../lib/keys";
 import {
   useArchiveProject,
+  useHolidays,
   useOpenDataFolder,
   useProjects,
   useSettings,
@@ -32,6 +43,16 @@ const REMINDER_OPTIONS: Array<{ value: ReminderFrequency; label: string; descrip
   { value: "once_per_day", label: "1日1回だけ表示", description: "その日最初の起動のときだけダイアログを出します。" },
 ];
 
+const DAY_COUNT_OPTIONS: Array<{ value: DayCount; label: string; description: string }> = [
+  { value: "calendar", label: "暦日で数える", description: "土日や祝日も1日として数えます。" },
+  {
+    value: "business",
+    label: "営業日で数える",
+    description:
+      "土日、祝日、独自の休日を除いて数えます。休日に当たる日限は、前の営業日に寄せて判定します。待ちの日数は暦日のまま数えます。",
+  },
+];
+
 /** A development build (`tauri dev`) never registers itself to start at login. */
 const DEV_BUILD = import.meta.env.DEV;
 
@@ -45,6 +66,8 @@ function inputOf(s: Settings): SettingsInput {
     notify_times: s.notify_times,
     close_to_tray: s.close_to_tray,
     autostart: s.autostart,
+    day_count: s.day_count,
+    custom_holidays: s.custom_holidays,
   };
 }
 
@@ -55,6 +78,7 @@ export function SettingsPage() {
     <div className="settings-page">
       <PageHeader title="設定" actions={<span className="text-caption">変更はすぐに保存されます</span>} />
       {settings.data ? <ReminderCard key={settings.dataUpdatedAt} settings={settings.data} /> : null}
+      {settings.data ? <DayCountCard settings={settings.data} /> : null}
       {settings.data ? <ResidentCard settings={settings.data} /> : null}
       <DisplayCard />
       <DataCard />
@@ -125,6 +149,7 @@ function ReminderCard({ settings }: { settings: Settings }) {
   }
 
   const error = localError ?? (update.error ? errorMessage(update.error) : null);
+  const unit = settings.day_count === "business" ? "営業日" : "日";
 
   return (
     <Card title="リマインド" description="日限注意を知らせる頻度と、区分の基準を決めます。">
@@ -143,7 +168,7 @@ function ReminderCard({ settings }: { settings: Settings }) {
           <TextField
             label="「間近」とみなす日数"
             inputMode="numeric"
-            suffix="日以内"
+            suffix={`${unit}以内`}
             description="日限がこの日数以内に来るTODOを「間近」に出します。"
             value={soon}
             onChange={(e) => setSoon(e.target.value)}
@@ -152,12 +177,148 @@ function ReminderCard({ settings }: { settings: Settings }) {
           <TextField
             label="確認日の初期値"
             inputMode="numeric"
-            suffix="日後"
+            suffix={`${unit}後`}
             description="「待ち」にした日から数えます。TODOごとに変えられます。"
             value={followUp}
             onChange={(e) => setFollowUp(e.target.value)}
             onBlur={saveDays}
           />
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/** 「2026/12/29〜2027/01/03」, or one date. */
+function periodLabel(h: CustomHoliday): string {
+  return h.start === h.end ? formatDate(h.start) : `${formatDate(h.start)}〜${formatDate(h.end)}`;
+}
+
+/** 日数の数え方: 暦日 or 営業日, the custom holidays, and this year's national holidays (v1.1). */
+function DayCountCard({ settings }: { settings: Settings }) {
+  const update = useUpdateSettings();
+  const [name, setName] = useState("");
+  const [start, setStart] = useState<string | null>(null);
+  const [end, setEnd] = useState<string | null>(null);
+  const [yearly, setYearly] = useState(true);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const year = todayYmd().slice(0, 4);
+  const holidays = useHolidays({ start: `${year}-01-01`, end: `${year}-12-31` });
+  const national = (holidays.data ?? []).filter((h) => !h.custom);
+
+  function save(change: Partial<SettingsInput>, onSaved?: () => void) {
+    setLocalError(null);
+    update.mutate({ ...inputOf(settings), ...change }, { onSuccess: onSaved });
+  }
+
+  function addHoliday() {
+    if (!start || !end) {
+      setLocalError("独自の休日の開始日と終了日を入力してください。");
+      return;
+    }
+    save({ custom_holidays: [...settings.custom_holidays, { name, start, end, yearly }] }, () => {
+      setName("");
+      setStart(null);
+      setEnd(null);
+    });
+  }
+
+  const error = localError ?? (update.error ? errorMessage(update.error) : null);
+  const rows = settings.custom_holidays.map((h, i) => ({ id: i, holiday: h }));
+
+  return (
+    <Card
+      title="日数の数え方"
+      description="日限までの日数、「間近」の判定、確認日の初期値を、暦日と営業日のどちらで数えるかを決めます。"
+    >
+      <div className="settings-card__body">
+        {error ? <Alert tone="danger">{error}</Alert> : null}
+        <RadioGroup
+          label="日数の数え方"
+          name="day-count"
+          options={DAY_COUNT_OPTIONS}
+          value={settings.day_count}
+          disabled={update.isPending}
+          onChange={(value) => save({ day_count: value as DayCount })}
+        />
+        <fieldset className="az-field holiday-form" disabled={update.isPending}>
+          <legend className="az-field__label">独自の休日</legend>
+          {rows.length > 0 ? (
+            <Table<{ id: number; holiday: CustomHoliday }>
+              rows={rows}
+              density="compact"
+              columns={[
+                { key: "name", header: "名前", render: (r) => r.holiday.name },
+                { key: "period", header: "期間", render: (r) => periodLabel(r.holiday) },
+                { key: "yearly", header: "くり返し", width: 100, render: (r) => (r.holiday.yearly ? "毎年" : "1回だけ") },
+                {
+                  key: "actions",
+                  header: "操作",
+                  align: "right",
+                  width: 110,
+                  render: (r) => (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      aria-label={`${r.holiday.name}を削除する`}
+                      onClick={() =>
+                        save({ custom_holidays: settings.custom_holidays.filter((_, i) => i !== r.id) })
+                      }
+                    >
+                      削除する
+                    </Button>
+                  ),
+                },
+              ]}
+            />
+          ) : (
+            <p className="settings-card__text text-muted">独自の休日はまだありません。年末年始などの休みを足せます。</p>
+          )}
+          <div className="holiday-form__add">
+            <TextField
+              label="名前"
+              placeholder="例: 年末年始"
+              maxLength={30}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+            <DateField
+              label="開始日"
+              value={start}
+              onChange={(v) => {
+                setStart(v);
+                if (v && !end) setEnd(v);
+              }}
+            />
+            <DateField label="終了日" value={end} onChange={setEnd} />
+            <Checkbox label="毎年くり返す" checked={yearly} onChange={(e) => setYearly(e.target.checked)} />
+            <Button iconStart="plus" onClick={addHoliday}>
+              休日を追加
+            </Button>
+          </div>
+          <p className="az-field__desc">
+            1件は31日まで登録できます。毎年くり返す休日は、12月29日〜1月3日のように年をまたげます。祝日と独自の休日は、暦日で数えるときもガントチャートで網掛けします。
+          </p>
+        </fieldset>
+        <div className="az-field">
+          <span className="az-field__label">{year}年の祝日</span>
+          {holidays.error ? <Alert tone="danger">{errorMessage(holidays.error)}</Alert> : null}
+          {national.length > 0 ? (
+            <Table<Holiday>
+              rowKey="date"
+              rows={national}
+              density="compact"
+              maxHeight={280}
+              columns={[
+                { key: "date", header: "日付", width: 160, render: (h) => formatDateWithWeekday(h.date) },
+                { key: "name", header: "名前", render: (h) => h.name },
+              ]}
+            />
+          ) : holidays.isSuccess ? (
+            <p className="settings-card__text text-muted">
+              {year}年の祝日は計算していません。祝日を計算するのは2020〜2099年で、ほかの年は土日だけを休みとして数えます。
+            </p>
+          ) : null}
         </div>
       </div>
     </Card>

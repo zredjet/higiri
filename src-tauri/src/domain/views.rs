@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use super::model::{Project, Status, Todo};
 use super::status::check_allowed;
-use super::urgency::{Assessment, assess};
+use super::urgency::{Assessment, Rules, assess, classify};
 
 /// Number of TODOs per status.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, specta::Type)]
@@ -59,13 +59,13 @@ pub fn project_summaries(
     projects: Vec<Project>,
     todos: &[Todo],
     today: NaiveDate,
-    soon_days: u32,
+    rules: &Rules,
 ) -> Vec<ProjectSummary> {
     let mut counts: HashMap<i64, (StatusCounts, i64)> = HashMap::new();
     for t in todos {
         let entry = counts.entry(t.project_id).or_default();
         entry.0.add(t.status);
-        if super::urgency::classify(t, today, soon_days).is_some() {
+        if classify(t, today, rules).is_some() {
             entry.1 += 1;
         }
     }
@@ -94,10 +94,13 @@ pub struct TodoItem {
     /// Statuses `change_status` accepts from the current one (the status
     /// select offers only these).
     pub next_statuses: Vec<Status>,
+    /// The follow-up date offered when this TODO goes 待ち today: the
+    /// setting's days (business days in 営業日) after today.
+    pub follow_up_default: NaiveDate,
 }
 
-pub fn todo_item(todo: Todo, project_name: String, today: NaiveDate, soon_days: u32) -> TodoItem {
-    let assessment = assess(&todo, today, soon_days);
+pub fn todo_item(todo: Todo, project_name: String, today: NaiveDate, rules: &Rules) -> TodoItem {
+    let assessment = assess(&todo, today, rules);
     let next_statuses = Status::ALL
         .into_iter()
         .filter(|to| check_allowed(todo.status, *to).is_ok())
@@ -107,6 +110,7 @@ pub fn todo_item(todo: Todo, project_name: String, today: NaiveDate, soon_days: 
         project_name,
         assessment,
         next_statuses,
+        follow_up_default: rules.follow_up_default(today),
     }
 }
 
@@ -124,7 +128,7 @@ pub struct TodoList {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::testing::{d, todo, ts};
+    use crate::domain::testing::{business_rules, d, rules, todo, ts};
 
     fn project(id: i64, name: &str) -> Project {
         Project {
@@ -170,7 +174,7 @@ mod tests {
             ],
             &todos,
             today,
-            3,
+            &rules(3),
         );
         assert_eq!(out.len(), 2);
         let s = &out[0];
@@ -199,7 +203,7 @@ mod tests {
             t(1, Status::Todo, Some("2026-11-17")),
             "社内ツール整備".into(),
             d("2026-11-19"),
-            3,
+            &rules(3),
         );
         assert_eq!(item.project_name, "社内ツール整備");
         assert_eq!(item.assessment.days_until_due, Some(-2));
@@ -213,14 +217,31 @@ mod tests {
                 Status::Cancelled
             ]
         );
-        let done = todo_item(t(1, Status::Done, None), "x".into(), d("2026-11-19"), 3);
+        let done = todo_item(
+            t(1, Status::Done, None),
+            "x".into(),
+            d("2026-11-19"),
+            &rules(3),
+        );
         assert_eq!(done.next_statuses, vec![Status::Doing]);
         let cancelled = todo_item(
             t(1, Status::Cancelled, None),
             "x".into(),
             d("2026-11-19"),
-            3,
+            &rules(3),
         );
         assert_eq!(cancelled.next_statuses, vec![Status::Todo]);
+    }
+
+    #[test]
+    fn follow_up_default_counts_like_the_setting() {
+        let today = d("2026-11-19"); // Thursday
+        let item = |r: &Rules| todo_item(t(1, Status::Doing, None), "x".into(), today, r);
+        assert_eq!(item(&rules(3)).follow_up_default, d("2026-11-22"));
+        // 11/20, 11/24, 11/25 (11/21–11/23 are off).
+        assert_eq!(
+            item(&business_rules(3, vec![])).follow_up_default,
+            d("2026-11-25")
+        );
     }
 }

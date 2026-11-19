@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::date::{add_days, format_date, format_timestamp, month_day_ja};
+use super::date::{format_date, format_timestamp, month_day_ja};
 use super::events::{EventKind, EventNote, NewEvent};
 use super::model::{Status, Todo};
 
@@ -152,11 +152,6 @@ pub fn check_allowed(from: Status, to: Status) -> Result<(), TransitionError> {
         }
     }
     Ok(())
-}
-
-/// Default follow-up date when moving to 待ち: today + N days (setting).
-pub fn default_follow_up_date(today: NaiveDate, follow_up_days: u32) -> NaiveDate {
-    add_days(today, follow_up_days)
 }
 
 /// Result of a status change: the new field values and the event to record.
@@ -561,12 +556,6 @@ mod tests {
             transition(&current, &change, today(), now()),
             Err(TransitionError::FollowUpDateRequired)
         );
-    }
-
-    #[test]
-    fn default_follow_up_date_adds_setting_days() {
-        assert_eq!(default_follow_up_date(d("2026-11-19"), 3), d("2026-11-22"));
-        assert_eq!(default_follow_up_date(d("2026-12-30"), 3), d("2027-01-02"));
     }
 
     // ---- 保留にする --------------------------------------------------------

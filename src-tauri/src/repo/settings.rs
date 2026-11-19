@@ -13,6 +13,8 @@
 //! | `close_to_tray` | `true` / `false` |
 //! | `autostart` | `true` / `false` |
 //! | `tray_hint_shown` | `true` / `false` |
+//! | `day_count` | `"calendar"` or `"business"` |
+//! | `custom_holidays` | `[{"name", "start", "end", "yearly"}, …]` |
 //!
 //! Missing keys, unknown keys and unreadable values fall back to the defaults
 //! so that a bad row never prevents the app from starting.
@@ -29,7 +31,7 @@ use sqlx::SqliteConnection;
 use super::Result;
 use crate::domain::date::{format_timestamp, parse_timestamp};
 use crate::domain::notify::normalize_times;
-use crate::domain::settings::Settings;
+use crate::domain::settings::{CustomHoliday, Settings};
 
 pub const REMINDER_FREQUENCY: &str = "reminder_frequency";
 pub const SOON_DAYS: &str = "soon_days";
@@ -42,6 +44,8 @@ pub const LAST_NOTIFIED_AT: &str = "last_notified_at";
 pub const CLOSE_TO_TRAY: &str = "close_to_tray";
 pub const AUTOSTART: &str = "autostart";
 pub const TRAY_HINT_SHOWN: &str = "tray_hint_shown";
+pub const DAY_COUNT: &str = "day_count";
+pub const CUSTOM_HOLIDAYS: &str = "custom_holidays";
 
 /// Keys a restore (and the JSON import) leaves as they are on this PC:
 /// `autostart` belongs to the PC, the others are written by the app.
@@ -61,6 +65,14 @@ fn read_times(value: &str, fallback: Vec<String>) -> Vec<String> {
     serde_json::from_str::<Vec<String>>(value)
         .ok()
         .and_then(|times| normalize_times(&times).ok())
+        .unwrap_or(fallback)
+}
+
+/// Stored custom holidays, or the fallback unless every entry is valid.
+fn read_custom_holidays(value: &str, fallback: Vec<CustomHoliday>) -> Vec<CustomHoliday> {
+    serde_json::from_str::<Vec<CustomHoliday>>(value)
+        .ok()
+        .and_then(|list| list.iter().map(|h| h.checked().ok()).collect())
         .unwrap_or(fallback)
 }
 
@@ -92,6 +104,8 @@ pub async fn load(conn: &mut SqliteConnection) -> Result<Settings> {
             CLOSE_TO_TRAY => s.close_to_tray = read(&value, s.close_to_tray),
             AUTOSTART => s.autostart = read(&value, s.autostart),
             TRAY_HINT_SHOWN => s.tray_hint_shown = read(&value, s.tray_hint_shown),
+            DAY_COUNT => s.day_count = read(&value, s.day_count),
+            CUSTOM_HOLIDAYS => s.custom_holidays = read_custom_holidays(&value, s.custom_holidays),
             _ => {}
         }
     }
@@ -130,6 +144,8 @@ pub async fn save_user_settings(conn: &mut SqliteConnection, s: &Settings) -> Re
     put(conn, NOTIFY_TIMES, &s.notify_times).await?;
     put(conn, CLOSE_TO_TRAY, &s.close_to_tray).await?;
     put(conn, AUTOSTART, &s.autostart).await?;
+    put(conn, DAY_COUNT, &s.day_count).await?;
+    put(conn, CUSTOM_HOLIDAYS, &s.custom_holidays).await?;
     Ok(())
 }
 
@@ -157,7 +173,7 @@ pub async fn set_tray_hint_shown(conn: &mut SqliteConnection, shown: bool) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::settings::{ReminderFrequency, Theme};
+    use crate::domain::settings::{DayCount, ReminderFrequency, Theme};
     use crate::domain::testing::{d, ts};
     use crate::repo::testing::conn;
 
@@ -182,6 +198,13 @@ mod tests {
             close_to_tray: false,
             autostart: true,
             tray_hint_shown: true,
+            day_count: DayCount::Business,
+            custom_holidays: vec![CustomHoliday {
+                name: "年末年始".into(),
+                start: d("2026-12-29"),
+                end: d("2027-01-03"),
+                yearly: true,
+            }],
         };
         save(&mut c, &s).await.unwrap();
         assert_eq!(load(&mut c).await.unwrap(), s);
@@ -206,6 +229,12 @@ mod tests {
             vec![
                 ("autostart".to_owned(), "true".to_owned()),
                 ("close_to_tray".to_owned(), "false".to_owned()),
+                (
+                    "custom_holidays".to_owned(),
+                    r#"[{"name":"年末年始","start":"2026-12-29","end":"2027-01-03","yearly":true}]"#
+                        .to_owned()
+                ),
+                ("day_count".to_owned(), r#""business""#.to_owned()),
                 ("follow_up_days".to_owned(), "2".to_owned()),
                 ("last_notified_at".to_owned(), "null".to_owned()),
                 ("last_reminded_on".to_owned(), "null".to_owned()),
@@ -278,6 +307,11 @@ mod tests {
             ("close_to_tray", "false"),
             ("autostart", "1"),
             ("tray_hint_shown", "null"),
+            ("day_count", "\"weekdays\""),
+            (
+                "custom_holidays",
+                r#"[{"name":"","start":"2026-12-29","end":"2026-12-30","yearly":false}]"#,
+            ),
         ] {
             sqlx::query("INSERT INTO settings (key, value) VALUES (?1, ?2)")
                 .bind(k)
@@ -311,6 +345,24 @@ mod tests {
             assert_eq!(
                 load(&mut c).await.unwrap().notify_times,
                 ["09:00", "12:55"],
+                "{bad}"
+            );
+        }
+
+        // Custom holidays: one bad entry drops the stored value.
+        for bad in [
+            r#"[{"name":"逆","start":"2026-12-30","end":"2026-12-29","yearly":false}]"#,
+            r#"[{"name":"長い","start":"2026-08-01","end":"2026-09-01","yearly":false}]"#,
+            r#"[{"name":"形","start":"2026/12/29","end":"2026-12-30","yearly":false}]"#,
+            r#"{"name":"一つ"}"#,
+        ] {
+            sqlx::query("UPDATE settings SET value = ?1 WHERE key = 'custom_holidays'")
+                .bind(bad)
+                .execute(&mut *c)
+                .await
+                .unwrap();
+            assert!(
+                load(&mut c).await.unwrap().custom_holidays.is_empty(),
                 "{bad}"
             );
         }

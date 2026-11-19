@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::date::add_days;
 use super::model::Todo;
-use super::urgency::classify;
+use super::urgency::{Rules, classify};
 
 /// The 日限 filter of the list.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -18,9 +18,10 @@ pub enum DueFilter {
     All,
     /// 日限注意だけ (any category of `classify`)
     Attention,
-    /// 今日まで: due today or earlier
+    /// 今日まで: due today or earlier (in 営業日, a due date on a holiday
+    /// counts as the business day before it)
     UntilToday,
-    /// 7日後まで: due within 7 days from today, or earlier
+    /// 7日後まで: due within 7 calendar days from today, or earlier
     WithinWeek,
     /// 日限なし
     NoDue,
@@ -42,11 +43,13 @@ pub enum TodoSort {
     Priority,
 }
 
-pub fn due_matches(todo: &Todo, filter: DueFilter, today: NaiveDate, soon_days: u32) -> bool {
+pub fn due_matches(todo: &Todo, filter: DueFilter, today: NaiveDate, rules: &Rules) -> bool {
     match filter {
         DueFilter::All => true,
-        DueFilter::Attention => classify(todo, today, soon_days).is_some(),
-        DueFilter::UntilToday => todo.due_date.is_some_and(|d| d <= today),
+        DueFilter::Attention => classify(todo, today, rules).is_some(),
+        DueFilter::UntilToday => todo
+            .due_date
+            .is_some_and(|d| rules.calendar.effective_due(d) <= today),
         DueFilter::WithinWeek => todo
             .due_date
             .is_some_and(|d| d <= add_days(today, WEEK_DAYS)),
@@ -87,7 +90,7 @@ pub fn sort_todos<T>(items: &mut [T], sort: TodoSort, todo: impl Fn(&T) -> &Todo
 mod tests {
     use super::*;
     use crate::domain::model::{Priority, Status};
-    use crate::domain::testing::{d, todo};
+    use crate::domain::testing::{business_rules, d, rules, todo};
 
     fn t(id: i64, due: Option<&str>, priority: Priority) -> Todo {
         Todo {
@@ -119,7 +122,11 @@ mod tests {
         for (due, expected) in cases {
             let item = t(1, due, Priority::Medium);
             for (f, want) in filters.iter().zip(expected) {
-                assert_eq!(due_matches(&item, *f, today, 3), want, "{due:?} {f:?}");
+                assert_eq!(
+                    due_matches(&item, *f, today, &rules(3)),
+                    want,
+                    "{due:?} {f:?}"
+                );
             }
         }
     }
@@ -130,14 +137,48 @@ mod tests {
             &t(1, Some("2027-01-05"), Priority::Medium),
             DueFilter::WithinWeek,
             d("2026-12-29"),
-            3
+            &rules(3)
         ));
         assert!(!due_matches(
             &t(1, Some("2027-01-06"), Priority::Medium),
             DueFilter::WithinWeek,
             d("2026-12-29"),
-            3
+            &rules(3)
         ));
+    }
+
+    #[test]
+    fn until_today_uses_the_moved_due_date_in_business_days() {
+        // Friday 11/20; due Sunday 11/22 and holiday Monday 11/23 count as Friday.
+        let today = d("2026-11-20");
+        let b = business_rules(3, vec![]);
+        for (due, calendar, business) in [
+            ("2026-11-20", true, true),
+            ("2026-11-22", false, true),
+            ("2026-11-23", false, true),
+            ("2026-11-24", false, false),
+        ] {
+            let item = t(1, Some(due), Priority::Medium);
+            assert_eq!(
+                due_matches(&item, DueFilter::UntilToday, today, &rules(3)),
+                calendar,
+                "{due}"
+            );
+            assert_eq!(
+                due_matches(&item, DueFilter::UntilToday, today, &b),
+                business,
+                "{due}"
+            );
+        }
+        // 7日後まで stays in calendar days: 11/27 yes, 11/28 no.
+        for (due, want) in [("2026-11-27", true), ("2026-11-28", false)] {
+            let item = t(1, Some(due), Priority::Medium);
+            assert_eq!(
+                due_matches(&item, DueFilter::WithinWeek, today, &b),
+                want,
+                "{due}"
+            );
+        }
     }
 
     #[test]
@@ -147,14 +188,19 @@ mod tests {
             follow_up_date: Some(d("2026-11-19")),
             ..todo(Status::Waiting)
         };
-        assert!(due_matches(&waiting, DueFilter::Attention, today, 3));
+        assert!(due_matches(
+            &waiting,
+            DueFilter::Attention,
+            today,
+            &rules(3)
+        ));
         let done = Todo {
             due_date: Some(d("2026-11-01")),
             ..todo(Status::Done)
         };
-        assert!(!due_matches(&done, DueFilter::Attention, today, 3));
+        assert!(!due_matches(&done, DueFilter::Attention, today, &rules(3)));
         // Closed TODOs still match the date-only filters.
-        assert!(due_matches(&done, DueFilter::UntilToday, today, 3));
+        assert!(due_matches(&done, DueFilter::UntilToday, today, &rules(3)));
     }
 
     #[test]

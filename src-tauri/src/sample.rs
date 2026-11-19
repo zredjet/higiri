@@ -292,7 +292,7 @@ pub async fn seed_if_empty(pool: &SqlitePool, today: NaiveDate) -> Result<bool, 
 mod tests {
     use super::*;
     use crate::domain::events::EventKind;
-    use crate::domain::testing::d;
+    use crate::domain::testing::{d, rules};
     use crate::domain::urgency::{Urgency, classify};
     use crate::domain::views::project_summaries;
     use crate::repo::db;
@@ -308,7 +308,7 @@ mod tests {
             .map(|u| {
                 let n = todos
                     .iter()
-                    .filter(|t| classify(t, today, 3) == Some(*u))
+                    .filter(|t| classify(t, today, &rules(3)) == Some(*u))
                     .count();
                 (*u, n)
             })
@@ -333,7 +333,7 @@ mod tests {
         let todos = repo::todos::list(&mut c, &TodoFilter::default())
             .await
             .unwrap();
-        let s: Vec<_> = project_summaries(projects, &todos, today, 3)
+        let s: Vec<_> = project_summaries(projects, &todos, today, &rules(3))
             .into_iter()
             .map(|s| (s.attention_count, s.progress_done, s.progress_total))
             .collect();

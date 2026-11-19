@@ -26,6 +26,8 @@ export const queryKeys = {
   dashboard: ["todos", "dashboard"] as const,
   gantt: (query: GanttQuery) => ["todos", "gantt", query] as const,
   settings: ["settings"] as const,
+  holidays: (start: string, end: string) => ["holidays", start, end] as const,
+  allHolidays: ["holidays"] as const,
   report: (key: ReportKey) => ["reports", key] as const,
   backups: ["backups"] as const,
 };
@@ -90,12 +92,27 @@ export function useUpdateSettings() {
     mutationFn: (input: SettingsInput) => commands.updateSettings(input),
     onSuccess: (saved) => {
       qc.setQueryData(queryKeys.settings, saved);
-      // 「間近」の日数 changes the categories.
+      // 「間近」の日数, 日数の数え方 and the custom holidays change the
+      // categories, the day counts and the holidays.
       return Promise.all([
         qc.invalidateQueries({ queryKey: queryKeys.allProjects }),
         qc.invalidateQueries({ queryKey: queryKeys.todos }),
+        qc.invalidateQueries({ queryKey: queryKeys.allHolidays }),
       ]);
     },
+  });
+}
+
+/**
+ * National and custom holidays from `start` to `end` (at most 3 years), with
+ * their names. `null` fetches nothing.
+ */
+export function useHolidays(period: { start: string; end: string } | null) {
+  return useQuery({
+    queryKey: queryKeys.holidays(period?.start ?? "", period?.end ?? ""),
+    queryFn: () => commands.listHolidays(period?.start ?? "", period?.end ?? ""),
+    enabled: period !== null,
+    placeholderData: (previous) => previous,
   });
 }
 

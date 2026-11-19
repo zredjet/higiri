@@ -10,6 +10,7 @@ use super::clock;
 use super::error::CmdResult;
 use super::validate;
 use crate::domain::model::Project;
+use crate::domain::urgency::Rules;
 use crate::domain::views::{ProjectSummary, project_summaries};
 use crate::repo;
 use crate::repo::projects::{NewProject, ProjectEdit};
@@ -95,7 +96,7 @@ pub async fn list(
         projects,
         &todos,
         today,
-        settings.soon_days,
+        &Rules::from_settings(&settings),
     ))
 }
 

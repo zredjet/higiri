@@ -59,7 +59,11 @@ function CountCards({ dash }: { dash: Dashboard }) {
   const cards: Array<{ urgency: Urgency; count: number; text: string }> = [
     { urgency: "overdue", count: dash.counts.overdue, text: "日限を過ぎています" },
     { urgency: "due_today", count: dash.counts.due_today, text: "今日が日限です" },
-    { urgency: "due_soon", count: dash.counts.due_soon, text: `${dash.soon_days}日以内に日限が来ます` },
+    {
+      urgency: "due_soon",
+      count: dash.counts.due_soon,
+      text: `${dash.soon_days}${dash.business_days ? "営業日" : "日"}以内に日限が来ます`,
+    },
     { urgency: "follow_up", count: dash.counts.follow_up, text: "待ちの確認日が来ています" },
     { urgency: "late_start", count: dash.counts.late_start, text: "予定開始日を過ぎています" },
   ];

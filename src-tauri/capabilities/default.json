@@ -46,6 +46,7 @@
     "allow-list-backups",
     "allow-restore-backup",
     "allow-open-data-folder",
-    "allow-test-notification"
+    "allow-test-notification",
+    "allow-list-holidays"
   ]
 }

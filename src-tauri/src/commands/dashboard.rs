@@ -8,6 +8,7 @@ use super::clock;
 use super::error::CmdResult;
 use crate::domain::dashboard::{self, Dashboard, StartupReminder};
 use crate::domain::model::{Project, Todo};
+use crate::domain::urgency::Rules;
 use crate::repo;
 use crate::repo::todos::TodoFilter;
 
@@ -48,7 +49,7 @@ pub async fn get(pool: &SqlitePool, today: NaiveDate) -> CmdResult<Dashboard> {
         projects,
         &todos,
         today,
-        settings.soon_days,
+        &Rules::from_settings(&settings),
     ))
 }
 
@@ -59,7 +60,7 @@ pub async fn reminder(pool: &SqlitePool, today: NaiveDate) -> CmdResult<Option<S
         return Ok(None);
     }
     let (projects, todos) = active(&mut conn).await?;
-    let dash = dashboard::build(projects, &todos, today, settings.soon_days);
+    let dash = dashboard::build(projects, &todos, today, &Rules::from_settings(&settings));
     Ok(dashboard::startup_reminder(
         &settings,
         dash.attention,
@@ -105,6 +106,41 @@ mod tests {
         assert_eq!(dash.today_work.len(), 2);
         assert_eq!(dash.waiting.len(), 2);
         assert_eq!(dash.projects.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn business_days_follow_the_setting() {
+        let pool = seeded().await;
+        settings::update(
+            &pool,
+            SettingsInput {
+                day_count: crate::domain::settings::DayCount::Business,
+                ..SettingsInput::from(&crate::domain::settings::Settings::default())
+            },
+        )
+        .await
+        .unwrap();
+        // Thursday 11/19: the mock's five, now counted in business days.
+        let dash = get(&pool, d("2026-11-19")).await.unwrap();
+        assert!(dash.business_days);
+        assert_eq!(dash.attention_total, 5);
+        // Friday 11/20 seen on Saturday 11/21: 移行手順書 (due 11/19) is
+        // 1営業日超過, API設計書 (due 11/20) too.
+        let dash = get(&pool, d("2026-11-21")).await.unwrap();
+        let overdue: Vec<(&str, Option<i64>)> = dash
+            .attention
+            .iter()
+            .filter(|i| i.assessment.urgency == Some(crate::domain::urgency::Urgency::Overdue))
+            .map(|i| (i.todo.title.as_str(), i.assessment.days_until_due))
+            .collect();
+        assert_eq!(
+            overdue,
+            vec![
+                ("ライセンス棚卸し", Some(-3)),
+                ("移行手順書のドラフト", Some(-1)),
+                ("API設計書のレビュー対応", Some(-1)),
+            ]
+        );
     }
 
     #[tokio::test]

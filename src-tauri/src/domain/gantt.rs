@@ -10,6 +10,7 @@ use serde::Serialize;
 
 use super::events::{EventKind, TodoEvent};
 use super::model::{Project, Status, Todo};
+use super::urgency::Rules;
 use super::views::{TodoItem, todo_item};
 
 /// Days `start..=end`.
@@ -136,7 +137,7 @@ pub fn build(
     events: &[TodoEvent],
     filter: GanttFilter,
     today: NaiveDate,
-    soon_days: u32,
+    rules: &Rules,
 ) -> Gantt {
     let mut by_todo: HashMap<i64, Vec<&TodoEvent>> = HashMap::new();
     for e in events {
@@ -149,7 +150,7 @@ pub fn build(
                 .iter()
                 .filter(|t| t.project_id == project.id && filter.shows(t.status))
                 .map(|t| {
-                    let item = todo_item(t.clone(), project.name.clone(), today, soon_days);
+                    let item = todo_item(t.clone(), project.name.clone(), today, rules);
                     let evs = by_todo.get(&t.id).map(Vec::as_slice).unwrap_or(&[]);
                     row(item, evs, today)
                 })

@@ -10,6 +10,7 @@ pub mod clock;
 pub mod dashboard;
 pub mod error;
 pub mod gantt;
+pub mod holidays;
 pub mod notify;
 pub mod projects;
 pub mod reports;
@@ -60,6 +61,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             backup::restore_backup,
             backup::open_data_folder,
             notify::test_notification,
+            holidays::list_holidays,
         ])
         .typ::<error::AppError>()
         // IDs and counts are i64; they stay far below 2^53 in this app.
@@ -109,7 +111,7 @@ mod tests {
             .collect();
         allowed.sort();
         assert_eq!(allowed, commands_in_bindings());
-        assert_eq!(allowed.len(), 28);
+        assert_eq!(allowed.len(), 29);
     }
 
     /// Regenerates `src/lib/bindings.ts` and fails when the committed file was

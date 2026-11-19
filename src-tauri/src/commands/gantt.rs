@@ -8,6 +8,7 @@ use tauri::State;
 use super::clock;
 use super::error::CmdResult;
 use crate::domain::gantt::{self, Gantt, GanttFilter};
+use crate::domain::urgency::Rules;
 use crate::repo;
 use crate::repo::todos::TodoFilter;
 
@@ -56,7 +57,7 @@ pub async fn get(pool: &SqlitePool, query: &GanttQuery, today: NaiveDate) -> Cmd
             include_cancelled: query.include_cancelled,
         },
         today,
-        settings.soon_days,
+        &Rules::from_settings(&settings),
     ))
 }
 

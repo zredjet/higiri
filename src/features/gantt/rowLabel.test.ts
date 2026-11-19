@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Assessment, GanttRow, Todo } from "../../lib/bindings";
-import { rowLabel } from "./rowLabel";
+import { dueMarkText, rowLabel } from "./rowLabel";
 
 function row(todo: Partial<Todo>, assessment: Partial<Assessment> = {}): GanttRow {
   return {
@@ -36,9 +36,12 @@ function row(todo: Partial<Todo>, assessment: Partial<Assessment> = {}): GanttRo
         days_since_planned_start: null,
         waiting_day: null,
         days_since_follow_up: null,
+        business_days: false,
+        due_shifted: false,
         ...assessment,
       },
       next_statuses: [],
+      follow_up_default: "2026-11-22",
     },
     planned: null,
     actual: null,
@@ -90,5 +93,50 @@ describe("rowLabel", () => {
 
   it("says when nothing is planned", () => {
     expect(rowLabel(row({ title: "x" }))).toBe("x:予定なし、実績なし、日限なし");
+  });
+
+  it("words business days and a due date moved off a holiday", () => {
+    expect(
+      rowLabel(
+        row({ title: "x", due_date: "2026-11-17" }, { urgency: "overdue", days_until_due: -2, business_days: true }),
+      ),
+    ).toBe("x:予定なし、実績なし、日限 11/17(2営業日超過)");
+    expect(
+      rowLabel(
+        row(
+          { title: "x", due_date: "2026-11-22" },
+          { urgency: "due_today", days_until_due: 0, business_days: true, due_shifted: true },
+        ),
+      ),
+    ).toBe("x:予定なし、実績なし、日限 11/22(今日、休日のため前倒し)");
+    expect(
+      rowLabel(
+        row(
+          { title: "x", due_date: "2026-11-23" },
+          { urgency: null, days_until_due: 5, business_days: true, due_shifted: true },
+        ),
+      ),
+    ).toBe("x:予定なし、実績なし、日限 11/23(休日のため前倒し)");
+  });
+});
+
+describe("dueMarkText", () => {
+  const a = (over: Partial<Assessment>) => row({}, over).item.assessment;
+
+  it("shows the overdue days, as in the mock", () => {
+    expect(dueMarkText(a({ urgency: "overdue", days_until_due: -2 }))).toBe("2日超過");
+    expect(dueMarkText(a({ urgency: "due_today", days_until_due: 0 }))).toBeNull();
+    expect(dueMarkText(a({ urgency: "due_soon", days_until_due: 1 }))).toBeNull();
+  });
+
+  it("adds 営業日 and 休日のため前倒し", () => {
+    expect(dueMarkText(a({ urgency: "overdue", days_until_due: -1, business_days: true }))).toBe("1営業日超過");
+    expect(dueMarkText(a({ urgency: "overdue", days_until_due: -1, business_days: true, due_shifted: true }))).toBe(
+      "1営業日超過(休日のため前倒し)",
+    );
+    expect(dueMarkText(a({ urgency: "due_today", days_until_due: 0, business_days: true, due_shifted: true }))).toBe(
+      "休日のため前倒し",
+    );
+    expect(dueMarkText(a({ urgency: "due_soon", days_until_due: 1, business_days: true, due_shifted: true }))).toBeNull();
   });
 });

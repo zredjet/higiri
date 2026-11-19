@@ -41,7 +41,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
 
 - 判定と集計は Rust 側に置く。画面側で日限注意の区分や残り日数を計算し直さない。
 - `domain/` の関数は現在時刻を自分で取らない。今日の日付(と現在時刻)は引数で受け取る。時計を読むのは `commands/` と常駐のタイマー(`src-tauri/src/notifier.rs`)だけで、どちらも `commands::clock` を使う。通知の時刻はローカルの時刻なので、UTC からの変換には `clock::zone()`(PC のタイムゾーン)を渡す。
-- 日限注意の判定は `classify` の1か所。ダッシュボード、リマインド、一覧のバッジ、日報のすべてがこれを使う。今は `classify(todo, today, soon_days)`。v1.1 のフェーズ11で `classify(todo, today, &rules)` にする(`rules` は `soon_days` と `WorkCalendar` を持つ)。
+- 日限注意の判定は `classify(todo, today, &rules)` の1か所。ダッシュボード、リマインド、一覧のバッジ、日報のすべてがこれを使う。`rules`(`domain::urgency::Rules`)は `soon_days`、`follow_up_days`、`WorkCalendar` を持ち、`Rules::from_settings` で設定から作る。日数(`assess`)と確認日の初期値も `Rules` で数える。
 - ステータス変更は必ず `change_status` を通す。実績日の自動入力と `todo_events` への記録を1トランザクションで行う。`update_todo` でステータスを直接書き換えない。
 - 画面から呼べるのは設計書のコマンド一覧にあるものだけ。足すときは理由を添えて相談する。
 - 画面側からのコマンド呼び出しは、tauri-specta が生成する `src/lib/bindings.ts` 経由だけにする。画面のコードに `invoke` を直接書かない。
@@ -123,7 +123,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
 v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作る。この節には、まだ作っていないものも含む。ファイルの場所など実装で決まることは、作ったフェーズでこのファイルの各節に足す。仕様の詳細は設計書の「v1.1の詳細」にある。
 
 - テーブル定義は変えない(マイグレーションを足さない)。新しい値は `settings` のキーに入れ、検索は既存の列を `LIKE` で引く(FTS5 は使わない)。
-- 足すコマンドは次の5つだけ(27個から32個になる。フェーズ10の `test_notification` で今は28個)。上の「構成」の3か所をそろえ、件数のテスト(`commands/mod.rs`)も直す。
+- 足すコマンドは次の5つだけ(27個から32個になる。フェーズ10の `test_notification` とフェーズ11の `list_holidays` で今は29個)。上の「構成」の3か所をそろえ、件数のテスト(`commands/mod.rs`)も直す。
 
   | コマンド | フェーズ | 用途 |
   | --- | --- | --- |
@@ -177,6 +177,19 @@ v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作る。�
   - 待ち日数と確認日からの日数は、営業日の設定でも暦日で数える。
   - 「営業日」の文言と「休日のため前倒し」は、判定の結果(`business_days`、`due_shifted`)を見て出す。画面で日数を数え直さない。確認日の初期値も Rust 側で計算して返す。
   - 祝日は今の祝日法の規則(2020年以降のもの)から計算し、2020〜2099年だけを対象にする(その外の年は土日だけが休み)。2019年以前の改正の歴史は入れない。外部から取り込まない。
+  - 作ったもの(フェーズ11)
+    - `domain/holidays.rs`: 祝日の計算(`national_holidays(year)`、全年分を1回だけ作る `all()`、期間で引く `between`)。振替休日と国民の休日は、名前を「振替休日」「国民の休日」にする(内閣府の一覧ではどちらも「休日」)。内閣府の一覧(2020〜2027年)との照合のテストは `tests/fixtures/cao_holidays_2020-2027.txt` を使う。
+    - `domain/calendar.rs`: `DayCount`(`calendar` / `business`)、`CustomHoliday`(`checked` で検査。名前は前後の空白を除いて1〜30字、`start <= end`、31日まで)、`WorkCalendar`。`WorkCalendar` は平日に当たる休日(祝日と独自の休日)を並べて持ち、`business_days_in(a, b]` は週の計算とその二分探索で数える。`add_business_days`、`previous_business_day`、`effective_due`(営業日の設定のときだけ前の営業日に寄せる)、`holidays_in`(`list_holidays` の中身)もここ。
+    - 毎年くり返す独自の休日は、最初の年から2099年まで(最初の年が2100年以降ならその年だけ)を休みにする。最初の年より前の年には効かない。2/29 は、うるう年でない年は 2/28 にする。
+    - 営業日の設定での日数: 「あとN営業日」は今日の次の日から寄せた日限まで、「N営業日超過」と着手遅れの日数は最低1。`Assessment.business_days` は営業日の設定ならいつも true、`due_shifted` は開いている TODO の日限が休日に当たるときだけ true。
+    - `TodoItem.follow_up_default` に確認日の初期値を入れる(`Rules::follow_up_default`)。画面の「待ちにする」はこれを使う。`Dashboard.business_days` で「N営業日以内」を出す。
+    - 日報: 「明日の予定」は `Rules::next_day`(営業日の設定なら次の営業日)。日限注意の行は「日限 11/22、休日のため前倒し、あと1営業日、待ち」の順に添える。
+    - 一覧の「今日まで」は `effective_due` で寄せた日限で比べる。「7日後まで」は暦日のまま。
+    - settings の `custom_holidays` は、1件でも検査に通らない値があれば全体を既定値(`[]`)として読む。`update_settings` の日数の範囲のエラーは、営業日の設定なら「〜30営業日」と書く。
+    - `list_holidays(start, end)`: 期間は開始日から3年(36か月)未満まで。祝日と独自の休日を、暦日の設定でも返す。同じ日に祝日と独自の休日があれば両方を返す(祝日が先)。
+    - 画面の文言は `todoText.ts` の `dayUnit`、`overdueText`、`daysLeftText`、`SHIFTED_TEXT`。一覧の日限の下は「あと1営業日(休日のため前倒し)」、ダッシュボードとリマインドは「 ・ 休日のため前倒し」、ガントの行の名前は「日限 11/22(今日、休日のため前倒し)」。ガントのひし形の右には、超過の日数(前倒しなら括弧で添える)と、本日で前倒しのときの「休日のため前倒し」を出す(`rowLabel.ts` の `dueMarkText`)。
+    - ガント: 休日は `useHolidays`(`list_holidays`)で表示期間の分を取り、`weekendRuns(range, holidays)` で土日と同じく網掛けする(月表示は今までどおり網掛けしない)。見出しの上の段に、月の名前と重ならない所だけ休日の名前を出し(`holidayLabels`)、日表示では日付の数字にマウスを載せると名前が出る。1日の名前は祝日を優先し、独自の休日だけの日は名前を「・」でつなぐ(`holidayNames`)。
+    - 設定画面の「日数の数え方」のカードは `SettingsPage.tsx` の `DayCountCard`。独自の休日を足すとき、終了日が空なら開始日を入れ、「毎年くり返す」は初めからオン。リマインドのカードの単位は、営業日の設定なら「営業日以内」「営業日後」。
 - 全文検索(フェーズ12)
   - 入口は検索ダイアログで、Ctrl+F(macOS は Command+F)とサイドナビの「検索」で開く。ダイアログは App が持つ。「検索」は画面ではないので `Route` には足さない。
   - 語の分割、前後の文の切り出し、並び順は Rust 側で作る。画面は受け取ったものを並べるだけ。

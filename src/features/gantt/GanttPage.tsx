@@ -4,13 +4,15 @@ import { PageHeader } from "../../components/PageHeader";
 import type { GanttProject, GanttRow } from "../../lib/bindings";
 import { formatDate } from "../../lib/date";
 import { errorMessage } from "../../lib/errors";
-import { useGantt, useProjects } from "../../lib/queries";
+import { useGantt, useHolidays, useProjects } from "../../lib/queries";
 import { STATUS_LABEL, STATUS_TONE } from "../todos/todoText";
 import {
   addDays,
   DAY_WIDTH,
   dayCenter,
   headerRows,
+  holidayLabels,
+  holidayNames,
   LAYOUT,
   layoutRows,
   rangeEnd,
@@ -24,7 +26,7 @@ import {
   type Range,
   type Scale,
 } from "./geometry";
-import { rowLabel } from "./rowLabel";
+import { dueMarkText, rowLabel } from "./rowLabel";
 
 interface GanttPageProps {
   selectedTodoId: number | null;
@@ -70,6 +72,11 @@ export function GanttPage({ selectedTodoId, onOpenTodo }: GanttPageProps) {
   const range: Range | null = rangeStart ? { start: rangeStart, days } : null;
 
   const [scrollTop, setScrollTop] = useState(0);
+
+  // Holidays are shaded like weekends (whatever the day count setting), and
+  // named in the header. The month scale shades nothing.
+  const holidays = useHolidays(range && scale !== "month" ? { start: range.start, end: rangeEnd(range) } : null);
+  const names = useMemo(() => holidayNames(holidays.data ?? []), [holidays.data]);
 
   const layout = useMemo(
     () =>
@@ -164,7 +171,7 @@ export function GanttPage({ selectedTodoId, onOpenTodo }: GanttPageProps) {
             <>
               <div className="gantt__header">
                 <div className="gantt__name-head">TODO</div>
-                <Header range={range} scale={scale} today={today} minWidth={chartWidthAvailable} />
+                <Header range={range} scale={scale} today={today} minWidth={chartWidthAvailable} holidays={names} />
               </div>
               {layout.rows.length === 0 ? (
                 <p className="gantt__empty text-muted">
@@ -184,6 +191,7 @@ export function GanttPage({ selectedTodoId, onOpenTodo }: GanttPageProps) {
                     today={today}
                     height={layout.height}
                     rows={shown}
+                    holidays={names}
                     selectedTodoId={selectedTodoId}
                     onOpen={onOpenTodo}
                   />
@@ -229,11 +237,24 @@ function svgWidth(range: Range, scale: Scale, minWidth: number): number {
   return Math.max(range.days * DAY_WIDTH[scale], Math.floor(minWidth));
 }
 
-function Header({ range, scale, today, minWidth }: { range: Range; scale: Scale; today: string; minWidth: number }) {
+function Header({
+  range,
+  scale,
+  today,
+  minWidth,
+  holidays,
+}: {
+  range: Range;
+  scale: Scale;
+  today: string;
+  minWidth: number;
+  holidays: Map<string, string>;
+}) {
   const w = DAY_WIDTH[scale];
   const width = svgWidth(range, scale, minWidth);
   const { top, bottom } = headerRows(range, scale, today);
   const centered = scale === "day";
+  const labels = scale === "month" ? [] : holidayLabels(range, scale, holidays, width);
   return (
     <svg className="gantt__header-chart" width={width} height={LAYOUT.headerHeight - 1} aria-hidden="true">
       <line className="gantt-grid" x1={0} x2={width} y1={LAYOUT.headerTopRow - 0.5} y2={LAYOUT.headerTopRow - 0.5} />
@@ -247,11 +268,27 @@ function Header({ range, scale, today, minWidth }: { range: Range; scale: Scale;
           ) : null}
         </g>
       ))}
+      {labels.map((l) => (
+        <text key={`h${l.index}`} className="gantt-header-holiday" x={l.index * w + 4} y={16}>
+          {l.label}
+        </text>
+      ))}
       {bottom.map((s) =>
         centered ? (
           <g key={`b${s.index}`}>
             {s.current ? (
               <rect className="gantt-today-cell" x={s.index * w} y={LAYOUT.headerTopRow} width={w} height={LAYOUT.headerHeight - LAYOUT.headerTopRow - 1} />
+            ) : null}
+            {holidays.has(addDays(range.start, s.index)) ? (
+              <rect
+                className="gantt-header-hit"
+                x={s.index * w}
+                y={LAYOUT.headerTopRow}
+                width={w}
+                height={LAYOUT.headerHeight - LAYOUT.headerTopRow - 1}
+              >
+                <title>{holidays.get(addDays(range.start, s.index))}</title>
+              </rect>
             ) : null}
             <text
               className={s.current ? "gantt-header-day is-today" : "gantt-header-day"}
@@ -304,6 +341,7 @@ function Chart({
   today,
   height,
   rows,
+  holidays,
   selectedTodoId,
   onOpen,
 }: {
@@ -313,6 +351,7 @@ function Chart({
   today: string;
   height: number;
   rows: Row[];
+  holidays: Map<string, string>;
   selectedTodoId: number | null;
   onOpen: (id: number) => void;
 }) {
@@ -322,7 +361,7 @@ function Chart({
   return (
     <svg className="gantt__chart" width={width} height={height}>
       {scale !== "month"
-        ? weekendRuns(range).map((r) => (
+        ? weekendRuns(range, holidays.keys()).map((r) => (
             <rect key={r.index} className="gantt-weekend" x={r.index * w} y={0} width={r.length * w} height={height} />
           ))
         : null}
@@ -375,6 +414,7 @@ function TodoBars({
     assessment.urgency === "overdue" ? "gantt-due is-overdue" : assessment.urgency === "due_today" ? "gantt-due is-today" : "gantt-due";
   const cy = top + LAYOUT.todoRow / 2;
   const half = LAYOUT.diamond / 2;
+  const mark = dueMarkText(assessment);
   return (
     <g role="img" aria-label={rowLabel(row)} className="gantt-row" onClick={() => onOpen(todo.id)}>
       <rect className={selected ? "gantt-row__hit is-selected" : "gantt-row__hit"} x={0} y={top} width={width} height={LAYOUT.todoRow} />
@@ -409,9 +449,14 @@ function TodoBars({
             height={LAYOUT.diamond}
             transform={`rotate(45 ${dueX} ${cy})`}
           />
-          {assessment.urgency === "overdue" && assessment.days_until_due !== null ? (
-            <text className="gantt-overdue" x={dueX + half + 8} y={cy} dominantBaseline="central">
-              {-assessment.days_until_due}日超過
+          {mark ? (
+            <text
+              className={assessment.urgency === "overdue" ? "gantt-overdue" : "gantt-due-note"}
+              x={dueX + half + 8}
+              y={cy}
+              dominantBaseline="central"
+            >
+              {mark}
             </text>
           ) : null}
         </>
