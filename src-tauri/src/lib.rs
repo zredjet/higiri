@@ -19,6 +19,8 @@ pub fn run() {
         .expect("failed to export TypeScript bindings");
 
     tauri::Builder::default()
+        // Markdown links open in the default browser (http/https only; see capabilities).
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(specta.invoke_handler())
         .setup(move |app| {
             specta.mount_events(app);

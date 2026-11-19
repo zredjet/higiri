@@ -44,6 +44,12 @@ export default defineConfig({
     },
   },
 
+  build: {
+    // A desktop app loads its bundle from disk, not over a network, so one
+    // ~1 MB chunk is fine.
+    chunkSizeWarningLimit: 1500,
+  },
+
   test: {
     include: ["src/**/*.test.{ts,tsx}"],
     environment: "node",

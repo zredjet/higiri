@@ -16,7 +16,7 @@ export const commands = {
 	/**  Deletes a project with all its TODOs and records. The screen confirms first. */
 	deleteProject: (id: number, options?: InvokeOptions) => __TAURI_INVOKE<null>("delete_project", { id }, options),
 	/**  TODOs with their 日限注意 category, warnings and day counts. */
-	listTodos: (query: TodoQuery, options?: InvokeOptions) => __TAURI_INVOKE<TodoItem[]>("list_todos", { query }, options),
+	listTodos: (query: TodoQuery, options?: InvokeOptions) => __TAURI_INVOKE<TodoList>("list_todos", { query }, options),
 	getTodo: (id: number, options?: InvokeOptions) => __TAURI_INVOKE<TodoItem>("get_todo", { id }, options),
 	/**  Adds a TODO as 未着手 (also used by the quick add, T-5). */
 	createTodo: (input: NewTodoInput, options?: InvokeOptions) => __TAURI_INVOKE<TodoItem>("create_todo", { input }, options),
@@ -62,6 +62,19 @@ export type Assessment = {
 	waiting_day: number | null,
 };
 
+/**  The 日限 filter of the list. */
+export type DueFilter = 
+/**  すべて */
+"all" | 
+/**  日限注意だけ (any category of `classify`) */
+"attention" | 
+/**  今日まで: due today or earlier */
+"until_today" | 
+/**  7日後まで: due within 7 days from today, or earlier */
+"within_week" | 
+/**  日限なし */
+"no_due";
+
 export type ErrorKind = 
 /**  The input cannot be saved as is. The user can fix it. */
 "validation" | 
@@ -69,6 +82,12 @@ export type ErrorKind =
 "not_found" | 
 /**  Unexpected failure (database, file system). */
 "internal";
+
+/**  A recorded change with its text (「ステータスを「未着手」から「作業中」に変更。…」). */
+export type EventEntry = {
+	event: TodoEvent,
+	text: string,
+};
 
 export type EventKind = "created" | "status" | "due_date" | "planned" | "actual" | "follow_up";
 
@@ -217,7 +236,7 @@ export type Theme =
 "system";
 
 /**  One line of the detail panel's timeline: a work log or a recorded change. */
-export type TimelineEntry = { type: "work_log"; entry: WorkLog } | { type: "event"; entry: TodoEvent };
+export type TimelineEntry = { type: "work_log"; entry: WorkLog } | { type: "event"; entry: EventEntry };
 
 export type Todo = {
 	id: number,
@@ -287,6 +306,23 @@ export type TodoItem = {
 	todo: Todo,
 	project_name: string,
 	assessment: Assessment,
+	/**
+	 *  Statuses `change_status` accepts from the current one (the status
+	 *  select offers only these).
+	 */
+	next_statuses: Status[],
+};
+
+/**
+ *  The TODO list with the counts for its status tabs. The counts cover the
+ *  project, 日限 and 優先度 filters but not the status filter, so every tab
+ *  shows how many rows it would list.
+ */
+export type TodoList = {
+	items: TodoItem[],
+	counts: StatusCounts,
+	/**  The 「すべて」 tab. */
+	total: number,
 };
 
 export type TodoQuery = {
@@ -297,7 +333,22 @@ export type TodoQuery = {
 	project_id: number | null,
 	/**  Only these statuses. `null` = all. */
 	statuses: Status[] | null,
+	/**  Only this priority. `null` = all. */
+	priority: Priority | null,
+	/**  日限 filter. `null` = all. */
+	due: DueFilter | null,
+	/**  `null` = 登録順. */
+	sort: TodoSort | null,
 };
+
+/**  Order of the list. */
+export type TodoSort = 
+/**  登録順: project order, then the order TODOs were added. */
+"manual" | 
+/**  日限の近い順 (no due date last), then priority. */
+"due_date" | 
+/**  優先度の高い順, then due date. */
+"priority";
 
 /**
  *  Urgency category. Declared in severity order (most severe first), so the

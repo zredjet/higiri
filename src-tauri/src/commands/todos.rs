@@ -12,9 +12,10 @@ use super::clock;
 use super::error::{AppError, CmdResult};
 use super::validate;
 use crate::domain::events;
+use crate::domain::listing::{DueFilter, TodoSort, due_matches, sort_todos};
 use crate::domain::model::{Priority, Status, Todo};
 use crate::domain::status::{StatusChange, StatusFields, transition};
-use crate::domain::views::{TodoItem, todo_item};
+use crate::domain::views::{StatusCounts, TodoItem, TodoList, todo_item};
 use crate::repo;
 use crate::repo::todos::{NewTodo, TodoFilter};
 
@@ -25,6 +26,12 @@ pub struct TodoQuery {
     pub project_id: Option<i64>,
     /// Only these statuses. `null` = all.
     pub statuses: Option<Vec<Status>>,
+    /// Only this priority. `null` = all.
+    pub priority: Option<Priority>,
+    /// 日限 filter. `null` = all.
+    pub due: Option<DueFilter>,
+    /// `null` = 登録順.
+    pub sort: Option<TodoSort>,
 }
 
 #[derive(Debug, Clone, Deserialize, specta::Type)]
@@ -65,7 +72,7 @@ pub struct TodoFields {
 /// TODOs with their 日限注意 category, warnings and day counts.
 #[tauri::command]
 #[specta::specta]
-pub async fn list_todos(pool: State<'_, SqlitePool>, query: TodoQuery) -> CmdResult<Vec<TodoItem>> {
+pub async fn list_todos(pool: State<'_, SqlitePool>, query: TodoQuery) -> CmdResult<TodoList> {
     list(&pool, &query, clock::today()).await
 }
 
@@ -124,11 +131,7 @@ async fn item(conn: &mut SqliteConnection, todo: Todo, today: NaiveDate) -> CmdR
     Ok(todo_item(todo, project.name, today, soon))
 }
 
-pub async fn list(
-    pool: &SqlitePool,
-    query: &TodoQuery,
-    today: NaiveDate,
-) -> CmdResult<Vec<TodoItem>> {
+pub async fn list(pool: &SqlitePool, query: &TodoQuery, today: NaiveDate) -> CmdResult<TodoList> {
     let mut conn = pool.acquire().await?;
     let soon = soon_days(&mut conn).await?;
     let names: HashMap<i64, String> = repo::projects::list(&mut conn, true)
@@ -136,22 +139,45 @@ pub async fn list(
         .into_iter()
         .map(|p| (p.id, p.name))
         .collect();
-    let todos = repo::todos::list(
+    let due = query.due.unwrap_or_default();
+    let todos: Vec<Todo> = repo::todos::list(
         &mut conn,
         &TodoFilter {
             project_id: query.project_id,
-            statuses: query.statuses.clone(),
+            statuses: None,
             include_archived_projects: query.project_id.is_some(),
         },
     )
-    .await?;
-    Ok(todos
+    .await?
+    .into_iter()
+    .filter(|t| query.priority.is_none_or(|p| t.priority == p))
+    .filter(|t| due_matches(t, due, today, soon))
+    .collect();
+
+    // Tab counts: every filter except the status one.
+    let mut counts = StatusCounts::default();
+    for t in &todos {
+        counts.add(t.status);
+    }
+    let mut items: Vec<TodoItem> = todos
         .into_iter()
+        .filter(|t| {
+            query
+                .statuses
+                .as_ref()
+                .is_none_or(|s| s.contains(&t.status))
+        })
         .map(|t| {
             let name = names.get(&t.project_id).cloned().unwrap_or_default();
             todo_item(t, name, today, soon)
         })
-        .collect())
+        .collect();
+    sort_todos(&mut items, query.sort.unwrap_or_default(), |i| &i.todo);
+    Ok(TodoList {
+        items,
+        total: counts.total(),
+        counts,
+    })
 }
 
 pub async fn get(pool: &SqlitePool, id: i64, today: NaiveDate) -> CmdResult<TodoItem> {
@@ -589,32 +615,101 @@ mod tests {
         .unwrap();
 
         let all = list(&pool, &TodoQuery::default(), today()).await.unwrap();
-        assert_eq!(all.len(), 2);
+        assert_eq!(all.items.len(), 2);
+        assert_eq!(all.total, 2);
         let doing = list(
             &pool,
             &TodoQuery {
-                project_id: None,
                 statuses: Some(vec![Status::Doing]),
+                ..TodoQuery::default()
             },
             today(),
         )
         .await
         .unwrap();
-        assert_eq!(doing.len(), 1);
-        assert_eq!(doing[0].todo.title, "a");
+        assert_eq!(doing.items.len(), 1);
+        assert_eq!(doing.items[0].todo.title, "a");
+        // Tab counts ignore the status filter.
+        assert_eq!(
+            (doing.total, doing.counts.doing, doing.counts.todo),
+            (2, 1, 1)
+        );
 
         projects::archive(&pool, pid, true, now()).await.unwrap();
         assert!(
             list(&pool, &TodoQuery::default(), today())
                 .await
                 .unwrap()
+                .items
                 .is_empty()
         );
         let in_project = TodoQuery {
             project_id: Some(pid),
-            statuses: None,
+            ..TodoQuery::default()
         };
-        assert_eq!(list(&pool, &in_project, today()).await.unwrap().len(), 2);
+        assert_eq!(
+            list(&pool, &in_project, today()).await.unwrap().items.len(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn list_filters_by_due_and_priority_and_sorts() {
+        let (pool, pid) = setup().await;
+        let mk = |title: &str, due: Option<&str>, priority: Priority| NewTodoInput {
+            priority: Some(priority),
+            due_date: due.map(d),
+            ..new_input(pid, title)
+        };
+        for input in [
+            mk("期限なし", None, Priority::High),
+            mk("来月", Some("2026-12-20"), Priority::Low),
+            mk("明日", Some("2026-11-20"), Priority::Medium),
+            mk("昨日", Some("2026-11-18"), Priority::Low),
+        ] {
+            create(&pool, input, today(), now()).await.unwrap();
+        }
+        let titles = |l: TodoList| {
+            l.items
+                .into_iter()
+                .map(|i| i.todo.title)
+                .collect::<Vec<_>>()
+        };
+        let q = |due, priority, sort| TodoQuery {
+            due,
+            priority,
+            sort,
+            ..TodoQuery::default()
+        };
+
+        let attention = list(&pool, &q(Some(DueFilter::Attention), None, None), today())
+            .await
+            .unwrap();
+        assert_eq!(attention.total, 2);
+        assert_eq!(titles(attention), vec!["明日", "昨日"]);
+
+        let low = list(&pool, &q(None, Some(Priority::Low), None), today())
+            .await
+            .unwrap();
+        assert_eq!(titles(low), vec!["来月", "昨日"]);
+
+        let none = list(&pool, &q(Some(DueFilter::NoDue), None, None), today())
+            .await
+            .unwrap();
+        assert_eq!(titles(none), vec!["期限なし"]);
+
+        let by_due = list(&pool, &q(None, None, Some(TodoSort::DueDate)), today())
+            .await
+            .unwrap();
+        assert_eq!(titles(by_due), vec!["昨日", "明日", "来月", "期限なし"]);
+
+        let by_priority = list(&pool, &q(None, None, Some(TodoSort::Priority)), today())
+            .await
+            .unwrap();
+        assert_eq!(
+            titles(by_priority),
+            vec!["期限なし", "明日", "昨日", "来月"]
+        );
     }
 
     #[tokio::test]

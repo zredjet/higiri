@@ -6,6 +6,7 @@ use chrono::NaiveDate;
 use serde::Serialize;
 
 use super::model::{Project, Status, Todo};
+use super::status::check_allowed;
 use super::urgency::{Assessment, assess};
 
 /// Number of TODOs per status.
@@ -90,15 +91,34 @@ pub struct TodoItem {
     pub todo: Todo,
     pub project_name: String,
     pub assessment: Assessment,
+    /// Statuses `change_status` accepts from the current one (the status
+    /// select offers only these).
+    pub next_statuses: Vec<Status>,
 }
 
 pub fn todo_item(todo: Todo, project_name: String, today: NaiveDate, soon_days: u32) -> TodoItem {
     let assessment = assess(&todo, today, soon_days);
+    let next_statuses = Status::ALL
+        .into_iter()
+        .filter(|to| check_allowed(todo.status, *to).is_ok())
+        .collect();
     TodoItem {
         todo,
         project_name,
         assessment,
+        next_statuses,
     }
+}
+
+/// The TODO list with the counts for its status tabs. The counts cover the
+/// project, 日限 and 優先度 filters but not the status filter, so every tab
+/// shows how many rows it would list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
+pub struct TodoList {
+    pub items: Vec<TodoItem>,
+    pub counts: StatusCounts,
+    /// The 「すべて」 tab.
+    pub total: i64,
 }
 
 #[cfg(test)]
@@ -183,5 +203,24 @@ mod tests {
         );
         assert_eq!(item.project_name, "社内ツール整備");
         assert_eq!(item.assessment.days_until_due, Some(-2));
+        assert_eq!(
+            item.next_statuses,
+            vec![
+                Status::Doing,
+                Status::Waiting,
+                Status::Hold,
+                Status::Done,
+                Status::Cancelled
+            ]
+        );
+        let done = todo_item(t(1, Status::Done, None), "x".into(), d("2026-11-19"), 3);
+        assert_eq!(done.next_statuses, vec![Status::Doing]);
+        let cancelled = todo_item(
+            t(1, Status::Cancelled, None),
+            "x".into(),
+            d("2026-11-19"),
+            3,
+        );
+        assert_eq!(cancelled.next_statuses, vec![Status::Todo]);
     }
 }

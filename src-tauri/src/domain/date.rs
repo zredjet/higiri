@@ -27,6 +27,11 @@ pub fn parse_date(s: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()
 }
 
+/// Short date as the mocks write it in running text: 「11/20」.
+pub fn month_day_slash(date: NaiveDate) -> String {
+    format!("{}/{}", date.month(), date.day())
+}
+
 /// Date inside a Japanese sentence: 「11月20日」.
 pub fn month_day_ja(date: NaiveDate) -> String {
     format!("{}月{}日", date.month(), date.day())

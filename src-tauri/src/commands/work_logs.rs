@@ -12,6 +12,7 @@ use super::error::{AppError, CmdResult};
 use super::validate;
 use crate::domain::events::TodoEvent;
 use crate::domain::model::WorkLog;
+use crate::domain::timeline::describe;
 use crate::repo;
 use crate::repo::work_logs::{NewWorkLog, WorkLogEdit};
 
@@ -23,7 +24,14 @@ const MAX_MINUTES: i64 = 24 * 60;
 #[serde(tag = "type", content = "entry", rename_all = "snake_case")]
 pub enum TimelineEntry {
     WorkLog(WorkLog),
-    Event(TodoEvent),
+    Event(EventEntry),
+}
+
+/// A recorded change with its text (「ステータスを「未着手」から「作業中」に変更。…」).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
+pub struct EventEntry {
+    pub event: TodoEvent,
+    pub text: String,
 }
 
 impl TimelineEntry {
@@ -31,7 +39,7 @@ impl TimelineEntry {
     fn sort_key(&self) -> (NaiveDate, DateTime<Utc>, i64) {
         match self {
             TimelineEntry::WorkLog(l) => (l.log_date, l.created_at, l.id),
-            TimelineEntry::Event(e) => (e.event_date, e.occurred_at, e.id),
+            TimelineEntry::Event(e) => (e.event.event_date, e.event.occurred_at, e.event.id),
         }
     }
 }
@@ -85,7 +93,10 @@ pub async fn timeline(pool: &SqlitePool, todo_id: i64) -> CmdResult<Vec<Timeline
             repo::events::list_by_todo(&mut conn, todo_id)
                 .await?
                 .into_iter()
-                .map(TimelineEntry::Event),
+                .map(|event| {
+                    let text = describe(&event);
+                    TimelineEntry::Event(EventEntry { event, text })
+                }),
         )
         .collect();
     entries.sort_by_key(|e| Reverse(e.sort_key()));
@@ -237,9 +248,9 @@ mod tests {
                 TimelineEntry::WorkLog(l) => format!("log {}", l.log_date),
                 TimelineEntry::Event(ev) => format!(
                     "{} {} {}",
-                    ev.kind.as_str(),
-                    ev.event_date,
-                    ev.new_value.as_deref().unwrap_or("")
+                    ev.event.kind.as_str(),
+                    ev.event.event_date,
+                    ev.event.new_value.as_deref().unwrap_or("")
                 ),
             })
             .collect();
@@ -264,8 +275,9 @@ mod tests {
         let entries = timeline(&pool, tid).await.unwrap();
         let json = serde_json::to_value(&entries[0]).unwrap();
         assert_eq!(json["type"], "event");
-        assert_eq!(json["entry"]["kind"], "created");
-        assert_eq!(json["entry"]["note"], serde_json::json!({}));
+        assert_eq!(json["entry"]["event"]["kind"], "created");
+        assert_eq!(json["entry"]["event"]["note"], serde_json::json!({}));
+        assert_eq!(json["entry"]["text"], "TODOを作成");
     }
 
     #[tokio::test]

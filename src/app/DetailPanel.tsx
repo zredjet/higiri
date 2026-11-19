@@ -10,15 +10,19 @@ interface DetailPanelProps {
   children: ReactNode;
 }
 
+/** A dialog or menu is open: Esc belongs to it, not to the panel. */
+function overlayOpen(): boolean {
+  return document.querySelector(".az-dialog__overlay, .menu__popover") !== null;
+}
+
 /**
  * The right-hand panel (max 440px) that shows one TODO next to a list or the
- * Gantt chart. The frame only; the TODO detail itself comes in phase 4.
- * Esc closes it.
+ * Gantt chart. Esc closes it.
  */
 export function DetailPanel({ context, onClose, actions, children }: DetailPanelProps) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape" && !e.defaultPrevented) onClose();
+      if (e.key === "Escape" && !e.defaultPrevented && !overlayOpen()) onClose();
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -28,9 +32,9 @@ export function DetailPanel({ context, onClose, actions, children }: DetailPanel
     <aside className="app__detail" aria-label="TODOの詳細">
       <div className="detail-panel__header">
         <span className="text-caption">{context}</span>
-        <div className="page-header__actions">
+        <div className="detail-panel__actions">
           {actions}
-          <Button variant="ghost" size="sm" iconStart="x" aria-label="閉じる" onClick={onClose} />
+          <Button variant="ghost" size="sm" iconStart="x" aria-label="詳細を閉じる" onClick={onClose} />
         </div>
       </div>
       {children}

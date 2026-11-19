@@ -27,7 +27,7 @@
         "connect-src": "ipc: http://ipc.localhost",
         "img-src": "'self' data:",
         "font-src": "'self'",
-        "style-src": "'self'"
+        "style-src": "'self' 'unsafe-inline'"
       },
       "devCsp": {
         "default-src": "'self'",
@@ -36,7 +36,10 @@
         "img-src": "'self' data:",
         "font-src": "'self'",
         "style-src": "'self' 'unsafe-inline'"
-      }
+      },
+      "dangerousDisableAssetCspModification": [
+        "style-src"
+      ]
     }
   },
   "bundle": {

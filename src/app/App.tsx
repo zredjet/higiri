@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Alert, SideNav } from "../components/aizome";
 import { DashboardPage } from "../features/dashboard/DashboardPage";
 import { GanttPage } from "../features/gantt/GanttPage";
@@ -6,6 +6,7 @@ import { DeleteProjectDialog } from "../features/projects/DeleteProjectDialog";
 import { ProjectFormDialog } from "../features/projects/ProjectFormDialog";
 import { ReportPage } from "../features/report/ReportPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
+import { TodoDetailPanel } from "../features/todos/detail/TodoDetailPanel";
 import { TodosPage } from "../features/todos/TodosPage";
 import type { ProjectSummary } from "../lib/bindings";
 import { errorMessage } from "../lib/errors";
@@ -16,8 +17,18 @@ import { useAppliedTheme } from "./theme";
 
 const ALL_TODOS: Route = { page: "todos", projectId: null };
 
+/** Screens that can show the TODO detail panel (not 日報 or 設定). */
+const PANEL_PAGES: Route["page"][] = ["dashboard", "todos", "gantt"];
+
 export default function App() {
-  const [route, setRoute] = useState<Route>({ page: "dashboard" });
+  const [route, setRouteState] = useState<Route>({ page: "dashboard" });
+  /** TODO shown in the right-hand detail panel. */
+  const [openTodoId, setOpenTodoId] = useState<number | null>(null);
+  const closeTodo = useCallback(() => setOpenTodoId(null), []);
+  const setRoute = useCallback((next: Route) => {
+    setRouteState(next);
+    setOpenTodoId(null);
+  }, []);
   /** Project dialog: closed, creating, or editing the project with this id. */
   const [projectForm, setProjectForm] = useState<null | "new" | number>(null);
   const [deleteTarget, setDeleteTarget] = useState<ProjectSummary | null>(null);
@@ -36,7 +47,7 @@ export default function App() {
     ) {
       setRoute(ALL_TODOS);
     }
-  }, [route, projects.data]);
+  }, [route, projects.data, setRoute]);
 
   function select(id: string) {
     if (id === NEW_PROJECT_NAV_ID) {
@@ -72,6 +83,8 @@ export default function App() {
         {route.page === "todos" && (
           <TodosPage
             projectId={route.projectId}
+            selectedTodoId={openTodoId}
+            onOpenTodo={setOpenTodoId}
             onEditProject={(s) => setProjectForm(s.project.id)}
           />
         )}
@@ -79,6 +92,10 @@ export default function App() {
         {route.page === "report" && <ReportPage />}
         {route.page === "settings" && <SettingsPage />}
       </main>
+
+      {openTodoId !== null && PANEL_PAGES.includes(route.page) ? (
+        <TodoDetailPanel key={openTodoId} todoId={openTodoId} onClose={closeTodo} />
+      ) : null}
 
       <ProjectFormDialog
         target={formTarget}
