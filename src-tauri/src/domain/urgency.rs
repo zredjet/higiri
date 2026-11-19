@@ -13,7 +13,9 @@ use super::model::{Status, Todo};
 
 /// Urgency category. Declared in severity order (most severe first), so the
 /// derived `Ord` sorts 超過 → 本日 → 間近 → 要確認 → 着手遅れ.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, specta::Type,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Urgency {
     /// 超過: due date is before today.
@@ -76,7 +78,7 @@ pub fn classify(todo: &Todo, today: NaiveDate, soon_days: u32) -> Option<Urgency
 }
 
 /// The two small warning icons shown in the list and the Gantt chart.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, specta::Type)]
 pub struct Warnings {
     /// 計画が間に合わない: planned end is after the due date.
     pub plan_misses_due: bool,
@@ -115,6 +117,42 @@ pub fn attention_order(a: (&Todo, Urgency), b: (&Todo, Urgency)) -> Ordering {
         })
         .then_with(|| ta.priority.cmp(&tb.priority))
         .then_with(|| ta.id.cmp(&tb.id))
+}
+
+/// Everything the screens show about a TODO's urgency, computed once here so
+/// the frontend never recalculates categories or day counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
+pub struct Assessment {
+    pub urgency: Option<Urgency>,
+    pub warnings: Warnings,
+    /// Days from today to the due date; negative when overdue (「2日超過」 is -2,
+    /// 「あと1日」 is 1). Open TODOs with a due date only.
+    pub days_until_due: Option<i64>,
+    /// Days since the planned start (「予定開始から2日経過」). 着手遅れ only.
+    pub days_since_planned_start: Option<i64>,
+    /// Day of waiting, the first day being 1 (「3日目」). 待ち only.
+    pub waiting_day: Option<i64>,
+}
+
+pub fn assess(todo: &Todo, today: NaiveDate, soon_days: u32) -> Assessment {
+    let urgency = classify(todo, today, soon_days);
+    let open = todo.status.is_open();
+    Assessment {
+        urgency,
+        warnings: warnings(todo, today),
+        days_until_due: todo
+            .due_date
+            .filter(|_| open)
+            .map(|due| days_left(due, today)),
+        days_since_planned_start: todo
+            .planned_start
+            .filter(|_| urgency == Some(Urgency::LateStart))
+            .map(|start| days_since_planned_start(start, today)),
+        waiting_day: todo
+            .waiting_since
+            .filter(|_| todo.status == Status::Waiting)
+            .map(|since| waiting_day(since, today)),
+    }
 }
 
 /// Days past the due date (「2日超過」). Positive when overdue.
@@ -536,6 +574,65 @@ mod tests {
         assert_eq!(waiting_day(d("2026-11-17"), today), 3); // 待ち3日目
         assert_eq!(waiting_day(d("2026-11-19"), today), 1); // 待ち1日目
         assert_eq!(days_left(d("2027-01-01"), d("2026-12-31")), 1); // across year
+    }
+
+    #[test]
+    fn assess_fills_day_counts_only_where_they_apply() {
+        let today = d("2026-11-19");
+        // 募集要項ページの原稿確認: waiting since 11/17, follow-up 11/19, due 11/27.
+        let waiting = Todo {
+            due_date: Some(d("2026-11-27")),
+            planned_start: Some(d("2026-11-16")),
+            waiting_since: Some(d("2026-11-17")),
+            follow_up_date: Some(d("2026-11-19")),
+            ..todo(Status::Waiting)
+        };
+        assert_eq!(
+            assess(&waiting, today, SOON),
+            Assessment {
+                urgency: Some(Urgency::FollowUp),
+                warnings: Warnings::default(),
+                days_until_due: Some(8),
+                days_since_planned_start: None,
+                waiting_day: Some(3),
+            }
+        );
+
+        // ライセンス棚卸し: overdue by 2 days; planned start passed too, but the
+        // category is 超過, so no "since planned start" count.
+        let overdue = Todo {
+            due_date: Some(d("2026-11-17")),
+            planned_start: Some(d("2026-11-12")),
+            ..todo(Status::Todo)
+        };
+        let a = assess(&overdue, today, SOON);
+        assert_eq!(a.urgency, Some(Urgency::Overdue));
+        assert_eq!(a.days_until_due, Some(-2));
+        assert_eq!(a.days_since_planned_start, None);
+
+        // 性能試験の環境準備: late start by 2 days.
+        let late = Todo {
+            due_date: Some(d("2026-12-04")),
+            planned_start: Some(d("2026-11-17")),
+            ..todo(Status::Todo)
+        };
+        assert_eq!(assess(&late, today, SOON).days_since_planned_start, Some(2));
+
+        // Closed TODOs carry no counts.
+        let done = Todo {
+            due_date: Some(d("2026-11-13")),
+            ..todo(Status::Done)
+        };
+        assert_eq!(
+            assess(&done, today, SOON),
+            Assessment {
+                urgency: None,
+                warnings: Warnings::default(),
+                days_until_due: None,
+                days_since_planned_start: None,
+                waiting_day: None,
+            }
+        );
     }
 
     #[test]

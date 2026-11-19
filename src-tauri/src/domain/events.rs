@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use super::date::format_date;
 use super::model::{Status, Todo};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum EventKind {
     Created,
@@ -63,7 +63,7 @@ impl EventKind {
 ///   `null` when the column was cleared.
 ///
 /// Other rows store `{}`.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct EventNote {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waiting_on: Option<String>,
@@ -86,7 +86,7 @@ impl EventNote {
 }
 
 /// Value of `planned` / `actual` events.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct Period {
     pub start: Option<NaiveDate>,
     pub end: Option<NaiveDate>,
@@ -114,7 +114,7 @@ pub struct NewEvent {
 }
 
 /// A stored event.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
 pub struct TodoEvent {
     pub id: i64,
     pub todo_id: i64,

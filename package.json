@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
+    "dev:sample": "tauri dev -- -- --sample-data",
     "dev:web": "vite",
     "build": "tauri build",
     "build:web": "npm run typecheck && vite build",

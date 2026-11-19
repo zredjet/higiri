@@ -42,6 +42,12 @@ SQLite(アプリのデータフォルダ内の todo.db)
 - ステータス変更は必ず `change_status` を通す。実績日の自動入力と `todo_events` への記録を1トランザクションで行う。`update_todo` でステータスを直接書き換えない。
 - 画面から呼べるのは設計書のコマンド一覧にあるものだけ。足すときは理由を添えて相談する。
 - 画面側からのコマンド呼び出しは、tauri-specta が生成する `src/lib/bindings.ts` 経由だけにする。画面のコードに `invoke` を直接書かない。
+  - `bindings.ts` は手で編集しない。`cargo test`(`bindings_are_up_to_date`)と、開発ビルドの起動時に作り直される。古いまま残っていると `cargo test` が失敗する。
+  - 型のフィールド名は Rust と同じ snake_case のまま(`project_id` など)。コマンドの引数名だけは Tauri の規則で camelCase になる。
+  - i64 は TS の `number` として出す(`dangerously_cast_bigints_to_number`)。ID と件数は 2^53 を超えない。
+- コマンドを足すときは、`commands::specta_builder()`、`src-tauri/build.rs` の `APP_COMMANDS`、`capabilities/default.json` の `allow-*` の3か所を揃える。capability とバインディングのずれはテストで検出する。
+- コマンドは「時計を読んで内側の関数を呼ぶだけの `#[tauri::command]`」と「`&SqlitePool` と `today` / `now` を受け取る内側の関数」に分け、テストは内側の関数をメモリ上の DB で呼ぶ。
+- 画面に返すエラーは `AppError { kind, message }` の1種類。`message` は利用者向けの日本語で「何が起きたか+どうすればよいか」。DB の詳細は画面に出さない。
 - ステータスの遷移: 開いている4状態(未着手・作業中・待ち・保留)の間は自由。完了と中止にはその4状態から入れる。完了から戻せるのは作業中(再開)だけ、中止から戻せるのは未着手だけ。完了と中止の間は行き来できない。待ちから抜けると待ちの3項目(`waiting_on`、`waiting_since`、`follow_up_date`)を空にする。
 - 公式の sql プラグインは使わない(画面側からSQLを発行する方式のため)。
 - ファイルへの書き出し(日報の .md、バックアップ)は Rust 側で行う。保存先ダイアログも Rust 側で開き、画面から任意のパスを渡して書かせない。
@@ -90,7 +96,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
 - `repo/` はメモリ上の SQLite にマイグレーションを当ててテストする。
 - 画面側は、ガントの座標計算など計算を含む部分を Vitest でテストする。
 - ライブラリのバージョンは記憶に頼らず、導入時点の最新安定版と互換性を確認する。tauri-specta が入れた Tauri の版で動かない場合は、手書きの型定義に切り替えて報告する。
-- tauri-specta は Tauri 2 向けの安定版がないため、RC 版を使う。tauri-specta、specta、specta-typescript は互換性のある組を `=` で固定する。入れるときは、まずコマンド1つで型の生成と呼び出しを確かめてから全体に広げる。
+- tauri-specta は Tauri 2 向けの安定版がないため、RC 版を使う。tauri-specta、specta、specta-typescript は互換性のある組を `=` で固定する(今は `tauri-specta =2.0.0-rc.29`、`specta =2.0.0-rc.28`、`specta-typescript =0.0.15`)。上げるときは3つを同時に上げ、まずコマンド1つで型の生成と呼び出しを確かめてから全体に広げる。
 - Tauri の権限(`capabilities/default.json`)と CSP は、使うものだけに絞る。
 
 ## 進め方
@@ -106,6 +112,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
 | 用途 | コマンド |
 | --- | --- |
 | 開発(ウィンドウを開く) | `npm run dev`(`tauri dev`) |
+| 開発用のサンプルデータを入れて開く(DBが空のときだけ入る) | `npm run dev:sample` |
 | 画面だけをブラウザで開く(Tauri の API は動かない) | `npm run dev:web` |
 | 画面のテスト(Vitest) | `npm test` |
 | Rust のテスト | `npm run test:rust`(`cargo test --manifest-path src-tauri/Cargo.toml`) |
@@ -113,3 +120,6 @@ SQLite(アプリのデータフォルダ内の todo.db)
 | Rust の lint(警告はエラー扱い) | `npm run lint:rust` |
 | まとめて確認(型チェック、Vitest、cargo test、clippy) | `npm run check` |
 | 配布物のビルド | `npm run build` |
+
+- 開発ビルドの DB は、配布版と混ざらないように、データフォルダの下の `dev/todo.db` を使う(macOS は `~/Library/Application Support/com.redjet.higiri/dev/`、Windows は `%APPDATA%\com.redjet.higiri\dev\`)。サンプルデータを入れ直すときは、アプリを閉じてこの `dev` フォルダを消してから `npm run dev:sample` で起動する。
+- サンプルデータはモックの3プロジェクト・11件で、日付は「モックの今日(2026-11-19)」が実際の今日になるようにずらして入れる。ステータスの変化は `change_status` と同じ遷移関数で再現するので、変更履歴も残る。

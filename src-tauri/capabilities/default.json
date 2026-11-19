@@ -1,7 +1,25 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "Capability for the main window: Tauri core defaults and the app's own commands only.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "allow-list-projects",
+    "allow-create-project",
+    "allow-update-project",
+    "allow-archive-project",
+    "allow-delete-project",
+    "allow-list-todos",
+    "allow-get-todo",
+    "allow-create-todo",
+    "allow-update-todo",
+    "allow-change-status",
+    "allow-delete-todo",
+    "allow-list-timeline",
+    "allow-save-work-log",
+    "allow-delete-work-log",
+    "allow-get-settings",
+    "allow-update-settings"
+  ]
 }

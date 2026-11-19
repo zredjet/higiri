@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-delete-work-log"
+description = "Enables the delete_work_log command without any pre-configured scope."
+commands.allow = ["delete_work_log"]
+
+[[permission]]
+identifier = "deny-delete-work-log"
+description = "Denies the delete_work_log command without any pre-configured scope."
+commands.deny = ["delete_work_log"]

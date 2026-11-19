@@ -58,7 +58,7 @@ impl StatusFields {
 }
 
 /// A requested status change, with the extra input some targets need.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct StatusChange {
     pub to: Status,
     /// Required when moving to 待ち.

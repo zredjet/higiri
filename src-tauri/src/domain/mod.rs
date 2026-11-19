@@ -9,6 +9,7 @@ pub mod model;
 pub mod settings;
 pub mod status;
 pub mod urgency;
+pub mod views;
 
 #[cfg(test)]
 pub(crate) mod testing;

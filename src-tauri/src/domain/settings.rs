@@ -5,7 +5,7 @@ use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
 /// When the startup reminder dialog is shown.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum ReminderFrequency {
     /// 起動のたび (default)
@@ -16,7 +16,7 @@ pub enum ReminderFrequency {
 }
 
 /// Colour scheme.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum Theme {
     /// ライト (default; selected in the settings mock)
@@ -28,7 +28,7 @@ pub enum Theme {
     System,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
 pub struct Settings {
     pub reminder_frequency: ReminderFrequency,
     /// Days counted as 「間近」.
