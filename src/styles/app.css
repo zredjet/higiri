@@ -1,6 +1,18 @@
 /* App layout on top of Aizome. Colours, spacing and radii come from tokens
    (var(--…)); only sizes that have no token (widths, type sizes) are literal. */
 
+/* A shade drawn on a `surface` (Gantt weekends, project rows and header,
+   progress tracks, Markdown code and table headers). Aizome's `bg-subtle`
+   is that shade in the light theme, but equals `surface` in the dark theme,
+   so the dark theme takes the next step of the 墨 scale instead. */
+:root {
+  --surface-shade: var(--bg-subtle);
+}
+
+[data-theme="dark"] {
+  --surface-shade: var(--sumi-850);
+}
+
 html,
 body,
 #root {
@@ -404,14 +416,14 @@ body,
   padding: 0 var(--space-1);
   font-family: var(--font-mono);
   font-size: 13px;
-  background: var(--bg-subtle);
+  background: var(--surface-shade);
   border-radius: var(--radius-sm);
 }
 
 .markdown pre {
   padding: var(--space-3);
   overflow-x: auto;
-  background: var(--bg-subtle);
+  background: var(--surface-shade);
   border-radius: var(--radius-md);
 }
 
@@ -437,7 +449,7 @@ body,
 }
 
 .markdown th {
-  background: var(--bg-subtle);
+  background: var(--surface-shade);
   font-weight: 500;
 }
 
@@ -631,7 +643,7 @@ input[type="date"][data-empty="true"]:not(:focus) {
 .progress-bar {
   height: 8px;
   border-radius: var(--radius-xs);
-  background: var(--bg-subtle);
+  background: var(--surface-shade);
   overflow: hidden;
 }
 
@@ -813,7 +825,7 @@ input[type="date"][data-empty="true"]:not(:focus) {
   display: flex;
   height: 53px;
   box-sizing: border-box;
-  background: var(--bg-subtle);
+  background: var(--surface-shade);
   border-bottom: 1px solid var(--border);
 }
 
@@ -867,7 +879,7 @@ input[type="date"][data-empty="true"]:not(:focus) {
 }
 
 .gantt-name--project {
-  background: var(--bg-subtle);
+  background: var(--surface-shade);
   font-size: 13px;
   font-weight: 600;
 }
@@ -911,7 +923,7 @@ input[type="date"][data-empty="true"]:not(:focus) {
 
 .gantt-weekend,
 .gantt-project-row {
-  fill: var(--bg-subtle);
+  fill: var(--surface-shade);
 }
 
 .gantt-row {
