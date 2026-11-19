@@ -3,7 +3,10 @@ import type { StartupReminder } from "../../lib/bindings";
 import { formatDateWithWeekday } from "../../lib/date";
 import { reminderSide, URGENCY_LABEL, URGENCY_TONE } from "../todos/todoText";
 
-/** 起動時リマインド (docs/ui-mock/Reminder.dc.html). Closing it in any way acknowledges it. */
+/**
+ * 起動時リマインド (docs/ui-mock/Reminder.dc.html). It closes only with
+ * 「確認しました」 (not the scrim, Esc or ×), which acknowledges it.
+ */
 export function ReminderDialog({ reminder, onClose }: { reminder: StartupReminder; onClose: () => void }) {
   const note =
     reminder.frequency === "every_launch"
@@ -15,6 +18,7 @@ export function ReminderDialog({ reminder, onClose }: { reminder: StartupReminde
       open
       size="lg"
       onClose={onClose}
+      dismissible={false}
       title={`日限の近いTODOが${reminder.items.length}件あります`}
       description={`${formatDateWithWeekday(reminder.today)}の確認です。超過と本日のものから対応してください。待ちのものは相手に確認してください。`}
       footer={
