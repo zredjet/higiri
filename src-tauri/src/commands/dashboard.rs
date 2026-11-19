@@ -68,11 +68,8 @@ pub async fn reminder(pool: &SqlitePool, today: NaiveDate) -> CmdResult<Option<S
 }
 
 pub async fn ack(pool: &SqlitePool, today: NaiveDate) -> CmdResult<()> {
-    let mut tx = pool.begin().await?;
-    let mut settings = repo::settings::load(&mut tx).await?;
-    settings.last_reminded_on = Some(today);
-    repo::settings::save(&mut tx, &settings).await?;
-    tx.commit().await?;
+    let mut conn = pool.acquire().await?;
+    repo::settings::set_last_reminded_on(&mut conn, Some(today)).await?;
     Ok(())
 }
 
@@ -80,7 +77,7 @@ pub async fn ack(pool: &SqlitePool, today: NaiveDate) -> CmdResult<()> {
 mod tests {
     use super::*;
     use crate::commands::settings::{self, SettingsInput};
-    use crate::domain::settings::{ReminderFrequency, Theme};
+    use crate::domain::settings::ReminderFrequency;
     use crate::domain::testing::d;
     use crate::repo::db;
 
@@ -95,9 +92,7 @@ mod tests {
     fn frequency(f: ReminderFrequency) -> SettingsInput {
         SettingsInput {
             reminder_frequency: f,
-            soon_days: 3,
-            follow_up_days: 3,
-            theme: Theme::Light,
+            ..SettingsInput::from(&crate::domain::settings::Settings::default())
         }
     }
 

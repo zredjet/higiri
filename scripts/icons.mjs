@@ -4,6 +4,10 @@
 //   higiri-icon-small.svg  simplified for a few pixels: the .ico's 16-32 px
 //                          images and 32x32.png
 //   higiri-icon-macos.svg  Apple's icon grid (824 px square on 1024 px): icon.icns
+//   higiri-tray-macos.svg  one-color template image for the macOS menu bar:
+//                          tray-macos.png (36 px, 18 pt at 2x)
+// The Windows tray uses the color 32 px icon (tray-windows.png, the same image
+// as 32x32.png). Both tray icons are embedded by src-tauri/src/tray.rs.
 // Run with `npm run icons`. Android / iOS icons are not kept (desktop only).
 import { execSync } from "node:child_process";
 import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -47,10 +51,12 @@ try {
   const mac = join(tmp, "mac");
   const small = join(tmp, "small");
   const large = join(tmp, "large");
+  const trayMac = join(tmp, "tray-mac");
   tauriIcon(source("higiri-icon.svg"), full);
   tauriIcon(source("higiri-icon-macos.svg"), mac);
   tauriIcon(source("higiri-icon-small.svg"), small, [16, 24, 32]);
   tauriIcon(source("higiri-icon.svg"), large, [48, 64, 256]);
+  tauriIcon(source("higiri-tray-macos.svg"), trayMac, [36]);
 
   for (const name of [
     "128x128.png",
@@ -70,6 +76,8 @@ try {
     copyFileSync(join(full, name), join(icons, name));
   }
   copyFileSync(join(small, "32x32.png"), join(icons, "32x32.png"));
+  copyFileSync(join(small, "32x32.png"), join(icons, "tray-windows.png"));
+  copyFileSync(join(trayMac, "36x36.png"), join(icons, "tray-macos.png"));
   copyFileSync(join(mac, "icon.icns"), join(icons, "icon.icns"));
   const ico = [
     ...[16, 24, 32].map((size) => ({ size, data: readFileSync(join(small, `${size}x${size}.png`)) })),

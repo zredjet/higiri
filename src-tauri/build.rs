@@ -30,6 +30,7 @@ const APP_COMMANDS: &[&str] = &[
     "list_backups",
     "restore_backup",
     "open_data_folder",
+    "test_notification",
 ];
 
 fn main() {

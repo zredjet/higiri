@@ -9,6 +9,7 @@ pub mod events;
 pub mod gantt;
 pub mod listing;
 pub mod model;
+pub mod notify;
 pub mod report;
 pub mod settings;
 pub mod status;

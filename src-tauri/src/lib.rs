@@ -1,22 +1,34 @@
+pub mod autostart;
 pub mod backup;
 pub mod commands;
 pub mod domain;
+pub mod notifier;
 #[cfg(test)]
 mod perf;
 pub mod repo;
+pub mod resident;
 // Development sample data; also in test builds, which may be optimized.
 #[cfg(any(debug_assertions, test))]
 pub mod sample;
+pub mod tray;
+#[cfg(all(windows, not(debug_assertions)))]
+mod win_toast;
 
 use std::path::PathBuf;
 
 use tauri::Manager;
+use tauri_plugin_notification::NotificationExt;
 // Registered in release builds only (see run()); referenced here so the
-// dependency does not count as unused in development builds.
+// dependencies do not count as unused in development builds.
+#[cfg(all(desktop, debug_assertions))]
+use tauri_plugin_autostart as _;
 #[cfg(all(desktop, debug_assertions))]
 use tauri_plugin_single_instance as _;
+#[cfg(all(windows, debug_assertions))]
+use winreg as _;
 
 use crate::commands::backup::DataDir;
+use crate::domain::settings::Settings;
 use crate::repo::db;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -28,19 +40,21 @@ pub fn run() {
         .expect("failed to export TypeScript bindings");
 
     let builder = tauri::Builder::default();
-    // A second launch brings the running window to the front and exits. Release
-    // builds only: a development build may run next to the installed app (it
-    // has its own database), and both share the identifier the lock uses.
+    // A second launch brings the running window to the front and exits (a
+    // second launch at login leaves it hidden). Release builds only: a
+    // development build may run next to the installed app (it has its own
+    // database), and both share the identifier the lock uses.
     #[cfg(all(desktop, not(debug_assertions)))]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-        if let Some(w) = app.get_webview_window("main") {
-            let _ = w.unminimize();
-            let _ = w.show();
-            let _ = w.set_focus();
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        if !resident::started_at_login(&args) {
+            resident::show_main(app);
         }
     }));
+    // Start at login: release builds only (see autostart.rs).
+    #[cfg(all(desktop, not(debug_assertions)))]
+    let builder = builder.plugin(autostart::plugin());
 
-    builder
+    let app = builder
         .plugin(log_plugin())
         // Window position and size are restored at the next launch.
         .plugin(
@@ -58,7 +72,15 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         // Copying a report (frontend permission: write text only).
         .plugin(tauri_plugin_clipboard_manager::init())
+        // OS notifications (v1.1): shown from Rust only, no frontend permission.
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(specta.invoke_handler())
+        // × hides the window to the tray (see resident.rs).
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                resident::on_close_requested(window, api);
+            }
+        })
         .setup(move |app| {
             specta.mount_events(app);
             log::info!("Higiri {} starting", app.package_info().version);
@@ -83,24 +105,79 @@ pub fn run() {
                 );
             }
 
-            // C-1: one backup a day, at the first launch of the day. A failed
+            // C-1: one backup a day, at the first launch of the day (and when
+            // the date changes while resident, see notifier.rs). A failed
             // backup is logged and does not stop the app.
-            match tauri::async_runtime::block_on(backup::run_daily(
-                &pool,
-                &dir,
-                commands::clock::today(),
-            )) {
+            let today = commands::clock::today();
+            match tauri::async_runtime::block_on(backup::run_daily(&pool, &dir, today)) {
                 Ok(Some(file)) => log::info!("backup written: {}", file.display()),
                 Ok(None) => log::info!("backup for today already exists"),
                 Err(e) => log::error!("daily backup failed: {e}"),
             }
 
+            let settings = tauri::async_runtime::block_on(commands::settings::get(&pool))
+                .unwrap_or_else(|e| {
+                    log::error!("settings could not be read: {}", e.message);
+                    Settings::default()
+                });
+
+            // The tray first: without it, × quits instead of hiding.
+            let tray_ready = match tray::create(app.handle()) {
+                Ok(()) => true,
+                Err(e) => {
+                    log::error!("tray icon could not be created: {e}");
+                    false
+                }
+            };
+            app.manage(resident::CloseBehavior::new(&settings, tray_ready));
+
+            // A click on a notification brings the window back (as far as the
+            // OS reports it to the plugin).
+            let handle = app.handle().clone();
+            app.notification().on_action(move |performed| {
+                if performed.action_id() == "tap" {
+                    resident::show_main(&handle);
+                }
+            })?;
+
+            autostart::sync_at_startup(app.handle(), settings.autostart);
+            #[cfg(all(windows, not(debug_assertions)))]
+            if let Err(e) =
+                win_toast::register(&app.config().identifier, &app.package_info().name, &dir)
+            {
+                log::error!("toast registration failed: {e}");
+            }
+
+            let notifier = notifier::Notifier::default();
+            notifier::spawn(
+                app.handle().clone(),
+                &notifier,
+                pool.clone(),
+                dir.clone(),
+                today,
+            );
+            app.manage(notifier);
+
             app.manage(pool);
             app.manage(DataDir(dir));
+
+            // The window is created hidden; a launch at login stays in the tray.
+            if resident::started_at_login(std::env::args()) {
+                log::info!("started at login: tray only");
+            } else {
+                resident::show_main(app.handle());
+            }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|_app, event| match event {
+        // macOS: a click on the Dock icon brings the window back.
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Reopen { .. } => resident::show_main(_app),
+        _ => {}
+    });
 }
 
 /// Operation log: `higiri.log` (or `higiri-dev.log` for development builds) in

@@ -45,6 +45,7 @@
     "allow-export-report-file",
     "allow-list-backups",
     "allow-restore-backup",
-    "allow-open-data-folder"
+    "allow-open-data-folder",
+    "allow-test-notification"
   ]
 }

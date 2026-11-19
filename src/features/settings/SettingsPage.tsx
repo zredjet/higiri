@@ -1,14 +1,16 @@
 import { useState } from "react";
-import { Alert, Button, Card, RadioGroup, Table, TextField } from "../../components/aizome";
+import { Alert, Button, Card, RadioGroup, Switch, Table, TextField } from "../../components/aizome";
 import { PageHeader } from "../../components/PageHeader";
 import type { ProjectSummary, ReminderFrequency, Settings, SettingsInput, Theme } from "../../lib/bindings";
 import { formatTimestampDate } from "../../lib/date";
 import { errorMessage } from "../../lib/errors";
+import { isComposing } from "../../lib/keys";
 import {
   useArchiveProject,
   useOpenDataFolder,
   useProjects,
   useSettings,
+  useTestNotification,
   useUpdateSettings,
 } from "../../lib/queries";
 import { DeleteProjectDialog } from "../projects/DeleteProjectDialog";
@@ -30,12 +32,19 @@ const REMINDER_OPTIONS: Array<{ value: ReminderFrequency; label: string; descrip
   { value: "once_per_day", label: "1日1回だけ表示", description: "その日最初の起動のときだけダイアログを出します。" },
 ];
 
+/** A development build (`tauri dev`) never registers itself to start at login. */
+const DEV_BUILD = import.meta.env.DEV;
+
 function inputOf(s: Settings): SettingsInput {
   return {
     reminder_frequency: s.reminder_frequency,
     soon_days: s.soon_days,
     follow_up_days: s.follow_up_days,
     theme: s.theme,
+    notify_enabled: s.notify_enabled,
+    notify_times: s.notify_times,
+    close_to_tray: s.close_to_tray,
+    autostart: s.autostart,
   };
 }
 
@@ -46,6 +55,7 @@ export function SettingsPage() {
     <div className="settings-page">
       <PageHeader title="設定" actions={<span className="text-caption">変更はすぐに保存されます</span>} />
       {settings.data ? <ReminderCard key={settings.dataUpdatedAt} settings={settings.data} /> : null}
+      {settings.data ? <ResidentCard settings={settings.data} /> : null}
       <DisplayCard />
       <DataCard />
       <ArchivedProjectsCard />
@@ -149,6 +159,116 @@ function ReminderCard({ settings }: { settings: Settings }) {
             onBlur={saveDays}
           />
         </div>
+      </div>
+    </Card>
+  );
+}
+
+/** 通知と常駐: OS notifications at fixed times (D-6), the tray and start at login (D-7). */
+function ResidentCard({ settings }: { settings: Settings }) {
+  const update = useUpdateSettings();
+  const testNotification = useTestNotification();
+  const [newTime, setNewTime] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
+
+  function save(change: Partial<SettingsInput>, onSaved?: () => void) {
+    setNotice(null);
+    testNotification.reset();
+    update.mutate({ ...inputOf(settings), ...change }, { onSuccess: onSaved });
+  }
+
+  function addTime() {
+    save({ notify_times: [...settings.notify_times, newTime] }, () => setNewTime(""));
+  }
+
+  const error = update.error ?? testNotification.error;
+
+  return (
+    <Card title="通知と常駐" description="決まった時刻に、日限注意の件数をOSの通知で知らせます。">
+      <div className="settings-card__body">
+        {error ? <Alert tone="danger">{errorMessage(error)}</Alert> : null}
+        {notice ? (
+          <Alert tone="success" onClose={() => setNotice(null)}>
+            {notice}
+          </Alert>
+        ) : null}
+        <Switch
+          label="OSの通知を出す"
+          description="日限注意が1件もない時刻には出しません。"
+          checked={settings.notify_enabled}
+          disabled={update.isPending}
+          onChange={(on) => save({ notify_enabled: on })}
+        />
+        <fieldset className="az-field notify-times" disabled={update.isPending}>
+          <legend className="az-field__label">通知の時刻</legend>
+          <ul className="notify-times__list">
+            {settings.notify_times.map((time) => (
+              <li key={time} className="notify-times__item">
+                <span className="notify-times__time">{time}</span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label={`${time}を削除する`}
+                  onClick={() => save({ notify_times: settings.notify_times.filter((t) => t !== time) })}
+                >
+                  削除する
+                </Button>
+              </li>
+            ))}
+          </ul>
+          <div className="notify-times__add">
+            <TextField
+              aria-label="追加する時刻"
+              placeholder="17:30"
+              maxLength={5}
+              value={newTime}
+              onChange={(e) => setNewTime(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !isComposing(e) && newTime.trim() !== "") {
+                  e.preventDefault();
+                  addTime();
+                }
+              }}
+            />
+            <Button iconStart="plus" disabled={newTime.trim() === ""} onClick={addTime}>
+              時刻を追加
+            </Button>
+          </div>
+          <p className="az-field__desc">24時間制で、5つまで登録できます。</p>
+        </fieldset>
+        <div className="settings-card__actions">
+          <Button
+            disabled={testNotification.isPending}
+            onClick={() => {
+              setNotice(null);
+              update.reset();
+              testNotification.mutate(undefined, {
+                onSuccess: () =>
+                  setNotice("試しの通知を出しました。届かないときは、OSの設定で Higiri の通知が許可されているかを確かめてください。"),
+              });
+            }}
+          >
+            通知を試す
+          </Button>
+        </div>
+        <Switch
+          label="ウィンドウを閉じてもトレイに残す"
+          description="×ボタンで閉じても常駐して、決まった時刻に通知します。オフにすると、×ボタンで終了します。"
+          checked={settings.close_to_tray}
+          disabled={update.isPending}
+          onChange={(on) => save({ close_to_tray: on })}
+        />
+        <Switch
+          label="PCにログインしたときに起動する"
+          description={
+            DEV_BUILD
+              ? "開発ビルドでは使えません。配布版のアプリで設定してください。"
+              : "ウィンドウは出さずに、トレイだけで起動します。"
+          }
+          checked={settings.autostart}
+          disabled={DEV_BUILD || update.isPending}
+          onChange={(on) => save({ autostart: on })}
+        />
       </div>
     </Card>
   );

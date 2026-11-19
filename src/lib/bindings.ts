@@ -69,11 +69,18 @@ export const commands = {
 	listBackups: (options?: InvokeOptions) => __TAURI_INVOKE<Backup[]>("list_backups", undefined, options),
 	/**
 	 *  Replaces all data with the chosen backup. The current data is copied to a
-	 *  「復元する前の状態」 backup first, so the restore can be undone.
+	 *  「復元する前の状態」 backup first, so the restore can be undone. The
+	 *  restored settings then apply to the running app (× and the notification
+	 *  times); `autostart` is kept as it was, so the OS registration stays.
 	 */
 	restoreBackup: (fileName: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("restore_backup", { fileName }, options),
 	/**  Opens the data folder in Finder / Explorer. */
 	openDataFolder: (options?: InvokeOptions) => __TAURI_INVOKE<null>("open_data_folder", undefined, options),
+	/**
+	 *  「通知を試す」: shows a test notification, whether or not the
+	 *  notifications are turned on (it checks that the OS shows them at all).
+	 */
+	testNotification: (options?: InvokeOptions) => __TAURI_INVOKE<null>("test_notification", undefined, options),
 };
 
 /* Types */
@@ -312,17 +319,37 @@ export type Settings = {
 	/**  Last day the reminder was acknowledged. */
 	last_reminded_on: string | null,
 	theme: Theme,
+	/**  OS notifications at `notify_times` (v1.1). */
+	notify_enabled: boolean,
+	/**  Notification times, `HH:MM`, 1 to 5, distinct, in time order. */
+	notify_times: string[],
+	/**
+	 *  When the timer last handled a notification time (written by the
+	 *  timer, not by update_settings).
+	 */
+	last_notified_at: string | null,
+	/**  × hides the window to the tray instead of quitting. */
+	close_to_tray: boolean,
+	/**  Start at login (registered with the OS by release builds only). */
+	autostart: boolean,
+	/**  The tray hint was shown (written by the app, not by update_settings). */
+	tray_hint_shown: boolean,
 };
 
 /**
- *  Settings the user edits on the settings screen. `last_reminded_on` is
- *  written by `ack_reminder`, not here.
+ *  Settings the user edits on the settings screen. `last_reminded_on`,
+ *  `last_notified_at` and `tray_hint_shown` are written by the app, not here.
  */
 export type SettingsInput = {
 	reminder_frequency: ReminderFrequency,
 	soon_days: number,
 	follow_up_days: number,
 	theme: Theme,
+	notify_enabled: boolean,
+	/**  `HH:MM`, 1 to 5, distinct (saved in time order). */
+	notify_times: string[],
+	close_to_tray: boolean,
+	autostart: boolean,
 };
 
 /**  What the startup reminder dialog shows. */

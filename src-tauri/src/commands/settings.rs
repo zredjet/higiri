@@ -1,26 +1,52 @@
 //! 設定: get_settings, update_settings.
+//!
+//! `update_settings` saves in the inner function (database only), then the
+//! command applies the result to the running app and the OS: the resident
+//! timer and the × button (`resident::apply`), and start at login
+//! (`autostart::apply`).
 
 use serde::Deserialize;
 use sqlx::SqlitePool;
-use tauri::State;
+use tauri::{AppHandle, State};
 
-use super::error::CmdResult;
+use super::error::{AppError, CmdResult};
 use super::validate;
+use crate::domain::notify::{self, TimesError};
 use crate::domain::settings::{ReminderFrequency, Settings, Theme};
-use crate::repo;
+use crate::{autostart, repo, resident};
 
 /// Days accepted for 「間近」とみなす日数 and 確認日の初期値.
 const DAYS_MIN: i64 = 1;
 const DAYS_MAX: i64 = 30;
 
-/// Settings the user edits on the settings screen. `last_reminded_on` is
-/// written by `ack_reminder`, not here.
+/// Settings the user edits on the settings screen. `last_reminded_on`,
+/// `last_notified_at` and `tray_hint_shown` are written by the app, not here.
 #[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct SettingsInput {
     pub reminder_frequency: ReminderFrequency,
     pub soon_days: u32,
     pub follow_up_days: u32,
     pub theme: Theme,
+    pub notify_enabled: bool,
+    /// `HH:MM`, 1 to 5, distinct (saved in time order).
+    pub notify_times: Vec<String>,
+    pub close_to_tray: bool,
+    pub autostart: bool,
+}
+
+impl From<&Settings> for SettingsInput {
+    fn from(s: &Settings) -> SettingsInput {
+        SettingsInput {
+            reminder_frequency: s.reminder_frequency,
+            soon_days: s.soon_days,
+            follow_up_days: s.follow_up_days,
+            theme: s.theme,
+            notify_enabled: s.notify_enabled,
+            notify_times: s.notify_times.clone(),
+            close_to_tray: s.close_to_tray,
+            autostart: s.autostart,
+        }
+    }
 }
 
 #[tauri::command]
@@ -32,10 +58,29 @@ pub async fn get_settings(pool: State<'_, SqlitePool>) -> CmdResult<Settings> {
 #[tauri::command]
 #[specta::specta]
 pub async fn update_settings(
+    app: AppHandle,
     pool: State<'_, SqlitePool>,
     input: SettingsInput,
 ) -> CmdResult<Settings> {
-    update(&pool, input).await
+    let before = get(&pool).await?;
+    let saved = update(&pool, input.clone()).await?;
+    if saved.autostart != before.autostart
+        && let Err(e) = autostart::apply(&app, saved.autostart)
+    {
+        // Keep the switch as the OS has it.
+        let reverted = update(
+            &pool,
+            SettingsInput {
+                autostart: before.autostart,
+                ..input
+            },
+        )
+        .await?;
+        resident::apply(&app, &reverted);
+        return Err(e);
+    }
+    resident::apply(&app, &saved);
+    Ok(saved)
 }
 
 pub async fn get(pool: &SqlitePool) -> CmdResult<Settings> {
@@ -58,6 +103,7 @@ pub async fn update(pool: &SqlitePool, input: SettingsInput) -> CmdResult<Settin
         "確認日の初期値",
         "日",
     )?;
+    let notify_times = notify::normalize_times(&input.notify_times).map_err(times_error)?;
     let mut tx = pool.begin().await?;
     let current = repo::settings::load(&mut tx).await?;
     let next = Settings {
@@ -65,17 +111,38 @@ pub async fn update(pool: &SqlitePool, input: SettingsInput) -> CmdResult<Settin
         soon_days: input.soon_days,
         follow_up_days: input.follow_up_days,
         theme: input.theme,
+        notify_enabled: input.notify_enabled,
+        notify_times,
+        close_to_tray: input.close_to_tray,
+        autostart: input.autostart,
         ..current
     };
-    repo::settings::save(&mut tx, &next).await?;
+    repo::settings::save_user_settings(&mut tx, &next).await?;
     tx.commit().await?;
     Ok(next)
+}
+
+fn times_error(e: TimesError) -> AppError {
+    AppError::validation(match e {
+        TimesError::Format(s) => format!(
+            "通知の時刻「{s}」を読み取れませんでした。「09:00」のように、時と分を「:」で区切って入力してください。"
+        ),
+        TimesError::TooFew => "通知の時刻を1つ以上登録してください。通知を止めるときは「OSの通知を出す」をオフにしてください。".to_owned(),
+        TimesError::TooMany => format!(
+            "通知の時刻は{}つまで登録できます。いらない時刻を削除してから追加してください。",
+            notify::TIMES_MAX
+        ),
+        TimesError::Duplicate(s) => {
+            format!("通知の時刻「{s}」はすでに登録されています。別の時刻を入力してください。")
+        }
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::commands::error::ErrorKind;
+    use crate::domain::testing::{d, ts};
     use crate::repo::db;
 
     fn input(soon: u32, follow: u32) -> SettingsInput {
@@ -84,6 +151,14 @@ mod tests {
             soon_days: soon,
             follow_up_days: follow,
             theme: Theme::Dark,
+            ..SettingsInput::from(&Settings::default())
+        }
+    }
+
+    fn times(list: &[&str]) -> SettingsInput {
+        SettingsInput {
+            notify_times: list.iter().map(|s| s.to_string()).collect(),
+            ..SettingsInput::from(&Settings::default())
         }
     }
 
@@ -109,5 +184,88 @@ mod tests {
             "「間近」とみなす日数は1〜30日の範囲で入力してください。"
         );
         assert_eq!(get(&pool).await.unwrap(), Settings::default());
+    }
+
+    #[tokio::test]
+    async fn notification_and_tray_settings_are_saved() {
+        let pool = db::open_in_memory().await.unwrap();
+        let s = update(
+            &pool,
+            SettingsInput {
+                notify_enabled: false,
+                notify_times: vec!["17:30".into(), "8:00".into()],
+                close_to_tray: false,
+                autostart: true,
+                ..SettingsInput::from(&Settings::default())
+            },
+        )
+        .await
+        .unwrap();
+        assert!(!s.notify_enabled);
+        // Saved as HH:MM in time order.
+        assert_eq!(s.notify_times, ["08:00", "17:30"]);
+        assert!(!s.close_to_tray);
+        assert!(s.autostart);
+        assert_eq!(get(&pool).await.unwrap(), s);
+    }
+
+    #[tokio::test]
+    async fn notification_times_are_checked() {
+        let pool = db::open_in_memory().await.unwrap();
+        let message = |e: AppError| {
+            assert_eq!(e.kind, ErrorKind::Validation);
+            e.message
+        };
+        assert_eq!(
+            message(update(&pool, times(&["9時"])).await.unwrap_err()),
+            "通知の時刻「9時」を読み取れませんでした。「09:00」のように、時と分を「:」で区切って入力してください。"
+        );
+        assert_eq!(
+            message(update(&pool, times(&[])).await.unwrap_err()),
+            "通知の時刻を1つ以上登録してください。通知を止めるときは「OSの通知を出す」をオフにしてください。"
+        );
+        assert_eq!(
+            message(
+                update(
+                    &pool,
+                    times(&["08:00", "09:00", "10:00", "11:00", "12:00", "13:00"])
+                )
+                .await
+                .unwrap_err()
+            ),
+            "通知の時刻は5つまで登録できます。いらない時刻を削除してから追加してください。"
+        );
+        assert_eq!(
+            message(update(&pool, times(&["09:00", "9:00"])).await.unwrap_err()),
+            "通知の時刻「09:00」はすでに登録されています。別の時刻を入力してください。"
+        );
+        assert_eq!(get(&pool).await.unwrap(), Settings::default());
+        // Five distinct times are fine.
+        let s = update(&pool, times(&["08:00", "09:00", "10:00", "11:00", "12:00"]))
+            .await
+            .unwrap();
+        assert_eq!(s.notify_times.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn saving_keeps_the_values_the_app_writes() {
+        let pool = db::open_in_memory().await.unwrap();
+        {
+            let mut c = pool.acquire().await.unwrap();
+            repo::settings::set_last_reminded_on(&mut c, Some(d("2026-11-19")))
+                .await
+                .unwrap();
+            repo::settings::set_last_notified_at(&mut c, Some(ts(2026, 11, 19, 0, 0)))
+                .await
+                .unwrap();
+            repo::settings::set_tray_hint_shown(&mut c, true)
+                .await
+                .unwrap();
+        }
+        let s = update(&pool, input(5, 2)).await.unwrap();
+        assert_eq!(s.last_reminded_on, Some(d("2026-11-19")));
+        assert_eq!(s.last_notified_at, Some(ts(2026, 11, 19, 0, 0)));
+        assert!(s.tray_hint_shown);
+        assert_eq!(get(&pool).await.unwrap(), s);
     }
 }

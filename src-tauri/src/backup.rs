@@ -8,6 +8,9 @@
 //!   listed too, so a restore can be undone), then replaces every row with the
 //!   backup's rows in one transaction. The open pool stays usable, so the app
 //!   does not need to restart.
+//! - The settings in `repo::settings::KEPT_ON_REPLACE` (`autostart`, which
+//!   belongs to this PC, and the values the app writes) keep their current
+//!   values through the replacement.
 //!
 //! Copies are written with `VACUUM INTO`, never by copying the WAL-mode file.
 
@@ -21,6 +24,7 @@ use sqlx::{Connection, SqlitePool};
 
 use crate::domain::date::{format_date, parse_date};
 use crate::repo::db;
+use crate::repo::settings::KEPT_ON_REPLACE;
 
 /// Folder inside the data folder.
 pub const BACKUP_DIR: &str = "backups";
@@ -368,7 +372,11 @@ async fn prepare(work: &Path) -> Result<()> {
     result
 }
 
-async fn copy_rows(pool: &SqlitePool, work: &Path) -> Result<()> {
+/// Replaces every row of the database with the rows of `work` (a migrated
+/// Higiri database) in one transaction, keeping the current values of the
+/// settings in [`KEPT_ON_REPLACE`] (a key that is not set now is not set
+/// afterwards either).
+pub async fn copy_rows(pool: &SqlitePool, work: &Path) -> Result<()> {
     let mut conn = pool.acquire().await?;
     // ATTACH cannot run inside a transaction.
     sqlx::query("ATTACH DATABASE ?1 AS src")
@@ -381,11 +389,33 @@ async fn copy_rows(pool: &SqlitePool, work: &Path) -> Result<()> {
         sqlx::query("PRAGMA defer_foreign_keys = ON")
             .execute(&mut *tx)
             .await?;
+        let mut kept: Vec<(String, String)> = Vec::new();
+        for key in KEPT_ON_REPLACE {
+            let row: Option<(String, String)> =
+                sqlx::query_as("SELECT key, value FROM main.settings WHERE key = ?1")
+                    .bind(key)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            kept.extend(row);
+        }
         for sql in DELETE_CHILD_FIRST {
             sqlx::query(sql).execute(&mut *tx).await?;
         }
         for sql in INSERT_PARENT_FIRST {
             sqlx::query(sql).execute(&mut *tx).await?;
+        }
+        for key in KEPT_ON_REPLACE {
+            sqlx::query("DELETE FROM main.settings WHERE key = ?1")
+                .bind(key)
+                .execute(&mut *tx)
+                .await?;
+        }
+        for (key, value) in &kept {
+            sqlx::query("INSERT INTO main.settings (key, value) VALUES (?1, ?2)")
+                .bind(key)
+                .bind(value)
+                .execute(&mut *tx)
+                .await?;
         }
         tx.commit().await
     }
@@ -562,6 +592,125 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(fk.0, 1);
+    }
+
+    #[tokio::test]
+    async fn restore_keeps_the_pc_and_app_written_settings() {
+        use crate::commands::settings::{self as cmd, SettingsInput};
+        use crate::domain::settings::{Settings, Theme};
+        use crate::repo::settings as repo_settings;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = file_db(tmp.path()).await;
+        // At backup time: autostart off, the other kept values unset, and a
+        // user setting (theme, notification times) that the restore brings back.
+        cmd::update(
+            &pool,
+            SettingsInput {
+                theme: Theme::Dark,
+                notify_times: vec!["08:00".into()],
+                ..SettingsInput::from(&Settings::default())
+            },
+        )
+        .await
+        .unwrap();
+        run_daily(&pool, tmp.path(), d("2026-11-18")).await.unwrap();
+
+        // Since then: autostart on, the app wrote its values, the user changed the theme.
+        cmd::update(
+            &pool,
+            SettingsInput {
+                theme: Theme::Light,
+                autostart: true,
+                ..SettingsInput::from(&Settings::default())
+            },
+        )
+        .await
+        .unwrap();
+        {
+            let mut c = pool.acquire().await.unwrap();
+            repo_settings::set_last_reminded_on(&mut c, Some(d("2026-11-19")))
+                .await
+                .unwrap();
+            repo_settings::set_last_notified_at(&mut c, Some(ts(2026, 11, 19, 3, 55)))
+                .await
+                .unwrap();
+            repo_settings::set_tray_hint_shown(&mut c, true)
+                .await
+                .unwrap();
+        }
+        let before = cmd::get(&pool).await.unwrap();
+
+        restore(
+            &pool,
+            tmp.path(),
+            "todo-2026-11-18.db",
+            ts(2026, 11, 19, 4, 0),
+        )
+        .await
+        .unwrap();
+        let after = cmd::get(&pool).await.unwrap();
+        // Restored from the backup.
+        assert_eq!(after.theme, Theme::Dark);
+        assert_eq!(after.notify_times, ["08:00"]);
+        // Kept as they were.
+        assert!(after.autostart);
+        assert_eq!(after.last_reminded_on, before.last_reminded_on);
+        assert_eq!(after.last_notified_at, before.last_notified_at);
+        assert!(after.tray_hint_shown);
+
+        // Undoing the restore brings the theme back and still keeps the
+        // current values (tray_hint_shown changed in between).
+        let kept = list(tmp.path())
+            .unwrap()
+            .into_iter()
+            .find(|b| b.kind == BackupKind::BeforeRestore)
+            .unwrap();
+        {
+            let mut c = pool.acquire().await.unwrap();
+            repo_settings::set_tray_hint_shown(&mut c, false)
+                .await
+                .unwrap();
+        }
+        restore(&pool, tmp.path(), &kept.file_name, ts(2026, 11, 19, 4, 5))
+            .await
+            .unwrap();
+        let undone = cmd::get(&pool).await.unwrap();
+        assert_eq!(undone.theme, Theme::Light);
+        assert!(!undone.tray_hint_shown);
+        assert!(undone.autostart);
+    }
+
+    #[tokio::test]
+    async fn restore_leaves_unset_kept_keys_unset() {
+        use crate::repo::settings as repo_settings;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = file_db(tmp.path()).await;
+        {
+            let mut c = pool.acquire().await.unwrap();
+            repo_settings::set_tray_hint_shown(&mut c, true)
+                .await
+                .unwrap();
+        }
+        run_daily(&pool, tmp.path(), d("2026-11-18")).await.unwrap();
+        sqlx::query("DELETE FROM settings")
+            .execute(&pool)
+            .await
+            .unwrap();
+        restore(
+            &pool,
+            tmp.path(),
+            "todo-2026-11-18.db",
+            ts(2026, 11, 19, 4, 0),
+        )
+        .await
+        .unwrap();
+        let keys: Vec<(String,)> = sqlx::query_as("SELECT key FROM settings")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(keys, vec![]);
     }
 
     #[tokio::test]

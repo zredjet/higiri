@@ -17,7 +17,8 @@ crate-type = ["rlib"]
 tauri-build = { version = "2.7.6", features = [] }
 
 [dependencies]
-tauri = { version = "2.12.7", features = [] }
+# tray-icon: the tray (v1.1, phase 10); image-png: the tray and toast icons.
+tauri = { version = "2.12.7", features = ["tray-icon", "image-png"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sqlx = { version = "0.9.1", default-features = false, features = ["runtime-tokio", "sqlite-bundled", "migrate", "macros"] }
@@ -29,6 +30,10 @@ tauri-plugin-clipboard-manager = "2.5.0"
 tauri-plugin-log = "2.10.2"
 tauri-plugin-window-state = "2.5.0"
 log = "0.4.35"
+# OS notifications (v1.1). Used from Rust only; the screens get no permission.
+tauri-plugin-notification = "2.8.1"
+# The resident timer (tokio::time::sleep, tokio::sync::Notify, select!); Tauri's own runtime is tokio.
+tokio = { version = "1.54.1", features = ["sync", "time", "macros"] }
 # Tauri 2 has no stable tauri-specta yet: keep these three pinned as one compatible set.
 specta = { version = "=2.0.0-rc.28", features = ["derive", "chrono"] }
 specta-typescript = "=0.0.15"
@@ -49,3 +54,9 @@ strip = true
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2.5.5"
+# Start at login (v1.1). Used from Rust only; the screens get no permission.
+tauri-plugin-autostart = "2.7.0"
+
+# Registers the toast AUMID under HKCU (v1.1). Already in the tree through tauri-build.
+[target.'cfg(windows)'.dependencies]
+winreg = "0.56.0"

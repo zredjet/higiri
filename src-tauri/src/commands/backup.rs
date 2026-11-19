@@ -6,9 +6,10 @@ use sqlx::SqlitePool;
 use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 
-use super::clock;
 use super::error::{AppError, CmdResult, ErrorKind};
+use super::{clock, settings};
 use crate::backup::{self, Backup, BackupError};
+use crate::resident;
 
 /// The folder holding todo.db and `backups/` (managed state).
 pub struct DataDir(pub PathBuf);
@@ -21,15 +22,20 @@ pub async fn list_backups(data_dir: State<'_, DataDir>) -> CmdResult<Vec<Backup>
 }
 
 /// Replaces all data with the chosen backup. The current data is copied to a
-/// 「復元する前の状態」 backup first, so the restore can be undone.
+/// 「復元する前の状態」 backup first, so the restore can be undone. The
+/// restored settings then apply to the running app (× and the notification
+/// times); `autostart` is kept as it was, so the OS registration stays.
 #[tauri::command]
 #[specta::specta]
 pub async fn restore_backup(
+    app: AppHandle,
     pool: State<'_, SqlitePool>,
     data_dir: State<'_, DataDir>,
     file_name: String,
 ) -> CmdResult<()> {
-    restore(&pool, &data_dir.0, &file_name, clock::now()).await
+    restore(&pool, &data_dir.0, &file_name, clock::now()).await?;
+    resident::apply(&app, &settings::get(&pool).await?);
+    Ok(())
 }
 
 /// Opens the data folder in Finder / Explorer.

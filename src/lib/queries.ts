@@ -251,3 +251,8 @@ export function useRestoreBackup() {
 export function useOpenDataFolder() {
   return useMutation({ mutationFn: () => commands.openDataFolder() });
 }
+
+/** 「通知を試す」: shows a test OS notification (even with notifications turned off). */
+export function useTestNotification() {
+  return useMutation({ mutationFn: () => commands.testNotification() });
+}

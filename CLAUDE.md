@@ -40,7 +40,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
 ```
 
 - 判定と集計は Rust 側に置く。画面側で日限注意の区分や残り日数を計算し直さない。
-- `domain/` の関数は現在時刻を自分で取らない。今日の日付(と現在時刻)は引数で受け取る。時計を読むのは `commands/` と常駐のタイマーだけで、どちらも `commands::clock` を使う(常駐のタイマーは v1.1 のフェーズ10で作る)。
+- `domain/` の関数は現在時刻を自分で取らない。今日の日付(と現在時刻)は引数で受け取る。時計を読むのは `commands/` と常駐のタイマー(`src-tauri/src/notifier.rs`)だけで、どちらも `commands::clock` を使う。通知の時刻はローカルの時刻なので、UTC からの変換には `clock::zone()`(PC のタイムゾーン)を渡す。
 - 日限注意の判定は `classify` の1か所。ダッシュボード、リマインド、一覧のバッジ、日報のすべてがこれを使う。今は `classify(todo, today, soon_days)`。v1.1 のフェーズ11で `classify(todo, today, &rules)` にする(`rules` は `soon_days` と `WorkCalendar` を持つ)。
 - ステータス変更は必ず `change_status` を通す。実績日の自動入力と `todo_events` への記録を1トランザクションで行う。`update_todo` でステータスを直接書き換えない。
 - 画面から呼べるのは設計書のコマンド一覧にあるものだけ。足すときは理由を添えて相談する。
@@ -81,8 +81,8 @@ SQLite(アプリのデータフォルダ内の todo.db)
 - 適用済みのマイグレーションファイルは書き換えない。変更は新しいファイルを足す。
 - DBへの接続なしで `cargo build` が通る構成にする(`query!` 系マクロを使うなら `cargo sqlx prepare` の成果物をコミットする)。
 - バックアップは `VACUUM INTO` で作る。WALモードのDBファイルを単純コピーしない。
-- バックアップは `src-tauri/src/backup.rs`。データフォルダの `backups/` に、その日最初の起動時に `todo-YYYY-MM-DD.db` を作り、新しい順に7個残す(起動しなかった日は数えない)。v1.1 のフェーズ10からは、常駐中に日付が変わったときも、常駐のタイマーが `backup::run_daily` でその日のバックアップを作る(1日1個、7個残すのは同じ)。復元の前には今のデータを `before-restore-<UTC日時>.db` に退避し、新しい順に3個残す。退避も復元の一覧に「復元する前の状態」として出し、復元を取り消せるようにする。
-- 復元は、選んだバックアップの作業用コピーを検査してマイグレーションを当ててから、`ATTACH` して全テーブルの行を1トランザクションで入れ替える(接続プールを開いたまま、再起動なしで済む)。新しい版のアプリで作ったバックアップと、壊れたファイルは復元しない。v1.1 のフェーズ10からは、`autostart`、`last_notified_at`、`tray_hint_shown`、`last_reminded_on` を今の値のまま残す(JSON の取り込みも同じ)。
+- バックアップは `src-tauri/src/backup.rs`。データフォルダの `backups/` に、その日最初の起動時に `todo-YYYY-MM-DD.db` を作り、新しい順に7個残す(起動しなかった日は数えない)。常駐中に日付が変わったときも、常駐のタイマーが `backup::run_daily` でその日のバックアップを作る(`notifier::backup_if_new_day`。1日1個、7個残すのは同じ)。復元の前には今のデータを `before-restore-<UTC日時>.db` に退避し、新しい順に3個残す。退避も復元の一覧に「復元する前の状態」として出し、復元を取り消せるようにする。
+- 復元は、選んだバックアップの作業用コピーを検査してマイグレーションを当ててから、`ATTACH` して全テーブルの行を1トランザクションで入れ替える(接続プールを開いたまま、再起動なしで済む)。新しい版のアプリで作ったバックアップと、壊れたファイルは復元しない。`autostart`、`last_notified_at`、`tray_hint_shown`、`last_reminded_on`(`repo::settings::KEPT_ON_REPLACE`)は、入れ替えの同じトランザクションの中で今の値に戻す(今ない値は、入れ替えたあともない)。行の入れ替えは `backup::copy_rows` で、フェーズ15の JSON の取り込みも同じ関数を使う。復元のあとは `restore_backup` の `#[tauri::command]` の層で `resident::apply` を呼び、×ボタンの動きとタイマーの待ち時間を復元した設定に合わせる。
 
 ## 画面の決めごと
 
@@ -106,8 +106,8 @@ SQLite(アプリのデータフォルダ内の todo.db)
 - TODO 一覧は200件を超えると、画面の近くの行だけを描く(`src/features/todos/virtualRows.ts` と `useVirtualRows.ts`)。行の高さは描いたあとに測り、それまでは見積もりを使う。Aizome の Table には見えている行だけを渡し、上下の行の分の高さは外側の要素の CSS(`tbody::before` / `::after`)で取る。Table の DOM は変えない。
 - キーボードショートカット: Ctrl+N(新規TODO)と Ctrl+1〜4(ダッシュボード、TODO、ガント、日報)は `src/app/shortcuts.ts`。macOS は Command。ダイアログやメニューが開いているときは効かない。「TODOを追加」のダイアログは App が持ち、画面のボタンとショートカットで同じものを開く。Esc、Ctrl+Enter、Ctrl+E は詳細パネルとエディタ側にある。
 - 動作ログは log プラグイン(OS のログフォルダの `higiri.log`、開発ビルドは `higiri-dev.log`。1 MB で切り替えて5個残す)。起動、バックアップ、復元、想定外のエラーだけを書き、TODO の中身は書かない。画面側は `src/lib/log.ts` の `logUnexpected` を使う(`errorMessage` が AppError 以外のエラーを渡す)。
-- 多重起動の防止(single-instance)は配布版だけで有効にする。開発ビルドは別のDBを使うので、インストールした版と同時に動かせるようにしている。ウィンドウの位置・大きさ・最大化は window-state で次回に戻す。
-- 権限(`capabilities/default.json`)は、アプリのコマンドと、opener の http/https、clipboard-manager の `allow-write-text`、log の `allow-log` だけ。`core:default` は付けない(画面は Tauri のウィンドウ・イベント・パスの API を使わない)。v1.1 で使う notification と autostart のプラグインは Rust からだけ使い、画面側には権限を付けない。
+- 多重起動の防止(single-instance)は配布版だけで有効にする。開発ビルドは別のDBを使うので、インストールした版と同時に動かせるようにしている。2つ目の起動は既存のウィンドウを前面に出す(`--autostart` つきなら出さない)。ウィンドウの位置・大きさ・最大化は window-state で次回に戻す。
+- 権限(`capabilities/default.json`)は、アプリのコマンドと、opener の http/https、clipboard-manager の `allow-write-text`、log の `allow-log` だけ。`core:default` は付けない(画面は Tauri のウィンドウ・イベント・パスの API を使わない)。notification と autostart のプラグインは Rust からだけ使い、画面側には権限を付けない。notification プラグインは画面に `window.Notification` の差し替えを入れ、Windows 以外では読み込み時に `is_permission_granted` を呼ぶが、権限がないので断られる(画面はこれを使わない)。
 - 日報: 節の組み立ては `domain/report.rs`。過去の日は、本日の作業と本日完了・中止をその日の記録から、待ち・明日の予定・日限注意を今の TODO の状態から対象日を今日として作る(待ちは、対象日より後に待ちに入ったものを除く)。中身のない節は「- なし」。所感・連絡事項は `## 所感・連絡事項` の見出しより後ろで、再生成しても残る。設計書の出力例との完全一致を `commands/reports.rs` のテスト(`tests/fixtures/daily_report_2026-11-19.md`)で確かめている。
 - 日報の画面(`src/features/report/`): 日付を開くと保存済みの日報を、なければ生成した日報を出す(開いただけでは保存しない)。編集が止まって1秒後と、再生成・コピー・.md で保存のときに `save_report` で保存する。コピーは clipboard-manager の `writeText`(権限は `clipboard-manager:allow-write-text` だけ)。.md の保存先ダイアログは dialog プラグインを Rust 側で開くので、画面側に dialog の権限は付けない。
 - プロジェクトの作成はサイドナビの「プロジェクトを追加」、編集・アーカイブ・削除はプロジェクトのページの「プロジェクトを編集」から行う。アーカイブしたプロジェクトは設定画面のカードで一覧し、元に戻す・削除する。削除は確認ダイアログを挟む。
@@ -123,7 +123,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
 v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作る。この節には、まだ作っていないものも含む。ファイルの場所など実装で決まることは、作ったフェーズでこのファイルの各節に足す。仕様の詳細は設計書の「v1.1の詳細」にある。
 
 - テーブル定義は変えない(マイグレーションを足さない)。新しい値は `settings` のキーに入れ、検索は既存の列を `LIKE` で引く(FTS5 は使わない)。
-- 足すコマンドは次の5つだけ(27個から32個になる)。上の「構成」の3か所をそろえ、件数のテスト(`commands/mod.rs`)も直す。
+- 足すコマンドは次の5つだけ(27個から32個になる。フェーズ10の `test_notification` で今は28個)。上の「構成」の3か所をそろえ、件数のテスト(`commands/mod.rs`)も直す。
 
   | コマンド | フェーズ | 用途 |
   | --- | --- | --- |
@@ -158,6 +158,19 @@ v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作る。�
   - 常駐のタイマーが起きたとき(最長10分おき)に日付が変わっていたら、`backup::run_daily` でその日のバックアップを取る。
   - 自動起動は `--autostart` の引数つきで登録し、そのときはウィンドウを出さずにトレイだけで起動する。single-instance の2つ目の起動も、`--autostart` つきならウィンドウを出さない。自動起動を OS に登録するのは配布版だけ。
   - ×ボタンは、`close_to_tray` がオンなら隠してトレイに残す。トレイを作れなかったときは、隠さずに終了する。
+  - 作ったもの(フェーズ10)
+    - `domain/notify.rs`: 時刻の読み取りと検査(`normalize_times`。`H:MM` も受け、全角の数字とコロンは半角として読む。保存は `HH:MM` で時刻の順)、`pending_slot`、`next_wake`、通知の文(`message`、`tray_hint`、`test_message`)。
+    - `notifier.rs`: 常駐のタイマー(tokio のタスク)。1回分の処理は `tick`(DB だけ。メモリ上の DB でテストする)と `backup_if_new_day`。設定の保存と復元のあとは `Notifier::wake`(`tokio::sync::Notify`)で起こす。通知を出すのは `notifier::show`。
+    - `resident.rs`: ウィンドウを出す `show_main`(最小化を戻す → 表示 → 前面)、×ボタン(`on_close_requested`)、トレイの案内、`--autostart` の判定、設定を動いているアプリに反映する `apply`(`close_to_tray` の `AtomicBool` とタイマーを起こす)。
+    - `tray.rs`: トレイ。メニューは「Higiri を開く」「終了」。Windows は左クリックでもウィンドウを開き、macOS はクリックでメニューを開く。
+    - `autostart.rs`: 自動起動の登録と解除(`apply`)。プラグインは配布版だけで読み込み、配布版は起動のたびに登録し直す(`sync_at_startup`)。App Translocation の判定は実行ファイルのパスに `AppTranslocation` があるか。
+    - `win_toast.rs`(Windows の配布版だけ): `HKCU\Software\Classes\AppUserModelId\com.redjet.higiri` に `DisplayName` と `IconUri`(データフォルダの `toast-icon.png`)を書く。
+    - `commands/notify.rs`: `test_notification`。
+    - `update_settings` の `#[tauri::command]` は、保存のあとに `resident::apply` と、`autostart` が変わったときの `autostart::apply` を呼ぶ。OS への登録に失敗したら `autostart` を元の値で保存し直してエラーを返す。
+    - アプリが書く値は1キーずつ書く(`repo::settings::set_last_reminded_on`、`set_last_notified_at`、`set_tray_hint_shown`)。`update_settings` は利用者が変える値だけを書く(`save_user_settings`)。
+    - 通知のクリックは、notification プラグイン(2.8.1)の `on_action` で `tap` を受けてウィンドウを出す。
+    - main ウィンドウは `tauri.conf.json` で `visible: false` にし、setup の最後に出す。macOS の Dock のクリック(`RunEvent::Reopen`)でも出す。
+    - 設定画面の「通知と常駐」のカードは `SettingsPage.tsx` の `ResidentCard`。開発ビルドかどうかは `import.meta.env.DEV` で見て、自動起動のスイッチを押せなくする。
 - 営業日(フェーズ11)
   - 判定は `classify(todo, today, &rules)` の1か所のまま。休日と営業日の計算も `domain/` の純粋関数にする。
   - 暦日の設定(初期値)では、今の判定と表示を何も変えない。既存のテストとフィクスチャはそのまま通す。
@@ -209,6 +222,6 @@ v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作る。�
 | 配布物のビルド(実行ファイルの ZIP を `release/` に作る) | `npm run build` |
 
 - 配布物は実行ファイルの ZIP で、インストーラーと .dmg は作らない。`npm run build`(`scripts/package.mjs`)が、Windows では `Higiri.exe`、macOS では ad-hoc 署名した `Higiri.app` を ZIP にして `release/` に置く(macOS は `ditto` で固めて、署名と実行権限を保つ)。リリースは `v` で始まるタグ(`v0.1.0` など。版は `tauri.conf.json` の `version` と揃える)を push すると、`.github/workflows/release.yml` が下書きのリリースを作り、Windows と macOS の ZIP を添付してから公開する。`windows.yml` と `macos.yml` は手動で動かす確認用で、ZIP を包み直さずに(`archive: false`)成果物に上げる。どれも同じスクリプトで ZIP を作り、Rust のキャッシュを共有する(ジョブ名を `build` で揃えている)。Actions では Vitest と cargo test を通してから作る(型チェックは build:web の中で行い、clippy は手元の `npm run check` だけで動かす)。配布版の設定(`[profile.release]`)は、ビルド時間を優先して LTO を使わない。改行は `.gitattributes` で LF に揃えている(生成物とフィクスチャをバイト単位で比べるテストがあるため)。
-- アプリアイコンは D3 案(藍の判子に白いチェック、右上に日限を表す朱のひし形。色は Aizome の `sumi-50`・`ai-700`・`shu-500`)。原画は `src-tauri/icons/source/` の SVG 3つで、`higiri-icon.svg`(全面。PNG と .ico の 48〜256px)、`higiri-icon-small.svg`(16〜32px 用に内側の枠を省き、チェックを太くした簡略版)、`higiri-icon-macos.svg`(Apple のグリッドに合わせた .icns 用)。`npm run icons`(`scripts/icons.mjs`)で `src-tauri/icons/` を作り直す。生成されたファイルは手で編集しない。
+- アプリアイコンは D3 案(藍の判子に白いチェック、右上に日限を表す朱のひし形。色は Aizome の `sumi-50`・`ai-700`・`shu-500`)。原画は `src-tauri/icons/source/` の SVG で、`higiri-icon.svg`(全面。PNG と .ico の 48〜256px)、`higiri-icon-small.svg`(16〜32px 用に内側の枠を省き、チェックを太くした簡略版)、`higiri-icon-macos.svg`(Apple のグリッドに合わせた .icns 用)。トレイのアイコンは、Windows が `higiri-icon-small.svg` の 32px(`tray-windows.png`)、macOS がメニューバー用の単色テンプレート画像 `higiri-tray-macos.svg` の 36px(`tray-macos.png`、18pt の2倍)で、どちらも `tray.rs` に埋め込む。`npm run icons`(`scripts/icons.mjs`)で `src-tauri/icons/` を作り直す。生成されたファイルは手で編集しない。
 - 開発ビルドの DB は、配布版と混ざらないように、データフォルダの下の `dev/todo.db` を使う(macOS は `~/Library/Application Support/com.redjet.higiri/dev/`、Windows は `%APPDATA%\com.redjet.higiri\dev\`)。サンプルデータを入れ直すときは、アプリを閉じてこの `dev` フォルダを消してから `npm run dev:sample` で起動する。
 - サンプルデータはモックの3プロジェクト・11件で、日付は「モックの今日(2026-11-19)」が実際の今日になるようにずらして入れる。ステータスの変化は `change_status` と同じ遷移関数で再現するので、変更履歴も残る。

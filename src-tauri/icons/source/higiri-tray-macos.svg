@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 100 100">
+  <!-- Higiri menu bar icon for macOS: a one-color template image (black and
+       transparency only; macOS tints it for the light and dark menu bar).
+       The seal of design D3 with the check cut out, and the 日限 diamond with
+       a gap around it. Drawn a little inside the square, like other menu bar
+       icons. Windows uses the color 32 px icon (higiri-icon-small.svg). -->
+  <defs>
+    <mask id="cut">
+      <rect x="-20" y="-20" width="140" height="140" fill="#fff"/>
+      <path d="M26 57 L41 71 L67 42" fill="none" stroke="#000" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+      <polygon points="82,-3 103,18 82,39 61,18" fill="#000"/>
+    </mask>
+  </defs>
+  <g transform="translate(8 8) scale(0.84)">
+    <rect x="4" y="16" width="80" height="80" rx="14" fill="#000" mask="url(#cut)"/>
+    <polygon points="82,5 95,18 82,31 69,18" fill="#000"/>
+  </g>
+</svg>
