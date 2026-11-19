@@ -48,6 +48,16 @@ pub async fn get(
         .transpose()
 }
 
+/// Every saved report (checking that imported data can be read).
+pub async fn list_all(conn: &mut SqliteConnection) -> Result<Vec<Report>> {
+    sqlx::query_as::<_, ReportRow>("SELECT * FROM reports ORDER BY kind, period_start")
+        .fetch_all(&mut *conn)
+        .await?
+        .into_iter()
+        .map(ReportRow::into_report)
+        .collect()
+}
+
 /// Inserts or replaces the report of (kind, period_start).
 pub async fn upsert(conn: &mut SqliteConnection, r: &Report) -> Result<Report> {
     sqlx::query_as::<_, ReportRow>(

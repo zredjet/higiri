@@ -334,6 +334,23 @@ export function useRestoreBackup() {
   });
 }
 
+/** 「JSONで書き出す」: opens the save dialog (Rust side) and writes all data. Resolves to the path, or null when cancelled. */
+export function useExportData() {
+  return useMutation({ mutationFn: () => commands.exportData() });
+}
+
+/**
+ * 「JSONから取り込む」: opens the file dialog (Rust side) and replaces all data, then reloads
+ * everything on screen. Resolves to the file name, or null when cancelled (nothing changed).
+ */
+export function useImportData() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => commands.importData(),
+    onSuccess: (fileName) => (fileName === null ? undefined : qc.invalidateQueries()),
+  });
+}
+
 export function useOpenDataFolder() {
   return useMutation({ mutationFn: () => commands.openDataFolder() });
 }

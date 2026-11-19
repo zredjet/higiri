@@ -84,6 +84,15 @@ pub async fn list_by_todo(conn: &mut SqliteConnection, todo_id: i64) -> Result<V
     )
 }
 
+/// Every event (checking that imported data can be read).
+pub async fn list_all(conn: &mut SqliteConnection) -> Result<Vec<TodoEvent>> {
+    collect(
+        sqlx::query_as::<_, EventRow>("SELECT * FROM todo_events ORDER BY id")
+            .fetch_all(&mut *conn)
+            .await?,
+    )
+}
+
 /// Every status change of every TODO (待ち spans of the Gantt chart).
 pub async fn list_status_events(conn: &mut SqliteConnection) -> Result<Vec<TodoEvent>> {
     collect(

@@ -2,6 +2,7 @@ pub mod autostart;
 pub mod backup;
 pub mod commands;
 pub mod domain;
+pub mod json_data;
 pub mod notifier;
 #[cfg(test)]
 mod perf;

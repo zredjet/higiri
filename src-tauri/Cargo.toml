@@ -20,7 +20,8 @@ tauri-build = { version = "2.7.6", features = [] }
 # tray-icon: the tray (v1.1, phase 10); image-png: the tray and toast icons.
 tauri = { version = "2.12.7", features = ["tray-icon", "image-png"] }
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.154"
+# raw_value: the JSON export keeps stored JSON (todo_events.note, settings) as written.
+serde_json = { version = "1.0.154", features = ["raw_value"] }
 sqlx = { version = "0.9.1", default-features = false, features = ["runtime-tokio", "sqlite-bundled", "migrate", "macros"] }
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock", "serde"] }
 thiserror = "2.0.21"

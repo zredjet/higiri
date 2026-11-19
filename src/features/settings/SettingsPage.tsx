@@ -16,6 +16,7 @@ import { errorMessage } from "../../lib/errors";
 import { isComposing } from "../../lib/keys";
 import {
   useArchiveProject,
+  useExportData,
   useHolidays,
   useOpenDataFolder,
   useProjects,
@@ -26,6 +27,7 @@ import {
 } from "../../lib/queries";
 import { DeleteProjectDialog } from "../projects/DeleteProjectDialog";
 import { backupLabel } from "./backupText";
+import { ImportDialog } from "./ImportDialog";
 import { ReportTemplateCard } from "./ReportTemplateCard";
 import { RestoreDialog } from "./RestoreDialog";
 
@@ -74,16 +76,19 @@ export function SettingsPage() {
   );
 }
 
-/** データ: the data folder and restoring a backup (C-1). */
+/** データ: the data folder, restoring a backup (C-1), and the JSON export and import (C-2). */
 function DataCard() {
   const openFolder = useOpenDataFolder();
+  const exportData = useExportData();
   const [restoring, setRestoring] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const error = openFolder.error ?? exportData.error;
 
   return (
     <Card title="データ" description="データはこのPCの中だけに保存しています。">
       <div className="settings-card__body settings-card__body--tight">
-        {openFolder.error ? <Alert tone="danger">{errorMessage(openFolder.error)}</Alert> : null}
+        {error ? <Alert tone="danger">{errorMessage(error)}</Alert> : null}
         {notice ? (
           <Alert tone="success" onClose={() => setNotice(null)}>
             {notice}
@@ -103,13 +108,51 @@ function DataCard() {
             バックアップから復元
           </Button>
         </div>
+        <p className="settings-card__text">
+          全データを1つのJSONファイルに書き出せます。書き出したファイルから取り込むと、今のデータはすべて置き換わります。
+        </p>
+        <div className="settings-card__actions">
+          <Button
+            loading={exportData.isPending}
+            onClick={() => {
+              setNotice(null);
+              exportData.mutate(undefined, {
+                onSuccess: (path) => {
+                  if (path) setNotice(`JSONに書き出しました。保存先: ${path}`);
+                },
+              });
+            }}
+          >
+            JSONで書き出す
+          </Button>
+          <Button
+            onClick={() => {
+              setNotice(null);
+              setImporting(true);
+            }}
+          >
+            JSONから取り込む
+          </Button>
+        </div>
       </div>
       <RestoreDialog
         open={restoring}
         onClose={() => setRestoring(false)}
         onRestored={(b) => {
           setRestoring(false);
-          setNotice(`「${backupLabel(b)}」から復元しました。元に戻すときは「復元する前の状態」を選んで復元してください。`);
+          setNotice(
+            `「${backupLabel(b)}」から復元しました。元に戻すときは「復元・取り込みの前の状態」を選んで復元してください。`,
+          );
+        }}
+      />
+      <ImportDialog
+        open={importing}
+        onClose={() => setImporting(false)}
+        onImported={(fileName) => {
+          setImporting(false);
+          setNotice(
+            `「${fileName}」から取り込みました。元に戻すときは「バックアップから復元」で「復元・取り込みの前の状態」を選んで復元してください。`,
+          );
         }}
       />
     </Card>

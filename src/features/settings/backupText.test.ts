@@ -21,7 +21,7 @@ describe("backup text", () => {
         date: null,
         created_at: "2026-11-19T11:30:00.000Z",
       }),
-    ).toBe("復元する前の状態(2026/11/19 20:30)");
+    ).toBe("復元・取り込みの前の状態(2026/11/19 20:30)");
     expect(backupDetail(daily)).toBe("2026/11/19 09:12 に作成・84 KB");
   });
 

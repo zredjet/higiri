@@ -149,6 +149,15 @@ pub async fn list_by_todos(conn: &mut SqliteConnection, todo_ids: &[i64]) -> Res
     )
 }
 
+/// Every log (checking that imported data can be read).
+pub async fn list_all(conn: &mut SqliteConnection) -> Result<Vec<WorkLog>> {
+    collect(
+        sqlx::query_as::<_, WorkLogRow>("SELECT * FROM work_logs ORDER BY id")
+            .fetch_all(&mut *conn)
+            .await?,
+    )
+}
+
 /// Logs written for one day (daily report material).
 pub async fn list_by_date(conn: &mut SqliteConnection, date: NaiveDate) -> Result<Vec<WorkLog>> {
     collect(

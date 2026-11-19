@@ -7,7 +7,8 @@
 //!   `backups/before-restore-<UTC time>.db` (the newest 3 are kept, and they are
 //!   listed too, so a restore can be undone), then replaces every row with the
 //!   backup's rows in one transaction. The open pool stays usable, so the app
-//!   does not need to restart.
+//!   does not need to restart. The JSON import (`json_data`) replaces the data
+//!   the same way ([`keep_and_replace`]).
 //! - The settings in `repo::settings::KEPT_ON_REPLACE` (`autostart`, which
 //!   belongs to this PC, and the values the app writes) keep their current
 //!   values through the replacement.
@@ -89,7 +90,7 @@ pub type Result<T> = std::result::Result<T, BackupError>;
 pub enum BackupKind {
     /// 自動バックアップ (first launch of the day).
     Daily,
-    /// 復元する前の状態 (taken just before a restore).
+    /// 復元・取り込みの前の状態 (taken just before a restore or a JSON import).
     BeforeRestore,
 }
 
@@ -258,7 +259,7 @@ fn remove_if_exists(p: &Path) -> Result<()> {
 }
 
 /// Removes a database file and its -wal / -shm / -journal companions.
-fn remove_db_files(p: &Path) -> Result<()> {
+pub fn remove_db_files(p: &Path) -> Result<()> {
     remove_if_exists(p)?;
     for suffix in ["-wal", "-shm", "-journal"] {
         let mut s = p.as_os_str().to_owned();
@@ -307,29 +308,36 @@ pub async fn restore(
     let work = dir.join(RESTORE_WORK_FILE);
     remove_db_files(&work)?;
     std::fs::copy(&source, &work)?;
-    let result = restore_from_work(pool, &dir, &work, now).await;
+    let result = async {
+        prepare(&work).await?;
+        keep_and_replace(pool, data_dir, &work, now).await
+    }
+    .await;
     if let Err(e) = remove_db_files(&work) {
         log::warn!("could not remove {}: {e}", work.display());
     }
-    let kept = result?;
-    prune(&dir)?;
-    Ok(kept)
+    result
 }
 
-async fn restore_from_work(
+/// Keeps the current data as a 「復元・取り込みの前の状態」 copy, replaces
+/// every row with the rows of `work` (a checked and migrated Higiri database)
+/// in one transaction, then removes old copies. Returns the copy's file name.
+/// Used by the restore and by the JSON import.
+pub async fn keep_and_replace(
     pool: &SqlitePool,
-    dir: &Path,
+    data_dir: &Path,
     work: &Path,
     now: DateTime<Utc>,
 ) -> Result<String> {
-    prepare(work).await?;
-
+    let dir = dir(data_dir);
+    std::fs::create_dir_all(&dir)?;
     // 2. Keep the current data.
     let kept = BackupName::BeforeRestore(now).file_name();
     vacuum_into(pool, &dir.join(&kept)).await?;
 
     // 3. Replace every row in one transaction.
     copy_rows(pool, work).await?;
+    prune(&dir)?;
     Ok(kept)
 }
 

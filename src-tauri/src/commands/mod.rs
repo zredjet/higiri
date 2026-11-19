@@ -11,6 +11,7 @@ pub mod dashboard;
 pub mod error;
 pub mod gantt;
 pub mod holidays;
+pub mod json_data;
 pub mod notify;
 pub mod projects;
 pub mod reports;
@@ -64,6 +65,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             notify::test_notification,
             holidays::list_holidays,
             search::search_todos,
+            json_data::export_data,
+            json_data::import_data,
         ])
         .typ::<error::AppError>()
         // 「初期値に戻す」 on the settings screen sends this template.
@@ -118,7 +121,7 @@ mod tests {
             .collect();
         allowed.sort();
         assert_eq!(allowed, commands_in_bindings());
-        assert_eq!(allowed.len(), 30);
+        assert_eq!(allowed.len(), 32);
     }
 
     /// Regenerates `src/lib/bindings.ts` and fails when the committed file was

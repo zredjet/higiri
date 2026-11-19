@@ -30,7 +30,7 @@ function RestoreForm({ onClose, onRestored }: RestoreDialogProps) {
       open
       onClose={restore.isPending ? undefined : onClose}
       title="バックアップから復元"
-      description="選んだ時点のデータに戻します。今のデータは、復元の前に「復元する前の状態」として残します。"
+      description="選んだ時点のデータに戻します。今のデータは、復元の前に「復元・取り込みの前の状態」として残します。"
       footer={
         <>
           <Button onClick={onClose} disabled={restore.isPending}>

@@ -33,6 +33,8 @@ const APP_COMMANDS: &[&str] = &[
     "test_notification",
     "list_holidays",
     "search_todos",
+    "export_data",
+    "import_data",
 ];
 
 fn main() {

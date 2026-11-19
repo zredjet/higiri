@@ -22,7 +22,7 @@ pub async fn list_backups(data_dir: State<'_, DataDir>) -> CmdResult<Vec<Backup>
 }
 
 /// Replaces all data with the chosen backup. The current data is copied to a
-/// 「復元する前の状態」 backup first, so the restore can be undone. The
+/// 「復元・取り込みの前の状態」 backup first, so the restore can be undone. The
 /// restored settings then apply to the running app (× and the notification
 /// times); `autostart` is kept as it was, so the OS registration stays.
 #[tauri::command]

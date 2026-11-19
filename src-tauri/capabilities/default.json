@@ -48,6 +48,8 @@
     "allow-open-data-folder",
     "allow-test-notification",
     "allow-list-holidays",
-    "allow-search-todos"
+    "allow-search-todos",
+    "allow-export-data",
+    "allow-import-data"
   ]
 }

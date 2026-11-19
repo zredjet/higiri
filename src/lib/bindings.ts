@@ -69,7 +69,7 @@ export const commands = {
 	listBackups: (options?: InvokeOptions) => __TAURI_INVOKE<Backup[]>("list_backups", undefined, options),
 	/**
 	 *  Replaces all data with the chosen backup. The current data is copied to a
-	 *  「復元する前の状態」 backup first, so the restore can be undone. The
+	 *  「復元・取り込みの前の状態」 backup first, so the restore can be undone. The
 	 *  restored settings then apply to the running app (× and the notification
 	 *  times); `autostart` is kept as it was, so the OS registration stays.
 	 */
@@ -91,6 +91,19 @@ export const commands = {
 	 *  with where each word was found. At most 100, with the total count.
 	 */
 	searchTodos: (text: string, options?: InvokeOptions) => __TAURI_INVOKE<SearchResult>("search_todos", { text }, options),
+	/**
+	 *  Asks where to save (default name `higiri-YYYY-MM-DD.json`) and writes all
+	 *  data there. Returns the path, or null when the user closed the dialog.
+	 */
+	exportData: (options?: InvokeOptions) => __TAURI_INVOKE<string | null>("export_data", undefined, options),
+	/**
+	 *  Asks for a file exported by Higiri and replaces all data with it, after
+	 *  keeping the current data as a 「復元・取り込みの前の状態」 backup. The
+	 *  screen has already asked the user. The imported settings then apply to the
+	 *  running app, as after a restore. Returns the file's name, or null when the
+	 *  user closed the dialog.
+	 */
+	importData: (options?: InvokeOptions) => __TAURI_INVOKE<string | null>("import_data", undefined, options),
 };
 
 /* Constants */
@@ -167,7 +180,7 @@ export type Backup = {
 export type BackupKind = 
 /**  自動バックアップ (first launch of the day). */
 "daily" | 
-/**  復元する前の状態 (taken just before a restore). */
+/**  復元・取り込みの前の状態 (taken just before a restore or a JSON import). */
 "before_restore";
 
 /**  本日完了・中止. */

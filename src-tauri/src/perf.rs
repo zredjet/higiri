@@ -397,5 +397,31 @@ async fn perf_5000_todos_20000_logs() {
         .await
         .unwrap();
     println!("daily backup (VACUUM INTO)   {}", ms(t.elapsed()));
+
+    // C-2: export everything to JSON, then import it back (into the same
+    // database: the work database, the checks, the kept copy and the swap).
+    let file = tmp.path().join("higiri-export.json");
+    let now = Utc::now();
+    let t = Instant::now();
+    crate::json_data::export_to(&pool, &file, "perf", now)
+        .await
+        .unwrap();
+    let size = std::fs::metadata(&file).unwrap().len();
+    println!(
+        "export_data (JSON, {:.1} MB)  {}",
+        size as f64 / 1_000_000.0,
+        ms(t.elapsed())
+    );
+    let t = Instant::now();
+    crate::json_data::import(&pool, tmp.path(), &file, now)
+        .await
+        .unwrap();
+    println!("import_data (JSON)           {}", ms(t.elapsed()));
+    let counts: (i64, i64) =
+        sqlx::query_as("SELECT (SELECT COUNT(*) FROM todos), (SELECT COUNT(*) FROM work_logs)")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(counts, (TODOS as i64, WORK_LOGS as i64));
     pool.close().await;
 }

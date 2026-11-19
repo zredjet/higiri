@@ -81,8 +81,8 @@ SQLite(アプリのデータフォルダ内の todo.db)
 - 適用済みのマイグレーションファイルは書き換えない。変更は新しいファイルを足す。
 - DBへの接続なしで `cargo build` が通る構成にする(`query!` 系マクロを使うなら `cargo sqlx prepare` の成果物をコミットする)。
 - バックアップは `VACUUM INTO` で作る。WALモードのDBファイルを単純コピーしない。
-- バックアップは `src-tauri/src/backup.rs`。データフォルダの `backups/` に、その日最初の起動時に `todo-YYYY-MM-DD.db` を作り、新しい順に7個残す(起動しなかった日は数えない)。常駐中に日付が変わったときも、常駐のタイマーが `backup::run_daily` でその日のバックアップを作る(`notifier::backup_if_new_day`。1日1個、7個残すのは同じ)。復元の前には今のデータを `before-restore-<UTC日時>.db` に退避し、新しい順に3個残す。退避も復元の一覧に「復元する前の状態」として出し、復元を取り消せるようにする。
-- 復元は、選んだバックアップの作業用コピーを検査してマイグレーションを当ててから、`ATTACH` して全テーブルの行を1トランザクションで入れ替える(接続プールを開いたまま、再起動なしで済む)。新しい版のアプリで作ったバックアップと、壊れたファイルは復元しない。`autostart`、`last_notified_at`、`tray_hint_shown`、`last_reminded_on`(`repo::settings::KEPT_ON_REPLACE`)は、入れ替えの同じトランザクションの中で今の値に戻す(今ない値は、入れ替えたあともない)。行の入れ替えは `backup::copy_rows` で、フェーズ15の JSON の取り込みも同じ関数を使う。復元のあとは `restore_backup` の `#[tauri::command]` の層で `resident::apply` を呼び、×ボタンの動きとタイマーの待ち時間を復元した設定に合わせる。
+- バックアップは `src-tauri/src/backup.rs`。データフォルダの `backups/` に、その日最初の起動時に `todo-YYYY-MM-DD.db` を作り、新しい順に7個残す(起動しなかった日は数えない)。常駐中に日付が変わったときも、常駐のタイマーが `backup::run_daily` でその日のバックアップを作る(`notifier::backup_if_new_day`。1日1個、7個残すのは同じ)。復元と JSON の取り込み(フェーズ15)の前には今のデータを `before-restore-<UTC日時>.db` に退避し、新しい順に3個残す。退避も復元の一覧に「復元・取り込みの前の状態」として出し、復元と取り込みを取り消せるようにする。
+- 復元は、選んだバックアップの作業用コピーを検査してマイグレーションを当ててから、`ATTACH` して全テーブルの行を1トランザクションで入れ替える(接続プールを開いたまま、再起動なしで済む)。新しい版のアプリで作ったバックアップと、壊れたファイルは復元しない。`autostart`、`last_notified_at`、`tray_hint_shown`、`last_reminded_on`(`repo::settings::KEPT_ON_REPLACE`)は、入れ替えの同じトランザクションの中で今の値に戻す(今ない値は、入れ替えたあともない)。退避・行の入れ替え・古い退避の削除は `backup::keep_and_replace`(行の入れ替えは中の `backup::copy_rows`)で、フェーズ15の JSON の取り込みも同じ関数を使う。復元のあとは `restore_backup` の `#[tauri::command]` の層で `resident::apply` を呼び、×ボタンの動きとタイマーの待ち時間を復元した設定に合わせる。
 
 ## 画面の決めごと
 
@@ -129,7 +129,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
 v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作る。この節には、まだ作っていないものも含む。ファイルの場所など実装で決まることは、作ったフェーズでこのファイルの各節に足す。仕様の詳細は設計書の「v1.1の詳細」にある。
 
 - テーブル定義は変えない(マイグレーションを足さない)。新しい値は `settings` のキーに入れ、検索は既存の列を `LIKE` で引く(FTS5 は使わない)。
-- 足すコマンドは次の5つだけ(27個から32個になる。フェーズ10の `test_notification`、フェーズ11の `list_holidays`、フェーズ12の `search_todos` で今は30個)。上の「構成」の3か所をそろえ、件数のテスト(`commands/mod.rs`)も直す。
+- 足すコマンドは次の5つだけ(27個から32個になる。フェーズ15の `export_data`、`import_data` で32個そろった)。上の「構成」の3か所をそろえ、件数のテスト(`commands/mod.rs`)も直す。
 
   | コマンド | フェーズ | 用途 |
   | --- | --- | --- |
@@ -238,6 +238,19 @@ v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作る。�
     - 日報の画面の「再生成」の横の文は、所感・連絡事項の見出しを今のテンプレートから取る(既定ではモックの文のまま)。
 - JSON のエクスポートとインポート(フェーズ15)
   - 取り込みは全データの置き換え。復元と同じく、作業用の DB で検査してから今のデータを `before-restore-<UTC日時>.db` に退避し、`ATTACH` して1トランザクションで入れ替える。`autostart`、`last_notified_at`、`tray_hint_shown`、`last_reminded_on` は、復元と同じく今の値のまま残す。
+  - 作ったもの(フェーズ15)
+    - `src-tauri/src/json_data.rs`: 書き出し(`export_json`、ファイルに書く `export_to`)と取り込み(`import`、中身は `import_bytes`)。`commands/json_data.rs` が `export_data` と `import_data`。
+    - ファイルの形: 設計書の形(`format` は `"higiri-export"`、`format_version` は1、`schema_version` は `_sqlx_migrations` の適用済みの最新の番号、`app_version`、`exported_at`、5つの表、`settings`)。表は `projects`、`todos`、`work_logs`、`todo_events`、`reports` の順で、行は ID(`reports` は種類と開始日)の順。行は列名をキーにし、値は保存されているまま(整数・文字列・null)。`todo_events.note` と settings の値は、保存してある JSON の文をそのまま(キーの順も変えずに)JSON の値として埋め込む(serde_json の `raw_value`)。1行に1つの行を置き、ほかは2字の字下げ。settings はキーの順。
+    - 書き出し: 5つの表と settings を1つのトランザクションで読む。保存先と同じフォルダの `<名前>.part` に書いてから名前を変え、失敗したら `.part` を消す(途中までのファイルを残さない)。JSON として読めない settings の値は書き出さない(アプリは既定値として読むので、取り込んでも同じになる)。JSON として読めない `note` は文字列として書き出す(アプリが書くことはない。その行は取り込みで「読めない値」として断られる)。
+    - 取り込みの順: (1) 先頭の BOM を除く。(2) 先頭の項目だけを読む(ほかのキーも構文は確かめる)。JSON として読めなければ `NotJson`、`format` が違えば `NotOurs`、`format_version` が1より大きいか `schema_version` がこの版の最新より大きければ `TooNew`、版の値がおかしければ `Malformed`。(3) 5つの表と settings を読む(どれかがなければ `Malformed`。ほかのキーは無視)。(4) `backups/import-work.db` を作り、ファイルの `schema_version` までマイグレーションを当てて(`MIGRATOR.run_to`)、外部キーを遅らせた1つのトランザクションで行を入れる。列は作業用の DB の `pragma_table_info` と照らし、知らない列と型の違う値(INTEGER の列に整数以外、TEXT の列に文字列以外)は `Malformed`。ない列は表の既定値になる。外部キー・CHECK・NOT NULL・主キーの重複は `Constraint`。(5) 残りのマイグレーションを当て、アプリの読み取り(`repo::projects::list`、`repo::todos::list`、`repo::work_logs::list_all`、`repo::events::list_all`、`repo::reports::list_all`)で全行を読み直す。読めない値(日付の書き方、ステータス名、優先度、変更履歴の種類と `note` の形)は `Unreadable`。(6) `backup::keep_and_replace` で退避して入れ替える。断ったときは退避も入れ替えもせず、作業用の DB は成否にかかわらず消す。
+    - 行は同じ列の並びが続く間、1つの INSERT にまとめる(1文の値は4,000個まで)。ID はファイルの値のまま入れる。`AUTOINCREMENT` の表はない(`sqlite_sequence` もない)ので、取り込んだあとの新しい行は今ある最大の ID の次になる。
+    - settings: ファイルの値をそのまま入れる。知らないキーも残し(アプリは無視する)、読めない値も残す(アプリは既定値として読む。DB のときと同じ)。`KEPT_ON_REPLACE` の4つは `copy_rows` が今の値に戻す。
+    - エラーの文は `commands/json_data.rs` の `import_error`。断ったときは「〜ため、取り込めませんでした。今のデータは変わっていません。」に、どうすればよいか(「Higiriの「JSONで書き出す」で作ったファイルを選んでください。」「アプリを新しい版にしてから取り込んでください。」「書き出したあとに手で直した所があれば元に戻すか、書き出し直したファイルを選んでください。」)を続ける。
+    - ダイアログは .md の保存と同じく `spawn_blocking` で開く(保存は `blocking_save_file`、既定の名前は `higiri-YYYY-MM-DD.json`。取り込みは `blocking_pick_file`)。どちらも JSON の絞り込みを付ける。選ばずに閉じたら `null` を返し、何もしない。`export_data` は保存先のパス、`import_data` はファイル名を返す。取り込みのあとは `resident::apply` を呼ぶ(復元と同じ)。
+    - 動作ログ: 書き出しと取り込みをしたこと、取り込みで作った退避のファイル名、断った理由の種類(読めない値は列の名前まで)だけを書く(件数・中身・パスは書かない。`ImportError` は値を持たない)。
+    - 画面: 設定画面の「データ」のカードに、説明の文と「JSONで書き出す」「JSONから取り込む」のボタン。書き出したら「JSONに書き出しました。保存先: …」。取り込みは確認のダイアログ(`src/features/settings/ImportDialog.tsx`。題は「JSONから取り込みますか」、文は設計書のもの、ボタンは「キャンセル」「ファイルを選ぶ」)から開き、断られたらダイアログの中にエラーを出す(ダイアログは開いたまま、別のファイルを選べる)。ファイルを選ばずに閉じたら確認のダイアログも閉じる。取り込んだら「「(ファイル名)」から取り込みました。元に戻すときは「バックアップから復元」で「復元・取り込みの前の状態」を選んで復元してください。」。フックは `queries.ts` の `useExportData`、`useImportData`(取り込んだらすべての一覧を取り直す)。
+    - 退避の表示名は「復元・取り込みの前の状態(日時)」(`backupText.ts`)。復元のダイアログと案内の文も合わせた。
+    - perf(`perf.rs`): 5,000件・作業ログ20,000件で、書き出し(約9.5 MB)と、それを同じ DB に取り込む時間を測る。
 
 ## 品質の決めごと
 
