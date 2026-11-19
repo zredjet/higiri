@@ -10,6 +10,7 @@ import {
   subLine,
   warningTexts,
 } from "./todoText";
+import { useVirtualRows } from "./useVirtualRows";
 
 interface TodoTableProps {
   items: TodoItem[];
@@ -20,8 +21,12 @@ interface TodoTableProps {
   emptyText: string;
 }
 
-/** The TODO list (docs/ui-mock/Todos.dc.html), plus 優先度 and the warnings. */
+/**
+ * The TODO list (docs/ui-mock/Todos.dc.html), plus 優先度 and the warnings.
+ * Long lists draw only the rows near the screen (useVirtualRows).
+ */
 export function TodoTable({ items, showProject, selectedId, onOpen, emptyText }: TodoTableProps) {
+  const { window: shown, wrapperProps } = useVirtualRows(items.map((i) => i.todo.id));
   const columns: TableColumn<TodoItem>[] = [
     {
       key: "title",
@@ -103,13 +108,15 @@ export function TodoTable({ items, showProject, selectedId, onOpen, emptyText }:
   ];
 
   return (
-    <Table<TodoItem>
-      columns={columns}
-      rows={items.map((i) => ({ ...i, id: i.todo.id }))}
-      rowKey="id"
-      selectedKey={selectedId ?? undefined}
-      onRowClick={(i) => onOpen(i.todo.id)}
-      emptyText={emptyText}
-    />
+    <div {...wrapperProps}>
+      <Table<TodoItem>
+        columns={columns}
+        rows={items.slice(shown.first, shown.end).map((i) => ({ ...i, id: i.todo.id }))}
+        rowKey="id"
+        selectedKey={selectedId ?? undefined}
+        onRowClick={(i) => onOpen(i.todo.id)}
+        emptyText={emptyText}
+      />
+    </div>
   );
 }
