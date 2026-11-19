@@ -32,6 +32,7 @@ const APP_COMMANDS: &[&str] = &[
     "open_data_folder",
     "test_notification",
     "list_holidays",
+    "search_todos",
 ];
 
 fn main() {

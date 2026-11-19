@@ -6,17 +6,18 @@ import { GanttPage } from "../features/gantt/GanttPage";
 import { DeleteProjectDialog } from "../features/projects/DeleteProjectDialog";
 import { ProjectFormDialog } from "../features/projects/ProjectFormDialog";
 import { ReportPage } from "../features/report/ReportPage";
+import { SearchDialog } from "../features/search/SearchDialog";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { TodoDetailPanel } from "../features/todos/detail/TodoDetailPanel";
 import { NewTodoDialog } from "../features/todos/NewTodoDialog";
 import { TodosPage } from "../features/todos/TodosPage";
-import type { ProjectSummary } from "../lib/bindings";
+import type { ProjectSummary, TodoItem } from "../lib/bindings";
 import { errorMessage } from "../lib/errors";
 import { overlayOpen } from "../lib/keys";
 import { logInfo } from "../lib/log";
 import { useDashboard, useProjects, useSettings } from "../lib/queries";
 import { buildNavSections } from "./nav";
-import { NEW_PROJECT_NAV_ID, navIdToRoute, routeToNavId, type Route } from "./routes";
+import { NEW_PROJECT_NAV_ID, navIdToRoute, routeToNavId, SEARCH_NAV_ID, type Route } from "./routes";
 import { shortcutFor } from "./shortcuts";
 import { useAppliedTheme } from "./theme";
 import { useStartupReminder } from "./useStartupReminder";
@@ -40,6 +41,8 @@ export default function App() {
   const [deleteTarget, setDeleteTarget] = useState<ProjectSummary | null>(null);
   /** 「TODOを追加」 dialog, with the project it starts on (null: the first project). */
   const [newTodo, setNewTodo] = useState<{ projectId: number | null } | null>(null);
+  /** 検索ダイアログ (Ctrl+F and the side nav's 「検索」). */
+  const [searchOpen, setSearchOpen] = useState(false);
 
   const projects = useProjects(false);
   const settings = useSettings();
@@ -59,14 +62,19 @@ export default function App() {
   const currentProjectId = route.page === "todos" ? route.projectId : null;
   const openNewTodo = useCallback(() => setNewTodo({ projectId: currentProjectId }), [currentProjectId]);
 
-  // Ctrl+N (new TODO) and Ctrl+1〜4 (screens); Command on macOS.
+  // Ctrl+N (new TODO), Ctrl+F (search) and Ctrl+1〜4 (screens); Command on
+  // macOS. None of them while a dialog or menu is open.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.defaultPrevented || e.isComposing || overlayOpen()) return;
+      if (e.defaultPrevented || e.isComposing) return;
       const shortcut = shortcutFor(e);
       if (!shortcut) return;
+      // Ctrl+F never opens the WebView's own find bar, under a dialog too.
+      if (shortcut.kind === "search") e.preventDefault();
+      if (overlayOpen()) return;
       e.preventDefault();
       if (shortcut.kind === "new_todo") openNewTodo();
+      else if (shortcut.kind === "search") setSearchOpen(true);
       else setRoute(shortcut.route);
     }
     document.addEventListener("keydown", onKey);
@@ -90,8 +98,24 @@ export default function App() {
       setProjectForm("new");
       return;
     }
+    if (id === SEARCH_NAV_ID) {
+      setSearchOpen(true);
+      return;
+    }
     const next = navIdToRoute(id);
     if (next) setRoute(next);
+  }
+
+  /**
+   * A search result: its project's page (all TODOs when the project is
+   * archived, as archived projects have no page) with the detail panel open.
+   */
+  function openSearchResult(item: TodoItem) {
+    setSearchOpen(false);
+    const projectId = item.todo.project_id;
+    const active = projects.data?.some((p) => p.project.id === projectId) ?? false;
+    setRouteState(active ? { page: "todos", projectId } : ALL_TODOS);
+    setOpenTodoId(item.todo.id);
   }
 
   const formTarget =
@@ -147,6 +171,7 @@ export default function App() {
           setOpenTodoId(item.todo.id);
         }}
       />
+      <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} onOpenTodo={openSearchResult} />
       <ProjectFormDialog
         target={formTarget}
         onClose={() => setProjectForm(null)}

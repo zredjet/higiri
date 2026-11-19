@@ -13,6 +13,7 @@ pub mod listing;
 pub mod model;
 pub mod notify;
 pub mod report;
+pub mod search;
 pub mod settings;
 pub mod status;
 pub mod timeline;

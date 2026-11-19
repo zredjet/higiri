@@ -11,6 +11,9 @@ export type Route =
 /** Side-nav id of the "add a project" item (opens a dialog, not a screen). */
 export const NEW_PROJECT_NAV_ID = "project:new";
 
+/** Side-nav id of 「検索」 (opens the search dialog, not a screen). */
+export const SEARCH_NAV_ID = "search";
+
 const PROJECT_PREFIX = "project:";
 
 export function projectNavId(projectId: number): string {

@@ -4,6 +4,8 @@
 //! `change_status`); [`update_fields`] never touches `status`, `waiting_since`
 //! or `closed_at`.
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, NaiveDate, Utc};
 use sqlx::{FromRow, SqliteConnection};
 
@@ -164,6 +166,26 @@ pub async fn list(conn: &mut SqliteConnection, filter: &TodoFilter) -> Result<Ve
     .into_iter()
     .map(TodoRow::into_todo)
     .collect()
+}
+
+/// The TODOs with these ids, in the order of `ids`. Missing ids are skipped.
+pub async fn list_by_ids(conn: &mut SqliteConnection, ids: &[i64]) -> Result<Vec<Todo>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut rows: HashMap<i64, TodoRow> = sqlx::query_as::<_, TodoRow>(
+        "SELECT * FROM todos WHERE id IN (SELECT value FROM json_each(?1))",
+    )
+    .bind(serde_json::Value::from(ids.to_vec()).to_string())
+    .fetch_all(&mut *conn)
+    .await?
+    .into_iter()
+    .map(|r| (r.id, r))
+    .collect();
+    ids.iter()
+        .filter_map(|id| rows.remove(id))
+        .map(TodoRow::into_todo)
+        .collect()
 }
 
 /// Writes the editable (non-status) fields of `todo`: title, priority, due
@@ -675,5 +697,20 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn list_by_ids_keeps_the_given_order() {
+        let (_pool, mut c) = conn().await;
+        let p = project(&mut c, "P").await;
+        let a = insert(&mut c, &new_todo(p.id, "a"), now()).await.unwrap();
+        let b = insert(&mut c, &new_todo(p.id, "b"), now()).await.unwrap();
+        let c3 = insert(&mut c, &new_todo(p.id, "c"), now()).await.unwrap();
+
+        let found = list_by_ids(&mut c, &[c3.id, a.id, 404, b.id])
+            .await
+            .unwrap();
+        assert_eq!(found, vec![c3, a, b]);
+        assert!(list_by_ids(&mut c, &[]).await.unwrap().is_empty());
     }
 }

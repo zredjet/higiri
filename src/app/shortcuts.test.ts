@@ -19,12 +19,16 @@ describe("shortcutFor", () => {
     });
     expect(shortcutFor(press("3", { ctrl: true }), false)).toEqual({ kind: "go", route: { page: "gantt" } });
     expect(shortcutFor(press("4", { ctrl: true }), false)).toEqual({ kind: "go", route: { page: "report" } });
+    expect(shortcutFor(press("f", { ctrl: true }), false)).toEqual({ kind: "search" });
     expect(shortcutFor(press("n", { meta: true }), false)).toBeNull();
+    expect(shortcutFor(press("f", { meta: true }), false)).toBeNull();
   });
 
   it("uses Command on macOS", () => {
     expect(shortcutFor(press("n", { meta: true }), true)).toEqual({ kind: "new_todo" });
     expect(shortcutFor(press("N", { meta: true }), true)).toEqual({ kind: "new_todo" });
+    expect(shortcutFor(press("f", { meta: true }), true)).toEqual({ kind: "search" });
+    expect(shortcutFor(press("F", { meta: true }), true)).toEqual({ kind: "search" });
     // Ctrl+N moves the cursor in macOS text fields; leave it alone.
     expect(shortcutFor(press("n", { ctrl: true }), true)).toBeNull();
   });
@@ -33,6 +37,8 @@ describe("shortcutFor", () => {
     expect(shortcutFor(press("5", { ctrl: true }), false)).toBeNull();
     expect(shortcutFor(press("n", {}), false)).toBeNull();
     expect(shortcutFor(press("n", { ctrl: true, shift: true }), false)).toBeNull();
+    expect(shortcutFor(press("f", {}), false)).toBeNull();
+    expect(shortcutFor(press("f", { ctrl: true, shift: true }), false)).toBeNull();
     expect(shortcutFor(press("1", { ctrl: true, alt: true }), false)).toBeNull();
   });
 });

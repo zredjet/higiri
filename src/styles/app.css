@@ -712,6 +712,98 @@ input[type="date"][data-empty="true"]:not(:focus) {
   font-weight: 500;
 }
 
+/* ---------- Search dialog ---------- */
+/* Results scroll inside the dialog, so the field stays in view. */
+.search-dialog__status {
+  min-height: 18px;
+}
+
+.search-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: min(480px, 55vh);
+  overflow-y: auto;
+}
+
+.search-results:empty {
+  display: none;
+}
+
+.search-hit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.search-hit:last-child {
+  border-bottom: 1px solid var(--border);
+}
+
+.search-hit:hover {
+  background: var(--surface-hover);
+}
+
+/* The chosen result (↑↓): the selected-row ground of the tables, and a ring
+   like the focus one so it does not rest on the colour alone. */
+.search-hit.is-selected {
+  background: var(--primary-soft);
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+  border-radius: var(--radius-md);
+}
+
+.search-hit__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.search-hit__title {
+  min-width: 0;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.search-hit__badges {
+  flex: 0 0 auto;
+  display: flex;
+  gap: var(--space-1);
+}
+
+.search-hit__match {
+  display: flex;
+  gap: var(--space-2);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.search-hit__field {
+  flex: 0 0 8em;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.search-hit__text {
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+/* A searched word: bold on the warning ground (not the colour alone). */
+.search-mark {
+  background: var(--warning-soft);
+  color: inherit;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+}
+
 /* ---------- Settings cards ---------- */
 .settings-card__body {
   display: flex;

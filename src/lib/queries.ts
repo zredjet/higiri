@@ -25,6 +25,8 @@ export const queryKeys = {
   // Under "todos" so every TODO change refreshes it too.
   dashboard: ["todos", "dashboard"] as const,
   gantt: (query: GanttQuery) => ["todos", "gantt", query] as const,
+  // Under "todos" too: a changed TODO or work log refreshes the results.
+  search: (text: string) => ["todos", "search", text] as const,
   settings: ["settings"] as const,
   holidays: (start: string, end: string) => ["holidays", start, end] as const,
   allHolidays: ["holidays"] as const,
@@ -146,6 +148,19 @@ export function useTodo(id: number) {
 
 export function useTimeline(id: number) {
   return useQuery({ queryKey: queryKeys.timeline(id), queryFn: () => commands.listTimeline(id) });
+}
+
+/**
+ * 全文検索 (search_todos). `""` fetches nothing (the dialog is closed or no
+ * word has been typed). The previous results stay while the next ones load.
+ */
+export function useSearch(text: string) {
+  return useQuery({
+    queryKey: queryKeys.search(text),
+    queryFn: () => commands.searchTodos(text),
+    enabled: text !== "",
+    placeholderData: (previous) => previous,
+  });
 }
 
 /** After a TODO changes: keep the returned item, refresh lists and counts. */

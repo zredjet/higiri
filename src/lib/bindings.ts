@@ -86,6 +86,11 @@ export const commands = {
 	 *  order. Listed whatever the day count setting is.
 	 */
 	listHolidays: (start: string, end: string, options?: InvokeOptions) => __TAURI_INVOKE<Holiday[]>("list_holidays", { start, end }, options),
+	/**
+	 *  TODOs that contain every word of `text` (split on spaces, 全角 included),
+	 *  with where each word was found. At most 100, with the total count.
+	 */
+	searchTodos: (text: string, options?: InvokeOptions) => __TAURI_INVOKE<SearchResult>("search_todos", { text }, options),
 };
 
 /* Types */
@@ -287,6 +292,17 @@ export type Holiday = {
 	custom: boolean,
 };
 
+/**  Where a TODO matched, besides its title. */
+export type MatchField = 
+/**  メモ */
+"memo" | 
+/**  待っている相手 */
+"waiting_on" | 
+/**  中止の理由 */
+"close_reason" | 
+/**  作業ログの本文 */
+"work_log";
+
 export type NewTodoInput = {
 	project_id: number,
 	title: string,
@@ -366,6 +382,46 @@ export type ReportKey = {
 
 /**  Report kinds (`reports.kind`). The MVP makes daily reports only. */
 export type ReportKind = "daily" | "weekly" | "monthly";
+
+/**  A TODO that contains every word. */
+export type SearchHit = {
+	item: TodoItem,
+	/**
+	 *  The whole title, with the words marked (no hit when the title has
+	 *  none of them).
+	 */
+	title: Segment[],
+	/**
+	 *  Memo, 待っている相手, 中止の理由, then up to 3 work logs (newest
+	 *  first). Only the fields that contain a word.
+	 */
+	matches: SearchMatch[],
+};
+
+/**  One place a word was found, with the text around it. */
+export type SearchMatch = {
+	field: MatchField,
+	/**  The work log's date (`work_log` only). */
+	log_date: string | null,
+	/**
+	 *  About 30 characters before and after the first hit, line breaks as
+	 *  spaces, with 「…」 where the text was cut.
+	 */
+	segments: Segment[],
+};
+
+export type SearchResult = {
+	/**  At most 100, title hits first, then the most recently updated. */
+	hits: SearchHit[],
+	/**  Every TODO that contains every word (may exceed `hits`). */
+	total: number,
+};
+
+/**  A piece of text: one of the words (`hit`) or the text between them. */
+export type Segment = {
+	text: string,
+	hit: boolean,
+};
 
 export type Settings = {
 	reminder_frequency: ReminderFrequency,

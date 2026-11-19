@@ -133,6 +133,22 @@ pub async fn list_by_todo(conn: &mut SqliteConnection, todo_id: i64) -> Result<V
     )
 }
 
+/// Logs of these TODOs, by TODO and then oldest first.
+pub async fn list_by_todos(conn: &mut SqliteConnection, todo_ids: &[i64]) -> Result<Vec<WorkLog>> {
+    if todo_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    collect(
+        sqlx::query_as::<_, WorkLogRow>(
+            "SELECT * FROM work_logs WHERE todo_id IN (SELECT value FROM json_each(?1))
+             ORDER BY todo_id, log_date, id",
+        )
+        .bind(serde_json::Value::from(todo_ids.to_vec()).to_string())
+        .fetch_all(&mut *conn)
+        .await?,
+    )
+}
+
 /// Logs written for one day (daily report material).
 pub async fn list_by_date(conn: &mut SqliteConnection, date: NaiveDate) -> Result<Vec<WorkLog>> {
     collect(
@@ -275,5 +291,35 @@ mod tests {
         .await
         .unwrap_err();
         assert!(err.is_constraint_violation(), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn lists_the_logs_of_several_todos() {
+        let (_pool, mut c) = conn().await;
+        let t1 = todo_id(&mut c).await;
+        let t2 = todo_id(&mut c).await;
+        let t3 = todo_id(&mut c).await;
+        let now = ts(2026, 11, 19, 0, 0);
+        let a = insert(&mut c, &log(t2, "2026-11-19", "a", None), now)
+            .await
+            .unwrap();
+        let b = insert(&mut c, &log(t1, "2026-11-19", "b", None), now)
+            .await
+            .unwrap();
+        let c2 = insert(&mut c, &log(t1, "2026-11-18", "c", None), now)
+            .await
+            .unwrap();
+        insert(&mut c, &log(t3, "2026-11-18", "d", None), now)
+            .await
+            .unwrap();
+
+        let ids: Vec<i64> = list_by_todos(&mut c, &[t2, t1])
+            .await
+            .unwrap()
+            .iter()
+            .map(|l| l.id)
+            .collect();
+        assert_eq!(ids, vec![c2.id, b.id, a.id]);
+        assert!(list_by_todos(&mut c, &[]).await.unwrap().is_empty());
     }
 }

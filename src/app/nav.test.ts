@@ -26,10 +26,12 @@ describe("buildNavSections", () => {
   it("lists screens, projects with badges, then settings", () => {
     const sections = buildNavSections([summary(1, "基幹システム更改", 3), summary(2, "社内ツール整備", 0)]);
     expect(sections.map((s) => s.items.map((i) => i.id))).toEqual([
-      ["dashboard", "todos", "gantt", "report"],
+      ["dashboard", "todos", "gantt", "report", "search"],
       ["project:1", "project:2", "project:new"],
       ["settings"],
     ]);
+    // 「検索」 opens a dialog; it sits after the screens of Ctrl+1〜4.
+    expect(sections[0].items[4]).toMatchObject({ label: "検索", icon: "search" });
     expect(sections[1].label).toBe("プロジェクト");
     expect(sections[1].items[0]).toMatchObject({ label: "基幹システム更改", icon: "folder", badge: "3" });
     // No badge when nothing needs attention.

@@ -3,6 +3,9 @@
 //! Every command is measured twice: with the default 暦日 setting, then with
 //! 営業日 and a yearly custom holiday (年末年始).
 //!
+//! The generated texts repeat, so the searches pick words that hit very
+//! different numbers of TODOs (see `SEARCHES`).
+//!
 //! Not part of the normal test run. Run it optimized:
 //!
 //! ```text
@@ -18,7 +21,7 @@ use std::time::{Duration, Instant};
 use chrono::{Days, NaiveDate, TimeZone, Utc};
 use sqlx::SqlitePool;
 
-use crate::commands::{dashboard, gantt, projects, reports, settings, todos};
+use crate::commands::{dashboard, gantt, projects, reports, search, settings, todos};
 use crate::domain::date::{format_date, format_timestamp};
 use crate::domain::listing::{DueFilter, TodoSort};
 use crate::domain::model::{Priority, Status};
@@ -29,6 +32,26 @@ use crate::repo::db;
 pub const PROJECTS: usize = 20;
 pub const TODOS: usize = 5_000;
 pub const WORK_LOGS: usize = 20_000;
+
+/// Searches measured (label, words). The seed's texts: titles
+/// 「TODO 0001 の作業」, memos 「- 進め方のメモ…」, 待っている相手
+/// 「相手の回答」 (about 10%), 中止の理由 「不要になったため」 (about 5%), work
+/// logs 「- 作業ログ {n}: 手順を確認し、…」.
+const SEARCHES: [(&str, &str); 6] = [
+    // 2 characters, every title: the most results to order.
+    ("search_todos (every TODO)", "作業"),
+    // 2 characters in 待っている相手; the rest scan memo, reason and logs.
+    ("search_todos (waiting_on)", "回答"),
+    // 2 characters in 中止の理由.
+    ("search_todos (close_reason)", "不要"),
+    // Two words, a few TODOs: 「作業ログ」 only in logs, 「1234」 in one
+    // title and a few logs.
+    ("search_todos (2 words, few)", "作業ログ 1234"),
+    // ASCII case ignored: 「TODO」 in every title, 「0042」 in one.
+    ("search_todos (ASCII case)", "todo 0042"),
+    // No hit: every field of every TODO is read.
+    ("search_todos (no hit)", "該当なし"),
+];
 
 /// Small deterministic generator, so every run measures the same data.
 struct Rng(u64);
@@ -237,7 +260,7 @@ async fn measure(pool: &SqlitePool, today: NaiveDate) -> Vec<(&'static str, Dura
     };
 
     let runs = 7;
-    vec![
+    let mut times = vec![
         (
             "get_dashboard",
             median(runs, || dashboard::get(pool, today)).await,
@@ -274,7 +297,14 @@ async fn measure(pool: &SqlitePool, today: NaiveDate) -> Vec<(&'static str, Dura
             "generate_report",
             median(runs, || reports::generate(pool, report, None)).await,
         ),
-    ]
+    ];
+    for (label, words) in SEARCHES {
+        times.push((
+            label,
+            median(runs, || search::search(pool, words, today)).await,
+        ));
+    }
+    times
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -353,6 +383,14 @@ async fn perf_5000_todos_20000_logs() {
         items.items.len(),
         g.projects.iter().map(|p| p.rows.len()).sum::<usize>()
     );
+    for (label, words) in SEARCHES {
+        let found = search::search(&pool, words, today).await.unwrap();
+        println!(
+            "{label:<28} 「{words}」 total {} / returned {}",
+            found.total,
+            found.hits.len()
+        );
+    }
 
     let t = Instant::now();
     crate::backup::run_daily(&pool, tmp.path(), today)

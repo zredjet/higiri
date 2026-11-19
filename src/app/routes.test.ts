@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NEW_PROJECT_NAV_ID, navIdToRoute, projectNavId, routeToNavId, type Route } from "./routes";
+import { NEW_PROJECT_NAV_ID, navIdToRoute, projectNavId, routeToNavId, SEARCH_NAV_ID, type Route } from "./routes";
 
 describe("routes", () => {
   it("round-trips every screen through its nav id", () => {
@@ -21,8 +21,9 @@ describe("routes", () => {
     expect(navIdToRoute("project:3")).toEqual({ page: "todos", projectId: 3 });
   });
 
-  it("does not treat the add-project item or junk as a screen", () => {
+  it("does not treat the add-project item, 検索 or junk as a screen", () => {
     expect(navIdToRoute(NEW_PROJECT_NAV_ID)).toBeNull();
+    expect(navIdToRoute(SEARCH_NAV_ID)).toBeNull();
     expect(navIdToRoute("project:0")).toBeNull();
     expect(navIdToRoute("project:1.5")).toBeNull();
     expect(navIdToRoute("unknown")).toBeNull();

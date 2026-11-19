@@ -104,7 +104,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
 - 起動時リマインドは起動時に1回 `get_startup_reminder` を呼び、「確認しました」のボタンでだけ閉じられ(画面外のクリック、Esc、× では閉じない)、閉じたら `ack_reminder`。ウィンドウが前面に来たときに日付が変わっていれば、すべての一覧を取り直して判定をやり直す(`src/app/useStartupReminder.ts`)。
 - ガント: 行データ(予定・実績・待ちの区間、区分)は `get_gantt`(`domain/gantt.rs`)。待ちの区間は変更履歴から「待ちに入った日〜抜けた前日」(待ち中は今日まで)。日付から座標への変換、目盛り、表示期間、見えている行だけを描く処理は `src/features/gantt/geometry.ts`(Vitest でモックの座標と照合)。表示する日数は画面の幅に収まる分で、初期表示は今日が左から3分の1。日限のひし形はモックどおり超過(朱)と本日(琥珀)だけ色を付ける。
 - TODO 一覧は200件を超えると、画面の近くの行だけを描く(`src/features/todos/virtualRows.ts` と `useVirtualRows.ts`)。行の高さは描いたあとに測り、それまでは見積もりを使う。Aizome の Table には見えている行だけを渡し、上下の行の分の高さは外側の要素の CSS(`tbody::before` / `::after`)で取る。Table の DOM は変えない。
-- キーボードショートカット: Ctrl+N(新規TODO)と Ctrl+1〜4(ダッシュボード、TODO、ガント、日報)は `src/app/shortcuts.ts`。macOS は Command。ダイアログやメニューが開いているときは効かない。「TODOを追加」のダイアログは App が持ち、画面のボタンとショートカットで同じものを開く。Esc、Ctrl+Enter、Ctrl+E は詳細パネルとエディタ側にある。
+- キーボードショートカット: Ctrl+N(新規TODO)、Ctrl+F(検索ダイアログ、v1.1)、Ctrl+1〜4(ダッシュボード、TODO、ガント、日報)は `src/app/shortcuts.ts`。macOS は Command。ダイアログやメニューが開いているときは効かない(Ctrl+F は、そのときも `preventDefault` だけはして WebView の検索バーを出さない)。「TODOを追加」と検索のダイアログは App が持ち、画面のボタン(サイドナビ)とショートカットで同じものを開く。Esc、Ctrl+Enter、Ctrl+E は詳細パネルとエディタ側にある。
 - 動作ログは log プラグイン(OS のログフォルダの `higiri.log`、開発ビルドは `higiri-dev.log`。1 MB で切り替えて5個残す)。起動、バックアップ、復元、想定外のエラーだけを書き、TODO の中身は書かない。画面側は `src/lib/log.ts` の `logUnexpected` を使う(`errorMessage` が AppError 以外のエラーを渡す)。
 - 多重起動の防止(single-instance)は配布版だけで有効にする。開発ビルドは別のDBを使うので、インストールした版と同時に動かせるようにしている。2つ目の起動は既存のウィンドウを前面に出す(`--autostart` つきなら出さない)。ウィンドウの位置・大きさ・最大化は window-state で次回に戻す。
 - 権限(`capabilities/default.json`)は、アプリのコマンドと、opener の http/https、clipboard-manager の `allow-write-text`、log の `allow-log` だけ。`core:default` は付けない(画面は Tauri のウィンドウ・イベント・パスの API を使わない)。notification と autostart のプラグインは Rust からだけ使い、画面側には権限を付けない。notification プラグインは画面に `window.Notification` の差し替えを入れ、Windows 以外では読み込み時に `is_permission_granted` を呼ぶが、権限がないので断られる(画面はこれを使わない)。
@@ -123,7 +123,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
 v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作る。この節には、まだ作っていないものも含む。ファイルの場所など実装で決まることは、作ったフェーズでこのファイルの各節に足す。仕様の詳細は設計書の「v1.1の詳細」にある。
 
 - テーブル定義は変えない(マイグレーションを足さない)。新しい値は `settings` のキーに入れ、検索は既存の列を `LIKE` で引く(FTS5 は使わない)。
-- 足すコマンドは次の5つだけ(27個から32個になる。フェーズ10の `test_notification` とフェーズ11の `list_holidays` で今は29個)。上の「構成」の3か所をそろえ、件数のテスト(`commands/mod.rs`)も直す。
+- 足すコマンドは次の5つだけ(27個から32個になる。フェーズ10の `test_notification`、フェーズ11の `list_holidays`、フェーズ12の `search_todos` で今は30個)。上の「構成」の3か所をそろえ、件数のテスト(`commands/mod.rs`)も直す。
 
   | コマンド | フェーズ | 用途 |
   | --- | --- | --- |
@@ -193,6 +193,21 @@ v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作る。�
 - 全文検索(フェーズ12)
   - 入口は検索ダイアログで、Ctrl+F(macOS は Command+F)とサイドナビの「検索」で開く。ダイアログは App が持つ。「検索」は画面ではないので `Route` には足さない。
   - 語の分割、前後の文の切り出し、並び順は Rust 側で作る。画面は受け取ったものを並べるだけ。
+  - 作ったもの(フェーズ12)
+    - `repo/search.rs`: `candidates` が、すべての語を含む TODO の ID・タイトル・更新日時を返す。語ごとに、タイトル・メモ・待っている相手・中止の理由・作業ログの本文(`EXISTS`)を `LIKE … ESCAPE '\'` で引き、語どうしは AND。`%`、`_`、`\` は文字として引く。SQL は `QueryBuilder` で組み、語はすべてバインドする(sqlx 0.9 は組み立てた文字列をそのまま受け付けない)。アーカイブしたプロジェクトも含める。
+    - `domain/search.rs`: `split_terms`(空白と全角の空白で分ける。同じ語は、英字の大文字・小文字を区別せずに1つにまとめる)、`rank`(並び順)、`search_hit`(当たった場所と前後の文)。当たったかどうかは、`LIKE` と同じく英字だけ大文字・小文字を区別せずに見る。
+    - 並び順: タイトルに語が1つでも入っているものが先。その中は TODO の更新日時(`todos.updated_at`。作業ログを足しただけでは変わらない)の新しい順、同じなら ID の大きい順。上から100件を返し、`total` に全体の件数を入れる。100件に切るのは並べたあとなので、`repo` は当たったものをすべて返し、`domain` で並べて切る。
+    - 返す形: `SearchResult { hits: [SearchHit { item: TodoItem, title: [Segment], matches: [SearchMatch] }], total }`。`Segment` は `{text, hit}`。`title` はタイトルの全文(切り詰めない)。`matches` は、語を含む項目だけを、メモ・待っている相手・中止の理由・作業ログの順に入れる。`SearchMatch { field, log_date, segments }` の `field` は `memo` / `waiting_on` / `close_reason` / `work_log`。
+    - 前後の文: 項目ごとに1つ。最初に当たった所の前後30字(文字の数で数える)を出し、その範囲に入るほかの語も `hit` にする。範囲の端で切れる語は最後まで含める。続く改行は空白1つにし、範囲の端の空白は除く。切った端には「…」を付ける。Markdown の記号は取り除かない。
+    - 作業ログは、語を1つでも含むものを日付の新しい順(同じ日なら ID の大きい順)に3件まで。
+    - `commands/search.rs`: `search_todos(text)`。語が空(空白だけ)なら0件を返す(エラーにしない)。判定は `Rules::from_settings` と `todo_item` で付ける。TODO と作業ログは `repo::todos::list_by_ids`、`repo::work_logs::list_by_todos` で100件分だけ読む。
+    - 画面: `src/features/search/SearchDialog.tsx`(文言と小さな計算は `searchText.ts`)。App が開いたままにして、前に打った語を残し、開くたびに語の全体を選び、先頭の結果を選ぶ。打ち終えて200ms(`SEARCH_DELAY_MS`)で引き、変換中(`compositionstart`〜`compositionend`)は引かない。変換中の Esc ではダイアログを閉じない。↑↓ で選び(キーで動かしたときだけ見える所までスクロールする)、Enter かクリックで開く。打ってから200msたたないうちの Enter は、開かずにすぐ引く。
+    - 選んだ TODO は、プロジェクトが稼働中ならそのページ、アーカイブ済みなら全体の TODO に移り、詳細パネルを開く(`App.tsx` の `openSearchResult`)。
+    - 検索のフックは `queries.ts` の `useSearch`。キーは `["todos", "search", 語]` で、TODO と作業ログの変更で取り直す。ダイアログを閉じている間は引かない。
+    - 1件の行: タイトル、日限注意の区分とステータスのバッジ、プロジェクト名、当たった場所ごとの見出し(「メモ」「待っている相手」「中止の理由」「作業ログ 11/19」)と前後の文。当たった語は `<mark class="search-mark">`(太字と `--warning-soft` の地)。選んでいる行は `--primary-soft` の地と `--focus` の枠。
+    - 文言: 語が空なら「タイトル、メモ、作業ログなどから探します。語を入れてください。」、0件なら「当てはまるTODOはありません。語を変えて検索してください。」、件数は「3件」(100件を超えたら「523件のうち100件」と、「100件を超えました。語を足して絞ってください。」の案内)。入力欄の下に「空白で区切ると、すべての語を含むTODOを探します。」。
+    - サイドナビの「検索」(`search` のアイコン)は、1つ目のまとまりの「日報」の下(`nav.ts`。id は `routes.ts` の `SEARCH_NAV_ID`)。
+    - perf(`perf.rs` の `SEARCHES`): 全件に当たる「作業」、待っている相手の「回答」、中止の理由の「不要」、2語で数件の「作業ログ 1234」、英字の大文字・小文字の「todo 0042」、0件の「該当なし」を測る。
 - ガントのドラッグ(フェーズ13)
   - 予定期間は `update_todo` で保存し、新しいコマンドは足さない。ドラッグの日数の計算は `geometry.ts` の純粋関数にして Vitest で確かめる。
 - 日報テンプレート(フェーズ14)
