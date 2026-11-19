@@ -1,0 +1,48 @@
+MIT License
+
+Copyright (c) 2026 zredjet
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+-------------------------------------------------------------------------------
+
+Exception: the Aizome design system
+
+The MIT License above does NOT apply to the Aizome design system, which is
+contained in these folders:
+
+  - docs/aizome/
+  - src/components/aizome/
+
+Copyright (c) 2026 zredjet. All rights reserved.
+
+These files are published only so that this application (Higiri) can be read
+and built from this repository. You may view them, and use them unmodified as
+part of building and running Higiri. Any other use, including copying them
+into other projects, modifying them, or redistributing them on their own,
+requires written permission from the copyright holder.
+
+例外: Aizome デザインシステム
+
+上の MIT ライセンスは、docs/aizome/ と src/components/aizome/ にある
+Aizome デザインシステムには適用しません。これらの著作権は zredjet が保持
+します。このリポジトリのアプリ(Higiri)を読む・ビルドするために公開して
+おり、閲覧と、Higiri を変更せずにビルド・実行するための利用だけを認めます。
+ほかのプロジェクトへの流用、改変、単独での再配布には、著作権者の書面による
+許可が必要です。
