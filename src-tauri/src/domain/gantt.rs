@@ -79,13 +79,13 @@ pub fn waiting_spans(t: &Todo, events: &[&TodoEvent], today: NaiveDate) -> Vec<D
     for e in sorted {
         if e.new_value.as_deref() == Some(Status::Waiting.as_str()) {
             open = Some(e.event_date);
-        } else if e.old_value.as_deref() == Some(Status::Waiting.as_str()) {
-            if let Some(start) = open.take()
-                && let Some(end) = e.event_date.checked_sub_days(Days::new(1))
-                && end >= start
-            {
-                out.push(DaySpan { start, end });
-            }
+        } else if e.old_value.as_deref() == Some(Status::Waiting.as_str())
+            // Leaving 待ち closes the open span (take() clears it either way).
+            && let Some(start) = open.take()
+            && let Some(end) = e.event_date.checked_sub_days(Days::new(1))
+            && end >= start
+        {
+            out.push(DaySpan { start, end });
         }
     }
     if t.status == Status::Waiting {
