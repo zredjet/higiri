@@ -66,8 +66,8 @@ pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
 }
 
 /// Applies saved settings to the running app: what × does, and the resident
-/// timer's wait (new notification times). Called after update_settings and
-/// after a restore replaced the settings.
+/// timer's settings (it keeps them in memory and computes its wait again).
+/// Called after update_settings and after a restore replaced the settings.
 pub fn apply<R: Runtime>(app: &AppHandle<R>, settings: &Settings) {
     if let Some(close) = app.try_state::<CloseBehavior>() {
         close
@@ -75,7 +75,7 @@ pub fn apply<R: Runtime>(app: &AppHandle<R>, settings: &Settings) {
             .store(settings.close_to_tray, Ordering::Relaxed);
     }
     if let Some(notifier) = app.try_state::<Notifier>() {
-        notifier.wake();
+        notifier.update(settings);
     }
 }
 

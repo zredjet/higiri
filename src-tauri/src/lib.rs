@@ -155,7 +155,7 @@ pub fn run() {
                 log::error!("toast registration failed: {e}");
             }
 
-            let notifier = notifier::Notifier::default();
+            let notifier = notifier::Notifier::new(&settings);
             notifier::spawn(
                 app.handle().clone(),
                 &notifier,

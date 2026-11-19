@@ -12,14 +12,18 @@
 //!    dashboard's own count, notifies when there is at least one, and saves
 //!    `last_notified_at` either way, so a time with none is not notified later.
 //!
-//! Saving the settings (or restoring a backup) wakes the task through
-//! [`Notifier::wake`], so it computes the wait again for the new times.
+//! The settings it needs ([`NotifySettings`]) are kept in memory by
+//! [`Notifier`], so a wake that only reads the clock never touches the
+//! database: only a due time (the count and `last_notified_at`) and a new day
+//! (the backup) do. Saving the settings or restoring a backup hands the new
+//! values over with [`Notifier::update`], which also wakes the task so it
+//! computes the wait again.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use chrono::{DateTime, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, NaiveDate, NaiveTime, TimeZone, Utc};
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_notification::NotificationExt;
@@ -29,55 +33,113 @@ use crate::backup;
 use crate::commands::error::CmdResult;
 use crate::commands::{clock, dashboard};
 use crate::domain::notify::{self, MAX_WAIT, Message};
+use crate::domain::settings::Settings;
 use crate::repo;
 
-/// Wakes the resident timer (managed state).
-#[derive(Default)]
-pub struct Notifier {
-    wake: Arc<Notify>,
+/// What the timer needs from the settings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotifySettings {
+    pub enabled: bool,
+    /// Notification times, sorted.
+    pub times: Vec<NaiveTime>,
+    /// When the last notification time was handled.
+    pub last_notified_at: Option<DateTime<Utc>>,
 }
 
-impl Notifier {
-    /// Makes the timer compute its wait again (after the settings changed).
-    /// A wake while it is busy is kept and takes effect when it next waits.
-    pub fn wake(&self) {
-        self.wake.notify_one();
+impl From<&Settings> for NotifySettings {
+    fn from(s: &Settings) -> NotifySettings {
+        NotifySettings {
+            enabled: s.notify_enabled,
+            times: notify::times_of(&s.notify_times),
+            last_notified_at: s.last_notified_at,
+        }
     }
 }
 
-/// What one wake decided: the notification to show now, and how long to
-/// sleep before the next wake.
+impl NotifySettings {
+    /// Records a handled time; an earlier one never replaces a later one.
+    fn notified(&mut self, at: DateTime<Utc>) {
+        self.last_notified_at = self.last_notified_at.max(Some(at));
+    }
+}
+
+/// The resident timer's settings and its wake-up (managed state).
+pub struct Notifier {
+    wake: Arc<Notify>,
+    settings: Arc<Mutex<NotifySettings>>,
+}
+
+impl Notifier {
+    /// Starts with the settings read at startup.
+    pub fn new(settings: &Settings) -> Notifier {
+        Notifier {
+            wake: Arc::default(),
+            settings: Arc::new(Mutex::new(NotifySettings::from(settings))),
+        }
+    }
+
+    /// Takes the saved settings (after the settings screen or a restore) and
+    /// makes the timer compute its wait again. A `last_notified_at` older
+    /// than the one in memory (read before the timer wrote its own) is not
+    /// taken, so a time is never notified twice. A wake while the timer is
+    /// busy is kept and takes effect when it next waits.
+    pub fn update(&self, settings: &Settings) {
+        {
+            let mut current = lock(&self.settings);
+            let last = current.last_notified_at;
+            *current = NotifySettings::from(settings);
+            if let Some(at) = last {
+                current.notified(at);
+            }
+        }
+        self.wake.notify_one();
+    }
+
+    /// A copy of the settings in memory.
+    pub fn settings(&self) -> NotifySettings {
+        lock(&self.settings).clone()
+    }
+}
+
+fn lock(m: &Mutex<NotifySettings>) -> std::sync::MutexGuard<'_, NotifySettings> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// What one wake decided: the notification to show now, how long to sleep
+/// before the next wake, and the time saved as `last_notified_at` (when a
+/// notification time was handled).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tick {
     pub message: Option<Message>,
     pub wait: Duration,
+    pub notified_at: Option<DateTime<Utc>>,
 }
 
-/// Handles the notification time due at `now`, if any. `tz` is the PC's time
-/// zone (the times are local). Database only; showing the message is up to
-/// the caller.
-pub async fn tick<Tz: TimeZone>(pool: &SqlitePool, now: DateTime<Utc>, tz: &Tz) -> CmdResult<Tick> {
-    let settings = {
-        let mut conn = pool.acquire().await?;
-        repo::settings::load(&mut conn).await?
-    };
+/// Handles the notification time due at `now`, if any, with the settings in
+/// memory. `tz` is the PC's time zone (the times are local). The database is
+/// used only when a time is due: the dashboard's count, and saving
+/// `last_notified_at`. Showing the message is up to the caller.
+pub async fn tick<Tz: TimeZone>(
+    pool: &SqlitePool,
+    settings: &NotifySettings,
+    now: DateTime<Utc>,
+    tz: &Tz,
+) -> CmdResult<Tick> {
     let now_local = now.with_timezone(tz).naive_local();
-    let times = notify::times_of(&settings.notify_times);
-    let wait = notify::next_wake(now_local, &times);
-    if !settings.notify_enabled {
-        return Ok(Tick {
-            message: None,
-            wait,
-        });
+    let wait = notify::next_wake(now_local, &settings.times);
+    let nothing = Tick {
+        message: None,
+        wait,
+        notified_at: None,
+    };
+    if !settings.enabled {
+        return Ok(nothing);
     }
     let last_local = settings
         .last_notified_at
         .map(|t| t.with_timezone(tz).naive_local());
-    if notify::pending_slot(now_local, &times, last_local).is_none() {
-        return Ok(Tick {
-            message: None,
-            wait,
-        });
+    if notify::pending_slot(now_local, &settings.times, last_local).is_none() {
+        return Ok(nothing);
     }
     let dash = dashboard::get(pool, now_local.date()).await?;
     let mut conn = pool.acquire().await?;
@@ -85,7 +147,24 @@ pub async fn tick<Tz: TimeZone>(pool: &SqlitePool, now: DateTime<Utc>, tz: &Tz) 
     Ok(Tick {
         message: notify::message(&dash.counts),
         wait,
+        notified_at: Some(now),
     })
+}
+
+/// One wake of the loop: [`tick`] with a copy of the settings in memory,
+/// then records the handled time in memory too.
+async fn check<Tz: TimeZone>(
+    shared: &Mutex<NotifySettings>,
+    pool: &SqlitePool,
+    now: DateTime<Utc>,
+    tz: &Tz,
+) -> CmdResult<Tick> {
+    let settings = lock(shared).clone();
+    let t = tick(pool, &settings, now, tz).await?;
+    if let Some(at) = t.notified_at {
+        lock(shared).notified(at);
+    }
+    Ok(t)
 }
 
 /// Takes the day's backup when `today` is a new day since `last_day`. Returns
@@ -136,6 +215,7 @@ pub fn spawn<R: Runtime>(
     backup_day: NaiveDate,
 ) {
     let wake = Arc::clone(&notifier.wake);
+    let shared = Arc::clone(&notifier.settings);
     tauri::async_runtime::spawn(async move {
         let mut backup_day = backup_day;
         loop {
@@ -143,15 +223,15 @@ pub fn spawn<R: Runtime>(
             let zone = clock::zone();
             let today = now.with_timezone(&zone).date_naive();
             backup_if_new_day(&pool, &data_dir, &mut backup_day, today).await;
-            let wait = match tick(&pool, now, &zone).await {
-                Ok(Tick { message, wait }) => {
-                    if let Some(m) = message {
+            let wait = match check(&shared, &pool, now, &zone).await {
+                Ok(t) => {
+                    if let Some(m) = t.message {
                         match show(&app, &m) {
                             Ok(()) => log::info!("notification shown"),
                             Err(e) => log::error!("notification failed: {e}"),
                         }
                     }
-                    wait
+                    t.wait
                 }
                 Err(e) => {
                     log::error!("notification check failed: {}", e.message);
@@ -193,18 +273,25 @@ mod tests {
         settings::get(pool).await.unwrap().last_notified_at
     }
 
+    /// One wake of the loop with the timer's settings in memory.
+    async fn wake(n: &Notifier, pool: &SqlitePool, now: DateTime<Utc>) -> Tick {
+        check(&n.settings, pool, now, &jst()).await.unwrap()
+    }
+
     #[tokio::test]
     async fn notifies_the_due_time_once_with_the_dashboard_counts() {
         let pool = sample().await;
+        let n = Notifier::new(&Settings::default());
         // 8:59 JST: nothing yet, wake at 9:00.
-        let t = tick(&pool, ts(2026, 11, 18, 23, 59), &jst()).await.unwrap();
+        let t = wake(&n, &pool, ts(2026, 11, 18, 23, 59)).await;
         assert_eq!(t.message, None);
         assert_eq!(t.wait, Duration::from_secs(60));
+        assert_eq!(t.notified_at, None);
         assert_eq!(last_notified(&pool).await, None);
 
         // Started at 9:30 JST: the 9:00 time, with the mock's 5 日限注意.
         let at = ts(2026, 11, 19, 0, 30);
-        let t = tick(&pool, at, &jst()).await.unwrap();
+        let t = wake(&n, &pool, at).await;
         let message = t.message.unwrap();
         assert_eq!(message.title, "日限注意が5件あります");
         assert_eq!(
@@ -213,56 +300,88 @@ mod tests {
                 .unwrap()
                 .body
         );
+        // Saved in the database and kept in memory.
+        assert_eq!(t.notified_at, Some(at));
         assert_eq!(last_notified(&pool).await, Some(at));
+        assert_eq!(n.settings().last_notified_at, Some(at));
 
         // Woken again before 12:55: nothing more.
-        let t = tick(&pool, ts(2026, 11, 19, 0, 40), &jst()).await.unwrap();
+        let t = wake(&n, &pool, ts(2026, 11, 19, 0, 40)).await;
         assert_eq!(t.message, None);
         assert_eq!(t.wait, MAX_WAIT);
         // 12:55 JST.
-        let t = tick(&pool, ts(2026, 11, 19, 3, 55), &jst()).await.unwrap();
+        let t = wake(&n, &pool, ts(2026, 11, 19, 3, 55)).await;
         assert!(t.message.is_some());
     }
 
     #[tokio::test]
     async fn a_time_with_nothing_to_report_counts_as_notified() {
         let pool = db::open_in_memory().await.unwrap();
+        let n = Notifier::new(&Settings::default());
         let at = ts(2026, 11, 19, 0, 30);
-        let t = tick(&pool, at, &jst()).await.unwrap();
+        let t = wake(&n, &pool, at).await;
         assert_eq!(t.message, None);
+        assert_eq!(t.notified_at, Some(at));
         assert_eq!(last_notified(&pool).await, Some(at));
 
         // TODOs added afterwards wait for the next time.
         crate::sample::seed_if_empty(&pool, d("2026-11-19"))
             .await
             .unwrap();
-        let t = tick(&pool, ts(2026, 11, 19, 1, 0), &jst()).await.unwrap();
+        let t = wake(&n, &pool, ts(2026, 11, 19, 1, 0)).await;
         assert_eq!(t.message, None);
-        let t = tick(&pool, ts(2026, 11, 19, 3, 55), &jst()).await.unwrap();
+        let t = wake(&n, &pool, ts(2026, 11, 19, 3, 55)).await;
         assert!(t.message.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_wake_with_nothing_due_does_not_touch_the_database() {
+        let pool = sample().await;
+        let n = Notifier::new(&Settings::default());
+        wake(&n, &pool, ts(2026, 11, 19, 0, 30)).await;
+        // From here on the database cannot be used at all.
+        pool.close().await;
+        for now in [ts(2026, 11, 19, 0, 40), ts(2026, 11, 19, 3, 50)] {
+            let t = check(&n.settings, &pool, now, &jst()).await.unwrap();
+            assert_eq!(t.message, None);
+        }
+        // Turned off: not even a due time reads it.
+        n.update(&Settings {
+            notify_enabled: false,
+            ..Settings::default()
+        });
+        let t = check(&n.settings, &pool, ts(2026, 11, 19, 3, 55), &jst())
+            .await
+            .unwrap();
+        assert_eq!(t.message, None);
+        // A due time needs the count, so it does read it.
+        n.update(&Settings::default());
+        assert!(
+            check(&n.settings, &pool, ts(2026, 11, 19, 3, 55), &jst())
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
     async fn turned_off_notifies_nothing_and_keeps_the_record() {
         let pool = sample().await;
-        settings::update(
-            &pool,
-            SettingsInput {
-                notify_enabled: false,
-                ..SettingsInput::from(&Settings::default())
-            },
-        )
-        .await
-        .unwrap();
-        let t = tick(&pool, ts(2026, 11, 19, 0, 30), &jst()).await.unwrap();
+        let n = Notifier::new(&Settings {
+            notify_enabled: false,
+            ..Settings::default()
+        });
+        let t = wake(&n, &pool, ts(2026, 11, 19, 0, 30)).await;
         assert_eq!(t.message, None);
+        assert_eq!(t.notified_at, None);
         assert_eq!(last_notified(&pool).await, None);
     }
 
     #[tokio::test]
-    async fn new_times_take_effect_on_the_next_tick() {
+    async fn saved_settings_take_effect_on_the_next_wake() {
         let pool = sample().await;
-        settings::update(
+        let n = Notifier::new(&Settings::default());
+        // As update_settings does: save, then hand the result over.
+        let saved = settings::update(
             &pool,
             SettingsInput {
                 notify_times: vec!["17:30".into()],
@@ -271,14 +390,38 @@ mod tests {
         )
         .await
         .unwrap();
+        n.update(&saved);
         // 9:30 JST: 9:00 is no longer a notification time.
-        let t = tick(&pool, ts(2026, 11, 19, 0, 30), &jst()).await.unwrap();
+        let t = wake(&n, &pool, ts(2026, 11, 19, 0, 30)).await;
         assert_eq!(t.message, None);
         // 17:25 JST -> wake at 17:30.
-        let t = tick(&pool, ts(2026, 11, 19, 8, 25), &jst()).await.unwrap();
+        let t = wake(&n, &pool, ts(2026, 11, 19, 8, 25)).await;
         assert_eq!(t.wait, Duration::from_secs(5 * 60));
-        let t = tick(&pool, ts(2026, 11, 19, 8, 30), &jst()).await.unwrap();
+        let t = wake(&n, &pool, ts(2026, 11, 19, 8, 30)).await;
         assert!(t.message.is_some());
+    }
+
+    #[test]
+    fn an_older_handled_time_never_replaces_a_newer_one() {
+        let n = Notifier::new(&Settings::default());
+        let mut s = n.settings();
+        s.notified(ts(2026, 11, 19, 0, 30));
+        *lock(&n.settings) = s;
+        // Settings read before the timer saved its time.
+        n.update(&Settings {
+            last_notified_at: Some(ts(2026, 11, 18, 3, 55)),
+            notify_times: vec!["08:00".into()],
+            ..Settings::default()
+        });
+        let now = n.settings();
+        assert_eq!(now.last_notified_at, Some(ts(2026, 11, 19, 0, 30)));
+        assert_eq!(now.times, notify::times_of(&["08:00".to_owned()]));
+        // A later one is taken.
+        n.update(&Settings {
+            last_notified_at: Some(ts(2026, 11, 19, 3, 55)),
+            ..Settings::default()
+        });
+        assert_eq!(n.settings().last_notified_at, Some(ts(2026, 11, 19, 3, 55)));
     }
 
     #[tokio::test]

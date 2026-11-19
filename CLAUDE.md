@@ -160,8 +160,8 @@ v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作る。�
   - ×ボタンは、`close_to_tray` がオンなら隠してトレイに残す。トレイを作れなかったときは、隠さずに終了する。
   - 作ったもの(フェーズ10)
     - `domain/notify.rs`: 時刻の読み取りと検査(`normalize_times`。`H:MM` も受け、全角の数字とコロンは半角として読む。保存は `HH:MM` で時刻の順)、`pending_slot`、`next_wake`、通知の文(`message`、`tray_hint`、`test_message`)。
-    - `notifier.rs`: 常駐のタイマー(tokio のタスク)。1回分の処理は `tick`(DB だけ。メモリ上の DB でテストする)と `backup_if_new_day`。設定の保存と復元のあとは `Notifier::wake`(`tokio::sync::Notify`)で起こす。通知を出すのは `notifier::show`。
-    - `resident.rs`: ウィンドウを出す `show_main`(最小化を戻す → 表示 → 前面)、×ボタン(`on_close_requested`)、トレイの案内、`--autostart` の判定、設定を動いているアプリに反映する `apply`(`close_to_tray` の `AtomicBool` とタイマーを起こす)。
+    - `notifier.rs`: 常駐のタイマー(tokio のタスク)。通知に使う設定(`NotifySettings`: `notify_enabled`、`notify_times`、`last_notified_at`)は `Notifier` がメモリに持ち、起きるたびに DB を読まない。DB に触るのは、通知する時刻が来たとき(件数の集計と `last_notified_at` の保存)と、日付が変わってバックアップを取るときだけ。1回分の処理は `tick`(メモリ上の設定を引数で受け取る。メモリ上の DB でテストする)と `backup_if_new_day`。設定の保存と復元のあとは `Notifier::update` で設定を入れ替えて起こす(`tokio::sync::Notify`)。メモリの `last_notified_at` より古い値では上書きしない。通知を出すのは `notifier::show`。
+    - `resident.rs`: ウィンドウを出す `show_main`(最小化を戻す → 表示 → 前面)、×ボタン(`on_close_requested`)、トレイの案内、`--autostart` の判定、設定を動いているアプリに反映する `apply`(`close_to_tray` の `AtomicBool` と、`Notifier::update`)。
     - `tray.rs`: トレイ。メニューは「Higiri を開く」「終了」。Windows は左クリックでもウィンドウを開き、macOS はクリックでメニューを開く。
     - `autostart.rs`: 自動起動の登録と解除(`apply`)。プラグインは配布版だけで読み込み、配布版は起動のたびに登録し直す(`sync_at_startup`)。App Translocation の判定は実行ファイルのパスに `AppTranslocation` があるか。
     - `win_toast.rs`(Windows の配布版だけ): `HKCU\Software\Classes\AppUserModelId\com.redjet.higiri` に `DisplayName` と `IconUri`(データフォルダの `toast-icon.png`)を書く。
