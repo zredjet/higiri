@@ -46,7 +46,7 @@ Node.js 24、Rust(stable)と、[Tauri の前提ツール](https://v2.tauri.app/s
 ```bash
 npm install
 npm run dev      # ウィンドウを開いて開発する
-npm run check    # 型チェック、テスト、lint
+npm run check    # 型チェック、書式の確認、テスト、lint
 npm run build    # 配布用の ZIP を release/ に作る
 ```
 
