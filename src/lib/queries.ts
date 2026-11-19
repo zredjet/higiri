@@ -7,6 +7,7 @@ import {
   type NewTodoInput,
   type ProjectInput,
   type ReportKey,
+  type Settings,
   type SettingsInput,
   type StatusChange,
   type Todo,
@@ -89,10 +90,44 @@ export function useDeleteProject() {
   });
 }
 
+/** The input of update_settings that keeps every setting as it is. */
+export function settingsInputOf(s: Settings): SettingsInput {
+  return {
+    reminder_frequency: s.reminder_frequency,
+    soon_days: s.soon_days,
+    follow_up_days: s.follow_up_days,
+    theme: s.theme,
+    notify_enabled: s.notify_enabled,
+    notify_times: s.notify_times,
+    close_to_tray: s.close_to_tray,
+    autostart: s.autostart,
+    day_count: s.day_count,
+    custom_holidays: s.custom_holidays,
+    report_template: s.report_template,
+  };
+}
+
+/** Settings to change; a function gets the settings as saved right now. */
+export type SettingsChange = Partial<SettingsInput> | ((current: Settings) => Partial<SettingsInput>);
+
+const SETTINGS_WRITES = { id: "settings-writes" };
+
+/**
+ * Saves some settings. update_settings takes every setting, so the others are
+ * read with get_settings just before the update, and the saves run one at a
+ * time in the order they were made: a heading saved when its field loses
+ * focus and a switch clicked right after never write back each other's older
+ * values.
+ */
 export function useUpdateSettings() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: SettingsInput) => commands.updateSettings(input),
+    scope: SETTINGS_WRITES,
+    mutationFn: async (change: SettingsChange) => {
+      const current = await commands.getSettings();
+      const edits = typeof change === "function" ? change(current) : change;
+      return commands.updateSettings({ ...settingsInputOf(current), ...edits });
+    },
     onSuccess: (saved) => {
       qc.setQueryData(queryKeys.settings, saved);
       // 「間近」の日数, 日数の数え方 and the custom holidays change the

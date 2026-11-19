@@ -66,6 +66,11 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             search::search_todos,
         ])
         .typ::<error::AppError>()
+        // 「初期値に戻す」 on the settings screen sends this template.
+        .constant(
+            "DEFAULT_REPORT_TEMPLATE",
+            crate::domain::report_template::ReportTemplate::default(),
+        )
         // IDs and counts are i64; they stay far below 2^53 in this app.
         .dangerously_cast_bigints_to_number()
         // One TS type per Rust type (no separate *_Serialize / *_Deserialize).

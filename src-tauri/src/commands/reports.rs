@@ -36,9 +36,9 @@ pub async fn get_report(pool: State<'_, SqlitePool>, key: ReportKey) -> CmdResul
     get(&pool, key).await
 }
 
-/// Builds the report from that day's records. The 所感・連絡事項 part is taken
-/// from `current_md` (the text being edited) when given, otherwise from the
-/// saved report. Nothing is saved.
+/// Builds the report from that day's records with the report template. The
+/// 所感・連絡事項 part is taken from `current_md` (the text being edited) when
+/// given, otherwise from the saved report. Nothing is saved.
 #[tauri::command]
 #[specta::specta]
 pub async fn generate_report(
@@ -123,22 +123,26 @@ pub async fn generate(
     .await?;
     let logs = repo::work_logs::list_by_date(&mut conn, key.date).await?;
     let events = repo::events::list_by_date(&mut conn, key.date).await?;
+    let template = &settings.report_template;
     let note = match current_md {
-        Some(md) => report::split_note(md),
+        Some(md) => report::split_note(md, template),
         None => repo::reports::get(&mut conn, key.kind, key.date)
             .await?
             .map(|r| r.note_md)
             .unwrap_or_default(),
     };
-    let body = report::generate_body(&ReportInput {
-        date: key.date,
-        rules: &Rules::from_settings(&settings),
-        projects: &projects,
-        todos: &todos,
-        logs: &logs,
-        events: &events,
-    });
-    Ok(report::compose(&body, &note))
+    let body = report::generate_body(
+        &ReportInput {
+            date: key.date,
+            rules: &Rules::from_settings(&settings),
+            projects: &projects,
+            todos: &todos,
+            logs: &logs,
+            events: &events,
+        },
+        template,
+    );
+    Ok(report::compose(&body, &note, template))
 }
 
 pub async fn save(
@@ -149,6 +153,7 @@ pub async fn save(
 ) -> CmdResult<Report> {
     daily_only(key)?;
     let mut conn = pool.acquire().await?;
+    let template = repo::settings::load(&mut conn).await?.report_template;
     Ok(repo::reports::upsert(
         &mut conn,
         &Report {
@@ -156,7 +161,7 @@ pub async fn save(
             period_start: key.date,
             period_end: key.date,
             body_md: body_md.to_owned(),
-            note_md: report::split_note(body_md),
+            note_md: report::split_note(body_md, &template),
             updated_at: now,
         },
     )
@@ -166,6 +171,8 @@ pub async fn save(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::settings::SettingsInput;
+    use crate::domain::report_template::{ReportTemplate, Section, SectionBody, SectionKind};
     use crate::domain::testing::{d, ts};
     use crate::repo::db;
 
@@ -217,6 +224,177 @@ mod tests {
             "{again}"
         );
         assert!(again.contains("\n## 待ち\n"));
+    }
+
+    /// Saves `template` as the report template.
+    async fn use_template(pool: &SqlitePool, template: ReportTemplate) {
+        let current = crate::commands::settings::get(pool).await.unwrap();
+        crate::commands::settings::update(
+            pool,
+            SettingsInput {
+                report_template: template,
+                ..SettingsInput::from(&current)
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    fn edit(t: &mut ReportTemplate, kind: SectionKind, f: impl FnOnce(&mut Section)) {
+        f(t.sections.iter_mut().find(|s| s.kind() == kind).unwrap());
+    }
+
+    #[tokio::test]
+    async fn the_template_sets_order_headings_and_items() {
+        let pool = seeded().await;
+        let mut t = ReportTemplate {
+            title: "{日付}({曜日}) 業務報告".into(),
+            ..ReportTemplate::default()
+        };
+        for s in t.sections.iter_mut() {
+            match &mut s.body {
+                SectionBody::Work(o) => {
+                    o.project_headings = false;
+                    o.status = false;
+                }
+                SectionBody::Closed(o) => o.close_reason = false,
+                SectionBody::Waiting(o) => {
+                    o.waiting_on = false;
+                    o.waiting_days = false;
+                    o.follow_up_date = false;
+                }
+                SectionBody::Tomorrow(o) => o.planned_period = false,
+                SectionBody::Attention(o) => {
+                    o.days = false;
+                    o.waiting_mark = false;
+                    o.follow_up_and_late_start = true;
+                }
+                SectionBody::Note(_) => s.heading = "連絡事項".into(),
+            }
+        }
+        // 日限注意 first, 本日の作業 last; 待ち not shown.
+        t.sections.swap(0, 4);
+        edit(&mut t, SectionKind::Waiting, |s| s.enabled = false);
+        edit(&mut t, SectionKind::Closed, |s| s.heading = "完了・中止".into());
+        use_template(&pool, t).await;
+        let text = generate(&pool, key("2026-11-19"), None).await.unwrap();
+        assert_eq!(
+            text,
+            concat!(
+                "# 2026-11-19(木) 業務報告\n",
+                "\n",
+                "## 日限注意\n",
+                "- 【超過】社内ツール整備 / ライセンス棚卸し(日限 11/17)\n",
+                "- 【本日】基幹システム更改 / 移行手順書のドラフト(日限 11/19)\n",
+                "- 【間近】基幹システム更改 / API設計書のレビュー対応(日限 11/20)\n",
+                "- 【要確認】採用サイト改修 / 募集要項ページの原稿確認(確認日 11/19)\n",
+                "- 【着手遅れ】基幹システム更改 / 性能試験の環境準備(予定開始 11/17)\n",
+                "\n",
+                "## 完了・中止\n",
+                "- 【完了】社内ツール整備 / デプロイ手順書の更新\n",
+                "- 【中止】基幹システム更改 / 旧帳票の移行検証\n",
+                "\n",
+                "## 明日の予定\n",
+                "- 基幹システム更改 / 移行手順書のドラフト\n",
+                "- 基幹システム更改 / 結合テスト計画の作成\n",
+                "- 基幹システム更改 / 性能試験の環境準備\n",
+                "- 社内ツール整備 / ライセンス棚卸し\n",
+                "\n",
+                "## 本日の作業\n",
+                "- 基幹システム更改 / **API設計書のレビュー対応**(日限 11/20)1.5h\n",
+                "  - 指摘12件のうち9件を反映\n",
+                "  - 残り3件は認証まわり。認証担当に質問を送り、回答待ち\n",
+                "  - [ ] 指摘10:トークン更新の手順を追記\n",
+                "- 基幹システム更改 / **移行手順書のドラフト**(日限 11/19)2.0h\n",
+                "  - 切り戻し手順の章を書き終え、レビューを依頼した\n",
+                "- 社内ツール整備 / **デプロイ手順書の更新** 0.5h\n",
+                "  - 新しい承認フローに合わせて手順4〜6を書き換えた\n",
+                "\n",
+                "## 連絡事項\n",
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn items_can_be_left_out_one_by_one() {
+        let pool = seeded().await;
+        let mut t = ReportTemplate::default();
+        for s in t.sections.iter_mut() {
+            match &mut s.body {
+                SectionBody::Work(o) => {
+                    o.status = false;
+                    o.due_date = false;
+                }
+                SectionBody::Waiting(o) => o.waiting_days = false,
+                SectionBody::Attention(o) => o.follow_up_and_late_start = true,
+                _ => {}
+            }
+        }
+        use_template(&pool, t).await;
+        let text = generate(&pool, key("2026-11-19"), None).await.unwrap();
+        // Project headings stay; no parentheses without status and due date.
+        assert!(
+            text.contains(concat!(
+                "## 本日の作業\n",
+                "\n",
+                "### 基幹システム更改\n",
+                "- **API設計書のレビュー対応** 1.5h\n",
+            )),
+            "{text}"
+        );
+        assert!(
+            text.contains(concat!(
+                "## 待ち\n",
+                "- 採用サイト改修 / 募集要項ページの原稿確認(人事部の原稿確認待ち、確認日 11/19)\n",
+                "- 基幹システム更改 / API設計書のレビュー対応(認証担当の回答待ち、確認日 11/20)\n",
+            )),
+            "{text}"
+        );
+        assert!(
+            text.contains(concat!(
+                "- 【間近】基幹システム更改 / API設計書のレビュー対応(日限 11/20、あと1日、待ち)\n",
+                "- 【要確認】採用サイト改修 / 募集要項ページの原稿確認(確認日 11/19、待ち3日目)\n",
+                "- 【着手遅れ】基幹システム更改 / 性能試験の環境準備(予定開始 11/17、2日経過)\n",
+            )),
+            "{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_note_survives_heading_changes() {
+        let pool = seeded().await;
+        let k = key("2026-11-19");
+        let with_note = |heading: &str| {
+            let mut t = ReportTemplate::default();
+            edit(&mut t, SectionKind::Note, |s| s.heading = heading.into());
+            t
+        };
+        let first = generate(&pool, k, None).await.unwrap();
+        save(&pool, k, &format!("{first}- 所感を書いた。\n"), ts(2026, 11, 19, 10, 0))
+            .await
+            .unwrap();
+
+        // 所感・連絡事項 → 連絡: found by the default heading.
+        use_template(&pool, with_note("連絡")).await;
+        let saved = get(&pool, k).await.unwrap().unwrap();
+        assert_eq!(saved.note_md, "- 所感を書いた。");
+        let second = generate(&pool, k, Some(&saved.body_md)).await.unwrap();
+        assert!(second.ends_with("\n\n## 連絡\n- 所感を書いた。\n"), "{second}");
+        save(&pool, k, &second, ts(2026, 11, 19, 11, 0)).await.unwrap();
+
+        // 連絡 → メモ: neither the heading nor the default is in the text,
+        // but 「## 連絡」 is not a section's heading.
+        use_template(&pool, with_note("メモ")).await;
+        let saved = get(&pool, k).await.unwrap().unwrap();
+        let third = generate(&pool, k, Some(&saved.body_md)).await.unwrap();
+        assert!(third.ends_with("\n\n## メモ\n- 所感を書いた。\n"), "{third}");
+        // Saving with the heading not found keeps the note apart as well.
+        let saved = save(&pool, k, &saved.body_md, ts(2026, 11, 19, 12, 0))
+            .await
+            .unwrap();
+        assert_eq!(saved.note_md, "- 所感を書いた。");
+        // And from the saved report, too.
+        assert_eq!(generate(&pool, k, None).await.unwrap(), third);
     }
 
     #[tokio::test]

@@ -96,6 +96,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
   - `main.tsx` の `QueryClient` の既定は、queries と mutations の両方が `retry: false` と `networkMode: "always"`。コマンドは外部と通信しないので、PC がオフラインになっても読み込みと保存を止めない(既定の `"online"` のままだと、ウィンドウの `offline` イベントで止まる)。
   - TODO の書き込み(`update_todo` と `change_status`)は、mutation の `scope`(`TODO_WRITES`)で1本の列に並べ、始めた順に1つずつ動かす。
   - `update_todo` はすべての項目を受け取るので、`useUpdateTodo` は `{ id, change }` を受け取り、送る直前に `get_todo` で今の TODO を読んで `change(今の todo)` の結果を送る。呼び出し側は `{ ...fieldsOf(current), 変える項目 }` のように自分が変える項目だけを重ねる(ガントのドラッグ、詳細パネル、ダッシュボードの日付の変更)。ほかの保存が入れたばかりの値を古い値で上書きしないため。
+  - 設定の保存(`useUpdateSettings`)も同じ考え方で、`scope`(`SETTINGS_WRITES`)で1本の列に並べ、送る直前に `get_settings` で今の設定を読み、呼び出し側が渡した変える項目だけを重ねて `update_settings` に送る。変える項目は `Partial<SettingsInput>` か、今の設定を受け取る関数(`SettingsChange`)。`SettingsInput` を設定から作るのは `queries.ts` の `settingsInputOf`。見出しの欄を離れたときの保存と、その直後にほかのカードで押したスイッチの保存が、互いに古い値で上書きしないため(フェーズ14)。
 - 入力の検証は Rust 側で行い、返ってきた `AppError.message` を表示する(`src/lib/errors.ts` の `errorMessage`)。フォームには `noValidate` を付け、ブラウザ標準の英語の吹き出しを出さない。
 - 一覧の絞り込み・並べ替え(`domain/listing.rs`)、ステータスの選択肢(`TodoItem.next_statuses`)、タイムラインの文(`domain/timeline.rs`)は Rust 側で作る。画面は受け取ったものを並べるだけ。
 - 日付の入力は `src/components/DateField.tsx` を使う(空を null にし、macOS の WebKit が空欄に今日の日付を出すのを薄く表示する)。
@@ -113,7 +114,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
 - 動作ログは log プラグイン(OS のログフォルダの `higiri.log`、開発ビルドは `higiri-dev.log`。1 MB で切り替えて5個残す)。起動、バックアップ、復元、想定外のエラーだけを書き、TODO の中身は書かない。画面側は `src/lib/log.ts` の `logUnexpected` を使う(`errorMessage` が AppError 以外のエラーを渡す)。
 - 多重起動の防止(single-instance)は配布版だけで有効にする。開発ビルドは別のDBを使うので、インストールした版と同時に動かせるようにしている。2つ目の起動は既存のウィンドウを前面に出す(`--autostart` つきなら出さない)。ウィンドウの位置・大きさ・最大化は window-state で次回に戻す。
 - 権限(`capabilities/default.json`)は、アプリのコマンドと、opener の http/https、clipboard-manager の `allow-write-text`、log の `allow-log` だけ。`core:default` は付けない(画面は Tauri のウィンドウ・イベント・パスの API を使わない)。notification と autostart のプラグインは Rust からだけ使い、画面側には権限を付けない。notification プラグインは画面に `window.Notification` の差し替えを入れ、Windows 以外では読み込み時に `is_permission_granted` を呼ぶが、権限がないので断られる(画面はこれを使わない)。
-- 日報: 節の組み立ては `domain/report.rs`。過去の日は、本日の作業と本日完了・中止をその日の記録から、待ち・明日の予定・日限注意を今の TODO の状態から対象日を今日として作る(待ちは、対象日より後に待ちに入ったものを除く)。中身のない節は「- なし」。所感・連絡事項は `## 所感・連絡事項` の見出しより後ろで、再生成しても残る。設計書の出力例との完全一致を `commands/reports.rs` のテスト(`tests/fixtures/daily_report_2026-11-19.md`)で確かめている。
+- 日報: 節の組み立ては `domain/report.rs`。過去の日は、本日の作業と本日完了・中止をその日の記録から、待ち・明日の予定・日限注意を今の TODO の状態から対象日を今日として作る(待ちは、対象日より後に待ちに入ったものを除く)。中身のない節は「- なし」。節の並び・見出し・出す節・添える項目は日報テンプレート(v1.1 のフェーズ14)で変えられ、所感・連絡事項はいつも最後で、その見出しより後ろが再生成しても残る(見出しの探し方は下の「v1.1 の決めごと」のフェーズ14)。既定のテンプレートでの、設計書の出力例との完全一致を `commands/reports.rs` のテスト(`tests/fixtures/daily_report_2026-11-19.md`)で確かめている。
 - 日報の画面(`src/features/report/`): 日付を開くと保存済みの日報を、なければ生成した日報を出す(開いただけでは保存しない)。編集が止まって1秒後と、再生成・コピー・.md で保存のときに `save_report` で保存する。コピーは clipboard-manager の `writeText`(権限は `clipboard-manager:allow-write-text` だけ)。.md の保存先ダイアログは dialog プラグインを Rust 側で開くので、画面側に dialog の権限は付けない。
 - プロジェクトの作成はサイドナビの「プロジェクトを追加」、編集・アーカイブ・削除はプロジェクトのページの「プロジェクトを編集」から行う。アーカイブしたプロジェクトは設定画面のカードで一覧し、元に戻す・削除する。削除は確認ダイアログを挟む。
 - `bundle.css` の先頭にある Google Fonts の `@import` は外し、IBM Plex Sans JP と IBM Plex Mono をアプリに同梱する。このアプリは外部と通信しない。
@@ -223,6 +224,18 @@ v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作る。�
     - ドラッグ中は、バーに `--focus` の枠を付け、バーの上に日付(「11/20〜11/27」。`rowLabel.ts` の `dragText`)を出す。カーソルは `app.css` の `.gantt-grip--move`(grab)、`.gantt-grip--resize`(ew-resize)と、ドラッグ中にルート要素に付ける `gantt-dragging--move` / `--resize`。
 - 日報テンプレート(フェーズ14)
   - 既定のテンプレートでは、今の出力(フィクスチャ)と完全に一致させる。所感・連絡事項は常に最後に置き、見出しを変えても前に書いた所感を残す。
+  - 作ったもの(フェーズ14)
+    - `domain/report_template.rs`: `ReportTemplate { title, sections }`。節は `Section { heading, enabled, body }` で、`body`(`SectionBody`)が種類と項目を持つ(JSON では `kind` と `options` が節に並ぶ。`#[serde(flatten)]` と `tag = "kind", content = "options"`)。既定(`Default`)は今の日報と同じ形。
+    - JSON のキー: 種類(`kind`)は `work`(本日の作業)、`closed`(本日完了・中止)、`waiting`(待ち)、`tomorrow`(明日の予定)、`attention`(日限注意)、`note`(所感・連絡事項)。項目(`options`)は `work` が `project_headings`・`status`・`due_date`・`work_time`、`closed` が `close_reason`、`waiting` が `waiting_on`・`waiting_days`・`follow_up_date`、`tomorrow` が `planned_period`、`attention` が `days`・`waiting_mark`・`follow_up_and_late_start`(既定はこれだけ `false`)、`note` は `{}`。
+    - 正規化(`normalized`): 種類の重複は前のものを残し、足りない種類は既定の節を所感・連絡事項の前に足し、所感・連絡事項を最後に移していつも出す。`checked` は正規化に加えて、題名と見出しの前後の空白と、頭の `#` と空白(「## 待ち」→「待ち」。「#1 進捗」はそのまま)を除き、検査する(`TemplateError`)。題名は空にできず60字まで(`TITLE_MAX`。`{日付}` なども1字ずつ数える)、見出しは空にできず40字まで(`HEADING_MAX`)、改行は使えない、6つの見出し(出さない節も含む)はすべて違うものにする。
+    - 題名と見出しは文だけを持ち、`# ` と `## ` はアプリが付ける。題名の `{日付}` は `2026-11-19`、`{曜日}` は `木`(`fill_title`)。
+    - settings の `report_template` は、読めない値と検査に通らない値は全体を既定値にし、読むときに正規化する(`repo::settings` の `read_report_template`)。`update_settings` は `checked` で検査し、正規化したものを保存する。エラーの文は `commands/settings.rs` の `template_error`(節は既定の見出しで呼ぶ。「「明日の予定」の節の見出しを入力してください。」)。
+    - `report.rs`: `generate_body(input, &template)` は題名と、出す節をテンプレートの順に組み立てる。`compose(body, note, &template)` が所感・連絡事項の見出しを最後に付ける。項目を外したときの書式: 括弧の中が空になったら括弧ごと出さない。本日の作業でステータスと日限を外して作業時間だけのときは「**タイトル** 1.5h」と空白を入れる。プロジェクトの見出しを外すと「- プロジェクト名 / **タイトル**(…)」になり、空のときは「- なし」を見出しの直後に置く(ほかの節と同じ)。日限注意の「休日のため前倒し」は日限に付くので、日数を外しても出す。
+    - 要確認と着手遅れを含めるとき(`follow_up_and_late_start`)の行は、起動時リマインドに合わせて「【要確認】P / T(確認日 11/19、待ち3日目)」「【着手遅れ】P / T(予定開始 11/17、2日経過)」。「待ち3日目」「2日経過」は日数(`days`)の項目で出す。営業日の設定では「2営業日経過」。
+    - 所感・連絡事項の切り出し(`split_note(full, &template)`、中は `note_line`): (1) 今のテンプレートの見出しと既定の見出し(「所感・連絡事項」)のうち、本文で先に出てくる行。今のテンプレートで出す節の見出しになっている文では探さない。(2) どちらもなければ、節の見出し(今のテンプレートの全節と既定)のどれでもない最初の `## ` の行(見出しを2回以上変えたときの、昔の所感の見出し)。(3) それもなければ所感なし(所感の見出しの行を手で消した日報。MVP と同じ)。迷ったときは多めに残す側に倒すので、節の見出しを変えていたころの日報では、生成した部分の一部が所感の側に重なって残ることがある(手で書いた所感は消えない)。`## ` は行頭のものだけを見る(字下げしたものと `### ` は対象外。作業ログの本文は字下げされているので、ログの中の `## ` では切らない)。`save_report` の `note_md` も同じ関数で切り出す。この順番はオーケストレーターと決めたもので、テストは A→B→C と変えたあとの再生成、所感の見出しの行を消した日報、所感の中の「## 所感・連絡事項」、ログの本文の `## ` を押さえている。
+    - 「初期値に戻す」の既定のテンプレートは、tauri-specta の `constant` で `bindings.ts` に `DEFAULT_REPORT_TEMPLATE` として出す(`commands::specta_builder`)。画面はこれを送る。新しいコマンドは足していない。押すと確認のダイアログ(「日報のテンプレートを初期値に戻しますか」、ボタンは「キャンセル」「初期値に戻す」)を出す。設定画面は変更をすぐ保存するので、押し間違いで変更がすべて消えないようにするため。
+    - 画面: 設定画面の「日報のテンプレート」のカード(`src/features/settings/ReportTemplateCard.tsx`。変える処理は `reportTemplate.ts`、Vitest あり)。題名の欄、節ごとのまとまり(節の名前、「日報に出す」のスイッチ、上へ・下へのボタン、見出しの欄、添える項目のチェック)、「初期値に戻す」のボタン。所感・連絡事項は動かせず、スイッチもない(いつも出して最後)。スイッチ・チェック・並べ替えはすぐ保存し、エラーはカードの上に出す。題名と見出しは、ほかの設定の欄(「間近」の日数)と同じく欄を離れたときに保存し(`DraftTextField`)、エラーは欄の下に出して、打ち直すと消す。保存していない文は、ほかの保存があっても残す。上への矢印は Aizome に `chevron-up` がないので、`chevron-down` を `.icon-up` で回して使う。
+    - 日報の画面の「再生成」の横の文は、所感・連絡事項の見出しを今のテンプレートから取る(既定ではモックの文のまま)。
 - JSON のエクスポートとインポート(フェーズ15)
   - 取り込みは全データの置き換え。復元と同じく、作業用の DB で検査してから今のデータを `before-restore-<UTC日時>.db` に退避し、`ATTACH` して1トランザクションで入れ替える。`autostart`、`last_notified_at`、`tray_hint_shown`、`last_reminded_on` は、復元と同じく今の値のまま残す。
 

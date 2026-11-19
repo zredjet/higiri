@@ -9,7 +9,6 @@ import type {
   ProjectSummary,
   ReminderFrequency,
   Settings,
-  SettingsInput,
   Theme,
 } from "../../lib/bindings";
 import { formatDate, formatDateWithWeekday, formatTimestampDate, todayYmd } from "../../lib/date";
@@ -23,9 +22,11 @@ import {
   useSettings,
   useTestNotification,
   useUpdateSettings,
+  type SettingsChange,
 } from "../../lib/queries";
 import { DeleteProjectDialog } from "../projects/DeleteProjectDialog";
 import { backupLabel } from "./backupText";
+import { ReportTemplateCard } from "./ReportTemplateCard";
 import { RestoreDialog } from "./RestoreDialog";
 
 const THEME_OPTIONS: Array<{ value: Theme; label: string }> = [
@@ -56,21 +57,6 @@ const DAY_COUNT_OPTIONS: Array<{ value: DayCount; label: string; description: st
 /** A development build (`tauri dev`) never registers itself to start at login. */
 const DEV_BUILD = import.meta.env.DEV;
 
-function inputOf(s: Settings): SettingsInput {
-  return {
-    reminder_frequency: s.reminder_frequency,
-    soon_days: s.soon_days,
-    follow_up_days: s.follow_up_days,
-    theme: s.theme,
-    notify_enabled: s.notify_enabled,
-    notify_times: s.notify_times,
-    close_to_tray: s.close_to_tray,
-    autostart: s.autostart,
-    day_count: s.day_count,
-    custom_holidays: s.custom_holidays,
-  };
-}
-
 /** 設定 (docs/ui-mock/Settings.dc.html). */
 export function SettingsPage() {
   const settings = useSettings();
@@ -80,6 +66,7 @@ export function SettingsPage() {
       {settings.data ? <ReminderCard key={settings.dataUpdatedAt} settings={settings.data} /> : null}
       {settings.data ? <DayCountCard settings={settings.data} /> : null}
       {settings.data ? <ResidentCard settings={settings.data} /> : null}
+      {settings.data ? <ReportTemplateCard template={settings.data.report_template} /> : null}
       <DisplayCard />
       <DataCard />
       <ArchivedProjectsCard />
@@ -143,7 +130,7 @@ function ReminderCard({ settings }: { settings: Settings }) {
       return;
     }
     setLocalError(null);
-    const next = { ...inputOf(settings), soon_days: Number(soon), follow_up_days: Number(followUp) };
+    const next = { soon_days: Number(soon), follow_up_days: Number(followUp) };
     if (next.soon_days === settings.soon_days && next.follow_up_days === settings.follow_up_days) return;
     update.mutate(next);
   }
@@ -161,7 +148,7 @@ function ReminderCard({ settings }: { settings: Settings }) {
           options={REMINDER_OPTIONS}
           value={settings.reminder_frequency}
           onChange={(value) =>
-            update.mutate({ ...inputOf(settings), reminder_frequency: value as ReminderFrequency })
+            update.mutate({ reminder_frequency: value as ReminderFrequency })
           }
         />
         <div className="settings-card__grid">
@@ -206,9 +193,9 @@ function DayCountCard({ settings }: { settings: Settings }) {
   const holidays = useHolidays({ start: `${year}-01-01`, end: `${year}-12-31` });
   const national = (holidays.data ?? []).filter((h) => !h.custom);
 
-  function save(change: Partial<SettingsInput>, onSaved?: () => void) {
+  function save(change: SettingsChange, onSaved?: () => void) {
     setLocalError(null);
-    update.mutate({ ...inputOf(settings), ...change }, { onSuccess: onSaved });
+    update.mutate(change, { onSuccess: onSaved });
   }
 
   function addHoliday() {
@@ -216,7 +203,8 @@ function DayCountCard({ settings }: { settings: Settings }) {
       setLocalError("独自の休日の開始日と終了日を入力してください。");
       return;
     }
-    save({ custom_holidays: [...settings.custom_holidays, { name, start, end, yearly }] }, () => {
+    const added = { name, start, end, yearly };
+    save((current) => ({ custom_holidays: [...current.custom_holidays, added] }), () => {
       setName("");
       setStart(null);
       setEnd(null);
@@ -332,10 +320,10 @@ function ResidentCard({ settings }: { settings: Settings }) {
   const [newTime, setNewTime] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
 
-  function save(change: Partial<SettingsInput>, onSaved?: () => void) {
+  function save(change: SettingsChange, onSaved?: () => void) {
     setNotice(null);
     testNotification.reset();
-    update.mutate({ ...inputOf(settings), ...change }, { onSuccess: onSaved });
+    update.mutate(change, { onSuccess: onSaved });
   }
 
   function addTime() {
@@ -450,7 +438,7 @@ function DisplayCard() {
           orientation="horizontal"
           options={THEME_OPTIONS}
           value={s.theme}
-          onChange={(value) => update.mutate({ ...inputOf(s), theme: value as Theme })}
+          onChange={(value) => update.mutate({ theme: value as Theme })}
         />
       ) : null}
     </Card>

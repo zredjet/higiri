@@ -51,9 +51,9 @@ export const commands = {
 	 */
 	getGantt: (query: GanttQuery, options?: InvokeOptions) => __TAURI_INVOKE<Gantt>("get_gantt", { query }, options),
 	/**
-	 *  Builds the report from that day's records. The 所感・連絡事項 part is taken
-	 *  from `current_md` (the text being edited) when given, otherwise from the
-	 *  saved report. Nothing is saved.
+	 *  Builds the report from that day's records with the report template. The
+	 *  所感・連絡事項 part is taken from `current_md` (the text being edited) when
+	 *  given, otherwise from the saved report. Nothing is saved.
 	 */
 	generateReport: (key: ReportKey, currentMd: string | null, options?: InvokeOptions) => __TAURI_INVOKE<string>("generate_report", { key, currentMd }, options),
 	/**  Saves the full text; its 所感・連絡事項 part is stored apart as well. */
@@ -92,6 +92,9 @@ export const commands = {
 	 */
 	searchTodos: (text: string, options?: InvokeOptions) => __TAURI_INVOKE<SearchResult>("search_todos", { text }, options),
 };
+
+/* Constants */
+export const DEFAULT_REPORT_TEMPLATE = {"sections":[{"enabled":true,"heading":"本日の作業","kind":"work","options":{"due_date":true,"project_headings":true,"status":true,"work_time":true}},{"enabled":true,"heading":"本日完了・中止","kind":"closed","options":{"close_reason":true}},{"enabled":true,"heading":"待ち","kind":"waiting","options":{"follow_up_date":true,"waiting_days":true,"waiting_on":true}},{"enabled":true,"heading":"明日の予定","kind":"tomorrow","options":{"planned_period":true}},{"enabled":true,"heading":"日限注意","kind":"attention","options":{"days":true,"follow_up_and_late_start":false,"waiting_mark":true}},{"enabled":true,"heading":"所感・連絡事項","kind":"note","options":{}}],"title":"日報 {日付}({曜日})"} as const;
 
 /* Types */
 export type AppError = {
@@ -139,6 +142,16 @@ export type Assessment = {
 	due_shifted: boolean,
 };
 
+/**  日限注意. */
+export type AttentionOptions = {
+	/**  「2日超過」「あと1日」 (and 「待ち3日目」「2日経過」 of 要確認 and 着手遅れ). */
+	days: boolean,
+	/**  「待ち」 on waiting TODOs. */
+	waiting_mark: boolean,
+	/**  Also list 要確認 and 着手遅れ (off by default: 超過・本日・間近 only). */
+	follow_up_and_late_start: boolean,
+};
+
 /**  A backup file as the settings screen lists it. */
 export type Backup = {
 	/**  File name in the backups folder; restore_backup takes it back. */
@@ -156,6 +169,12 @@ export type BackupKind =
 "daily" | 
 /**  復元する前の状態 (taken just before a restore). */
 "before_restore";
+
+/**  本日完了・中止. */
+export type ClosedOptions = {
+	/**  「(理由:…)」 of 中止. */
+	close_reason: boolean,
+};
 
 /**
  *  A holiday of the user's own (年末年始 and the like), one entry of
@@ -315,6 +334,9 @@ export type NewTodoInput = {
 	memo_md: string | null,
 };
 
+/**  所感・連絡事項 has no options (heading only). */
+export type NoteOptions = Record<string, never>;
+
 /**  Priority (`todos.priority`: 1 = 高, 2 = 中, 3 = 低). */
 export type Priority = "high" | "medium" | "low";
 
@@ -383,6 +405,13 @@ export type ReportKey = {
 /**  Report kinds (`reports.kind`). The MVP makes daily reports only. */
 export type ReportKind = "daily" | "weekly" | "monthly";
 
+export type ReportTemplate = {
+	/**  Text only (`# ` is added by the app); `{日付}` and `{曜日}` are filled in. */
+	title: string,
+	/**  Every kind once, 所感・連絡事項 last (see [`ReportTemplate::normalized`]). */
+	sections: Section[],
+};
+
 /**  A TODO that contains every word. */
 export type SearchHit = {
 	item: TodoItem,
@@ -416,6 +445,17 @@ export type SearchResult = {
 	/**  Every TODO that contains every word (may exceed `hits`). */
 	total: number,
 };
+
+/**  One section: `{ kind, heading, enabled, options }`. */
+export type Section = {
+	/**  Text only (`## ` is added by the app). */
+	heading: string,
+	/**  Shown in the report. Always true for 所感・連絡事項. */
+	enabled: boolean,
+} & SectionBody;
+
+/**  The kind of a section and its options (`"kind"` and `"options"` in JSON). */
+export type SectionBody = { kind: "work"; options: WorkOptions } | { kind: "closed"; options: ClosedOptions } | { kind: "waiting"; options: WaitingOptions } | { kind: "tomorrow"; options: TomorrowOptions } | { kind: "attention"; options: AttentionOptions } | { kind: "note"; options: NoteOptions };
 
 /**  A piece of text: one of the words (`hit`) or the text between them. */
 export type Segment = {
@@ -451,6 +491,8 @@ export type Settings = {
 	day_count: DayCount,
 	/**  The user's own holidays (v1.1). */
 	custom_holidays: CustomHoliday[],
+	/**  Sections, headings and items of the daily report (v1.1). */
+	report_template: ReportTemplate,
 };
 
 /**
@@ -470,6 +512,11 @@ export type SettingsInput = {
 	day_count: DayCount,
 	/**  Names 1 to 30 characters, `start <= end`, at most 31 days each. */
 	custom_holidays: CustomHoliday[],
+	/**
+	 *  Title 1 to 60 characters; headings 1 to 40 characters, all different.
+	 *  Saved normalized (see `ReportTemplate::checked`).
+	 */
+	report_template: ReportTemplate,
 };
 
 /**  What the startup reminder dialog shows. */
@@ -645,6 +692,12 @@ export type TodoSort =
 /**  優先度の高い順, then due date. */
 "priority";
 
+/**  明日の予定. */
+export type TomorrowOptions = {
+	/**  「(予定 11/20〜11/27)」 of 未着手. */
+	planned_period: boolean,
+};
+
 /**
  *  Urgency category. Declared in severity order (most severe first), so the
  *  derived `Ord` sorts 超過 → 本日 → 間近 → 要確認 → 着手遅れ.
@@ -668,6 +721,16 @@ export type UrgencyCounts = {
 	due_soon: number,
 	follow_up: number,
 	late_start: number,
+};
+
+/**  待ち. */
+export type WaitingOptions = {
+	/**  「人事部の原稿確認待ち」 */
+	waiting_on: boolean,
+	/**  「3日目」 */
+	waiting_days: boolean,
+	/**  「確認日 11/19」 */
+	follow_up_date: boolean,
 };
 
 /**  The two small warning icons shown in the list and the Gantt chart. */
@@ -696,4 +759,19 @@ export type WorkLogInput = {
 	body_md: string,
 	/**  作業時間 in minutes (optional). */
 	minutes: number | null,
+};
+
+/**  本日の作業. */
+export type WorkOptions = {
+	/**
+	 *  「### プロジェクト名」 above each project's TODOs. Off: each line
+	 *  starts with 「プロジェクト名 / 」.
+	 */
+	project_headings: boolean,
+	/**  「(作業中 …)」 */
+	status: boolean,
+	/**  「… / 日限 11/20」 (open TODOs only). */
+	due_date: boolean,
+	/**  「1.5h」 */
+	work_time: boolean,
 };

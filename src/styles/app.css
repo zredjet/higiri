@@ -893,6 +893,81 @@ input[type="date"][data-empty="true"]:not(:focus) {
   width: 180px;
 }
 
+/* 日報のテンプレート: one block per section. */
+.report-sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.report-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.report-section__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  min-height: var(--control-sm);
+}
+
+.report-section__name {
+  font-weight: 600;
+}
+
+.report-section--off .report-section__name {
+  color: var(--text-muted);
+}
+
+.report-section__tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.report-section__tools .az-switch {
+  margin-right: var(--space-3);
+}
+
+.report-section__body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-3) var(--space-6);
+}
+
+.report-section__heading {
+  width: 280px;
+  max-width: 100%;
+}
+
+.report-section__items {
+  flex: 1 1 320px;
+  min-width: 0;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.report-section__checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+}
+
+/* The up arrow of the order buttons (Aizome has chevron-down only). */
+.icon-up {
+  transform: rotate(180deg);
+}
+
 /* ---------- Gantt ---------- */
 /* The chart fills the rest of the page and scrolls its own rows. */
 .app__main--fill {

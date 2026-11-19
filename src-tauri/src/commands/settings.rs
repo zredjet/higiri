@@ -13,7 +13,10 @@ use super::error::{AppError, CmdResult};
 use super::validate;
 use crate::domain::calendar::{CUSTOM_DAYS_MAX, CUSTOM_NAME_MAX, CustomHolidayError};
 use crate::domain::notify::{self, TimesError};
-use crate::domain::settings::{CustomHoliday, DayCount, ReminderFrequency, Settings, Theme};
+use crate::domain::report_template::{HEADING_MAX, SectionKind, TITLE_MAX, TemplateError};
+use crate::domain::settings::{
+    CustomHoliday, DayCount, ReminderFrequency, ReportTemplate, Settings, Theme,
+};
 use crate::{autostart, repo, resident};
 
 /// Days accepted for 「間近」とみなす日数 and 確認日の初期値.
@@ -36,6 +39,9 @@ pub struct SettingsInput {
     pub day_count: DayCount,
     /// Names 1 to 30 characters, `start <= end`, at most 31 days each.
     pub custom_holidays: Vec<CustomHoliday>,
+    /// Title 1 to 60 characters; headings 1 to 40 characters, all different.
+    /// Saved normalized (see `ReportTemplate::checked`).
+    pub report_template: ReportTemplate,
 }
 
 impl From<&Settings> for SettingsInput {
@@ -51,6 +57,7 @@ impl From<&Settings> for SettingsInput {
             autostart: s.autostart,
             day_count: s.day_count,
             custom_holidays: s.custom_holidays.clone(),
+            report_template: s.report_template.clone(),
         }
     }
 }
@@ -119,6 +126,10 @@ pub async fn update(pool: &SqlitePool, input: SettingsInput) -> CmdResult<Settin
         .iter()
         .map(|h| h.checked().map_err(|e| holiday_error(h, e)))
         .collect::<CmdResult<Vec<_>>>()?;
+    let report_template = input
+        .report_template
+        .checked()
+        .map_err(template_error)?;
     let mut tx = pool.begin().await?;
     let current = repo::settings::load(&mut tx).await?;
     let next = Settings {
@@ -132,6 +143,7 @@ pub async fn update(pool: &SqlitePool, input: SettingsInput) -> CmdResult<Settin
         autostart: input.autostart,
         day_count: input.day_count,
         custom_holidays,
+        report_template,
         ..current
     };
     repo::settings::save_user_settings(&mut tx, &next).await?;
@@ -151,6 +163,35 @@ fn holiday_error(h: &CustomHoliday, e: CustomHolidayError) -> AppError {
         ),
         CustomHolidayError::TooLong => format!(
             "独自の休日は1件{CUSTOM_DAYS_MAX}日までです。「{name}」の期間を短くするか、分けて登録してください。"
+        ),
+    })
+}
+
+fn template_error(e: TemplateError) -> AppError {
+    let section = |k: SectionKind| k.default_heading();
+    AppError::validation(match e {
+        TemplateError::EmptyTitle => "日報の題名を入力してください。".to_owned(),
+        TemplateError::TitleTooLong => {
+            format!("日報の題名は{TITLE_MAX}字までにしてください。")
+        }
+        TemplateError::EmptyHeading(k) => {
+            format!("「{}」の節の見出しを入力してください。", section(k))
+        }
+        TemplateError::HeadingTooLong(k) => format!(
+            "「{}」の節の見出しは{HEADING_MAX}字までにしてください。",
+            section(k)
+        ),
+        TemplateError::LineBreak => {
+            "日報の題名と見出しに改行は使えません。1行で入力してください。".to_owned()
+        }
+        TemplateError::DuplicateHeading {
+            heading,
+            first,
+            second,
+        } => format!(
+            "見出し「{heading}」が「{}」と「{}」の節で重なっています。節ごとに違う見出しにしてください。",
+            section(first),
+            section(second)
         ),
     })
 }
@@ -365,6 +406,95 @@ mod tests {
             e.message,
             "「間近」とみなす日数は1〜30営業日の範囲で入力してください。"
         );
+    }
+
+    fn template(change: impl FnOnce(&mut ReportTemplate)) -> SettingsInput {
+        let mut t = ReportTemplate::default();
+        change(&mut t);
+        SettingsInput {
+            report_template: t,
+            ..SettingsInput::from(&Settings::default())
+        }
+    }
+
+    fn heading(t: &mut ReportTemplate, kind: SectionKind, text: &str) {
+        t.sections
+            .iter_mut()
+            .find(|s| s.kind() == kind)
+            .unwrap()
+            .heading = text.into();
+    }
+
+    #[tokio::test]
+    async fn report_template_is_saved_normalized() {
+        let pool = db::open_in_memory().await.unwrap();
+        let s = update(
+            &pool,
+            template(|t| {
+                t.title = " # {日付} 業務報告 ".into();
+                heading(t, SectionKind::Waiting, " ## 待ち状況 ");
+                // 所感 first and 日限注意 missing.
+                t.sections.rotate_right(1);
+                t.sections.retain(|s| s.kind() != SectionKind::Attention);
+            }),
+        )
+        .await
+        .unwrap();
+        let t = &s.report_template;
+        assert_eq!(t.title, "{日付} 業務報告");
+        assert_eq!(t.section(SectionKind::Waiting).unwrap().heading, "待ち状況");
+        let kinds: Vec<SectionKind> = t.sections.iter().map(|s| s.kind()).collect();
+        assert_eq!(
+            kinds,
+            [
+                SectionKind::Work,
+                SectionKind::Closed,
+                SectionKind::Waiting,
+                SectionKind::Tomorrow,
+                SectionKind::Attention,
+                SectionKind::Note,
+            ]
+        );
+        assert_eq!(get(&pool).await.unwrap(), s);
+    }
+
+    #[tokio::test]
+    async fn report_template_is_checked() {
+        let pool = db::open_in_memory().await.unwrap();
+        let message = |input| {
+            let pool = pool.clone();
+            async move { update(&pool, input).await.unwrap_err().message }
+        };
+        assert_eq!(
+            message(template(|t| t.title = " ".into())).await,
+            "日報の題名を入力してください。"
+        );
+        assert_eq!(
+            message(template(|t| t.title = "題".repeat(61))).await,
+            "日報の題名は60字までにしてください。"
+        );
+        assert_eq!(
+            message(template(|t| heading(t, SectionKind::Tomorrow, ""))).await,
+            "「明日の予定」の節の見出しを入力してください。"
+        );
+        assert_eq!(
+            message(template(|t| heading(
+                t,
+                SectionKind::Note,
+                &"見".repeat(41)
+            )))
+            .await,
+            "「所感・連絡事項」の節の見出しは40字までにしてください。"
+        );
+        assert_eq!(
+            message(template(|t| heading(t, SectionKind::Note, "## 待ち"))).await,
+            "見出し「待ち」が「待ち」と「所感・連絡事項」の節で重なっています。節ごとに違う見出しにしてください。"
+        );
+        assert_eq!(
+            message(template(|t| heading(t, SectionKind::Work, "作業\nログ"))).await,
+            "日報の題名と見出しに改行は使えません。1行で入力してください。"
+        );
+        assert_eq!(get(&pool).await.unwrap(), Settings::default());
     }
 
     #[tokio::test]

@@ -15,6 +15,7 @@
 //! | `tray_hint_shown` | `true` / `false` |
 //! | `day_count` | `"calendar"` or `"business"` |
 //! | `custom_holidays` | `[{"name", "start", "end", "yearly"}, …]` |
+//! | `report_template` | `{"title", "sections": [{"kind", "heading", "enabled", "options"}, …]}` |
 //!
 //! Missing keys, unknown keys and unreadable values fall back to the defaults
 //! so that a bad row never prevents the app from starting.
@@ -31,7 +32,7 @@ use sqlx::SqliteConnection;
 use super::Result;
 use crate::domain::date::{format_timestamp, parse_timestamp};
 use crate::domain::notify::normalize_times;
-use crate::domain::settings::{CustomHoliday, Settings};
+use crate::domain::settings::{CustomHoliday, ReportTemplate, Settings};
 
 pub const REMINDER_FREQUENCY: &str = "reminder_frequency";
 pub const SOON_DAYS: &str = "soon_days";
@@ -46,6 +47,7 @@ pub const AUTOSTART: &str = "autostart";
 pub const TRAY_HINT_SHOWN: &str = "tray_hint_shown";
 pub const DAY_COUNT: &str = "day_count";
 pub const CUSTOM_HOLIDAYS: &str = "custom_holidays";
+pub const REPORT_TEMPLATE: &str = "report_template";
 
 /// Keys a restore (and the JSON import) leaves as they are on this PC:
 /// `autostart` belongs to the PC, the others are written by the app.
@@ -73,6 +75,16 @@ fn read_custom_holidays(value: &str, fallback: Vec<CustomHoliday>) -> Vec<Custom
     serde_json::from_str::<Vec<CustomHoliday>>(value)
         .ok()
         .and_then(|list| list.iter().map(|h| h.checked().ok()).collect())
+        .unwrap_or(fallback)
+}
+
+/// A stored report template, normalized (missing sections added, repeats
+/// dropped, 所感・連絡事項 last), or the fallback unless it can be read and its
+/// title and headings pass the checks.
+fn read_report_template(value: &str, fallback: ReportTemplate) -> ReportTemplate {
+    serde_json::from_str::<ReportTemplate>(value)
+        .ok()
+        .and_then(|t| t.checked().ok())
         .unwrap_or(fallback)
 }
 
@@ -106,6 +118,7 @@ pub async fn load(conn: &mut SqliteConnection) -> Result<Settings> {
             TRAY_HINT_SHOWN => s.tray_hint_shown = read(&value, s.tray_hint_shown),
             DAY_COUNT => s.day_count = read(&value, s.day_count),
             CUSTOM_HOLIDAYS => s.custom_holidays = read_custom_holidays(&value, s.custom_holidays),
+            REPORT_TEMPLATE => s.report_template = read_report_template(&value, s.report_template),
             _ => {}
         }
     }
@@ -146,6 +159,7 @@ pub async fn save_user_settings(conn: &mut SqliteConnection, s: &Settings) -> Re
     put(conn, AUTOSTART, &s.autostart).await?;
     put(conn, DAY_COUNT, &s.day_count).await?;
     put(conn, CUSTOM_HOLIDAYS, &s.custom_holidays).await?;
+    put(conn, REPORT_TEMPLATE, &s.report_template).await?;
     Ok(())
 }
 
@@ -173,6 +187,7 @@ pub async fn set_tray_hint_shown(conn: &mut SqliteConnection, shown: bool) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::report_template::{SectionBody, SectionKind};
     use crate::domain::settings::{DayCount, ReminderFrequency, Theme};
     use crate::domain::testing::{d, ts};
     use crate::repo::testing::conn;
@@ -205,6 +220,10 @@ mod tests {
                 end: d("2027-01-03"),
                 yearly: true,
             }],
+            report_template: ReportTemplate {
+                title: "{日付} 業務報告".into(),
+                ..ReportTemplate::default()
+            },
         };
         save(&mut c, &s).await.unwrap();
         assert_eq!(load(&mut c).await.unwrap(), s);
@@ -224,6 +243,15 @@ mod tests {
                 .await
                 .unwrap();
         rows.sort();
+        let (_, template) = rows.remove(
+            rows.iter()
+                .position(|(k, _)| k == "report_template")
+                .unwrap(),
+        );
+        assert!(
+            template.starts_with(r#"{"title":"{日付} 業務報告","sections":[{"heading":"本日の作業","enabled":true,"kind":"work","options":{"project_headings":true,"#),
+            "{template}"
+        );
         assert_eq!(
             rows,
             vec![
@@ -293,6 +321,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn report_templates_are_normalized_when_read() {
+        let (_pool, mut c) = conn().await;
+        // 所感 first, 待ち twice, the rest missing.
+        let stored = r#"{"title":" ## 日報 {日付} ","sections":[
+            {"kind":"note","heading":"連絡","enabled":false,"options":{}},
+            {"kind":"waiting","heading":"待ち状況","enabled":false,"options":{"waiting_on":true,"waiting_days":false,"follow_up_date":true}},
+            {"kind":"waiting","heading":"待ち","enabled":true,"options":{"waiting_on":true,"waiting_days":true,"follow_up_date":true}}
+        ]}"#;
+        sqlx::query("INSERT INTO settings (key, value) VALUES ('report_template', ?1)")
+            .bind(stored)
+            .execute(&mut *c)
+            .await
+            .unwrap();
+        let t = load(&mut c).await.unwrap().report_template;
+        assert_eq!(t.title, "日報 {日付}");
+        let kinds: Vec<SectionKind> = t.sections.iter().map(|s| s.kind()).collect();
+        assert_eq!(
+            kinds,
+            [
+                SectionKind::Waiting,
+                SectionKind::Work,
+                SectionKind::Closed,
+                SectionKind::Tomorrow,
+                SectionKind::Attention,
+                SectionKind::Note,
+            ]
+        );
+        let waiting = &t.sections[0];
+        assert_eq!(waiting.heading, "待ち状況");
+        assert!(!waiting.enabled);
+        assert!(matches!(&waiting.body, SectionBody::Waiting(o) if !o.waiting_days));
+        assert_eq!(t.note_heading(), "連絡");
+        assert!(t.sections[5].enabled);
+    }
+
+    #[tokio::test]
     async fn unreadable_values_fall_back_to_defaults() {
         let (_pool, mut c) = conn().await;
         for (k, v) in [
@@ -345,6 +409,29 @@ mod tests {
             assert_eq!(
                 load(&mut c).await.unwrap().notify_times,
                 ["09:00", "12:55"],
+                "{bad}"
+            );
+        }
+
+        // Report templates that cannot be read or do not pass the checks.
+        for bad in [
+            r#""日報""#,
+            r#"{"title":"","sections":[]}"#,
+            r#"{"title":"T","sections":[{"kind":"work","heading":"待ち","enabled":true,"options":{"project_headings":true,"status":true,"due_date":true,"work_time":true}}]}"#,
+            r#"{"title":"T","sections":[{"kind":"weekly","heading":"週","enabled":true,"options":{}}]}"#,
+            r#"{"title":"T","sections":[{"kind":"closed","heading":"完了","enabled":true,"options":{"close_reason":"yes"}}]}"#,
+        ] {
+            sqlx::query(
+                "INSERT INTO settings (key, value) VALUES ('report_template', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            )
+            .bind(bad)
+            .execute(&mut *c)
+            .await
+            .unwrap();
+            assert_eq!(
+                load(&mut c).await.unwrap().report_template,
+                ReportTemplate::default(),
                 "{bad}"
             );
         }

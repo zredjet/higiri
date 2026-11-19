@@ -7,7 +7,7 @@ import { MarkdownView } from "../../components/markdown/MarkdownView";
 import { PageHeader } from "../../components/PageHeader";
 import { addDaysYmd, todayYmd } from "../../lib/date";
 import { errorMessage } from "../../lib/errors";
-import { useExportReport, useGenerateReport } from "../../lib/queries";
+import { useExportReport, useGenerateReport, useSettings } from "../../lib/queries";
 import { useReportDraft } from "./useReportDraft";
 
 /** 日報 (R-1〜R-4): pick a day, regenerate, edit, copy, save as .md. */
@@ -16,6 +16,9 @@ export function ReportPage() {
   const { doc, loadError, saveError, edit, replace, saveNow } = useReportDraft(date);
   const generate = useGenerateReport();
   const exportFile = useExportReport();
+  const settings = useSettings();
+  const noteHeading =
+    settings.data?.report_template.sections.find((s) => s.kind === "note")?.heading ?? "所感・連絡事項";
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -106,7 +109,7 @@ export function ReportPage() {
           </Button>
         </div>
         <div className="report-toolbar__regen">
-          <span className="text-caption">作業ログから作り直します。所感・連絡事項は残ります。</span>
+          <span className="text-caption">作業ログから作り直します。{noteHeading}は残ります。</span>
           <Button size="sm" disabled={!doc || generate.isPending} onClick={() => void regenerate()}>
             再生成
           </Button>
