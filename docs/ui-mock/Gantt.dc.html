@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>ガントチャート</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="ds/aizome/tokens.css">
+<link rel="stylesheet" href="ds/aizome/components/bundle.css">
+<script src="ds/aizome/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans+JP:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; background: var(--bg); color: var(--text); font-family: var(--font-sans); font-size: 14px; line-height: 22px;">
+  <div style="flex: 0 0 240px; display: flex; background: var(--nav-bg);">
+    <x-import component-from-global-scope="Aizome.SideNav" sections="{{navSections}}" active-id="gantt" header="TODO管理" label="メインナビゲーション" style="display: block; width: 240px; height: 100%;"></x-import>
+  </div>
+
+  <main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 24px 32px 32px; display: flex; flex-direction: column; gap: 16px;">
+    <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;">
+      <div style="display: flex; align-items: baseline; gap: 12px;">
+        <h1 style="margin: 0; font-size: 24px; line-height: 34px; font-weight: 600;">ガントチャート</h1>
+        <span style="font-size: 14px; line-height: 22px; color: var(--text-muted); font-variant-numeric: tabular-nums;">2026/11/09 〜 2026/12/04</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 4px;">
+        <x-import component-from-global-scope="Aizome.Button" variant="ghost" icon-start="chevron-left" aria-label="前の期間へ"></x-import>
+        <x-import component-from-global-scope="Aizome.Button">今日</x-import>
+        <x-import component-from-global-scope="Aizome.Button" variant="ghost" icon-start="chevron-right" aria-label="次の期間へ"></x-import>
+      </div>
+    </div>
+
+    <x-import component-from-global-scope="Aizome.Tabs" items="{{unitTabs}}" default-value="day" label="表示単位" style="display: block;"></x-import>
+
+    <div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px;">
+      <div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 24px;">
+        <x-import component-from-global-scope="Aizome.Select" label="プロジェクト" options="{{projectOptions}}" default-value="all" size="sm" style="display: block; width: 220px;"></x-import>
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 20px; min-height: 28px;">
+          <x-import component-from-global-scope="Aizome.Checkbox" label="完了したTODOも表示" default-checked="{{yes}}"></x-import>
+          <x-import component-from-global-scope="Aizome.Checkbox" label="中止したTODOも表示"></x-import>
+        </div>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px; font-size: 12px; line-height: 18px; letter-spacing: 0.02em; color: var(--text-muted);">
+        <span style="display: flex; align-items: center; gap: 6px;"><span aria-hidden="true" style="width: 24px; height: 10px; border-radius: 2px; background: var(--ai-200);"></span>予定</span>
+        <span style="display: flex; align-items: center; gap: 6px;"><span aria-hidden="true" style="width: 24px; height: 12px; border-radius: 2px; background: var(--ai-600);"></span>実績</span>
+        <span style="display: flex; align-items: center; gap: 6px;"><span aria-hidden="true" style="width: 24px; height: 12px; box-sizing: border-box; border: 2px solid var(--ai-600); border-radius: 2px; background: var(--surface);"></span>待ち</span>
+        <span style="display: flex; align-items: center; gap: 8px;"><span aria-hidden="true" style="width: 10px; height: 10px; transform: rotate(45deg); background: var(--text);"></span>日限</span>
+        <span style="display: flex; align-items: center; gap: 6px;"><span aria-hidden="true" style="width: 2px; height: 14px; background: var(--primary-text);"></span>今日</span>
+      </div>
+    </div>
+
+    <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow-x: auto;">
+      <div style="display: flex; width: 1134px;">
+
+        <div style="flex: 0 0 302px; box-sizing: border-box; border-right: 1px solid var(--border);">
+          <div style="height: 53px; box-sizing: border-box; border-bottom: 1px solid var(--border); background: var(--bg-subtle); display: flex; align-items: flex-end; padding: 0 16px 5px; font-size: 12px; line-height: 18px; font-weight: 500; letter-spacing: 0.02em; color: var(--text-muted);">TODO</div>
+
+          <div style="height: 32px; box-sizing: border-box; border-bottom: 1px solid var(--border); background: var(--bg-subtle); display: flex; align-items: center; justify-content: space-between; padding: 0 12px 0 16px; font-size: 13px; font-weight: 600;"><span>基幹システム更改</span><span style="font-size: 12px; font-weight: 400; color: var(--text-muted);">5件</span></div>
+          <div style="height: 44px; box-sizing: border-box; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px 0 16px;">
+            <span style="min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">移行手順書のドラフト</span>
+            <x-import component-from-global-scope="Aizome.Badge" tone="primary" dot="{{yes}}">作業中</x-import>
+          </div>
+          <div style="height: 44px; box-sizing: border-box; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px 0 16px;">
+            <span style="min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">API設計書のレビュー対応</span>
+            <x-import component-from-global-scope="Aizome.Badge" tone="warning" dot="{{yes}}">待ち</x-import>
+          </div>
+          <div style="height: 44px; box-sizing: border-box; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px 0 16px;">
+            <span style="min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">結合テスト計画の作成</span>
+            <x-import component-from-global-scope="Aizome.Badge" tone="neutral" dot="{{yes}}">未着手</x-import>
+          </div>
+          <div style="height: 44px; box-sizing: border-box; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px 0 16px;">
+            <span style="min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">性能試験の環境準備</span>
+            <x-import component-from-global-scope="Aizome.Badge" tone="neutral" dot="{{yes}}">未着手</x-import>
+          </div>
+          <div style="height: 44px; box-sizing: border-box; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px 0 16px;">
+            <span style="min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">要件定義書の改訂</span>
+            <x-import component-from-global-scope="Aizome.Badge" tone="success" dot="{{yes}}">完了</x-import>
+          </div>
+
+          <div style="height: 32px; box-sizing: border-box; border-bottom: 1px solid var(--border); background: var(--bg-subtle); display: flex; align-items: center; justify-content: space-between; padding: 0 12px 0 16px; font-size: 13px; font-weight: 600;"><span>社内ツール整備</span><span style="font-size: 12px; font-weight: 400; color: var(--text-muted);">3件</span></div>
+          <div style="height: 44px; box-sizing: border-box; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px 0 16px;">
+            <span style="min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">ライセンス棚卸し</span>
+            <x-import component-from-global-scope="Aizome.Badge" tone="neutral" dot="{{yes}}">未着手</x-import>
+          </div>
+          <div style="height: 44px; box-sizing: border-box; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px 0 16px;">
+            <span style="min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">デプロイ手順書の更新</span>
+            <x-import component-from-global-scope="Aizome.Badge" tone="success" dot="{{yes}}">完了</x-import>
+          </div>
+          <div style="height: 44px; box-sizing: border-box; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px 0 16px;">
+            <span style="min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">監視ダッシュボードの整理</span>
+            <x-import component-from-global-scope="Aizome.Badge" tone="neutral" dot="{{yes}}">保留</x-import>
+          </div>
+
+          <div style="height: 32px; box-sizing: border-box; border-bottom: 1px solid var(--border); background: var(--bg-subtle); display: flex; align-items: center; justify-content: space-between; padding: 0 12px 0 16px; font-size: 13px; font-weight: 600;"><span>採用サイト改修</span><span style="font-size: 12px; font-weight: 400; color: var(--text-muted);">2件</span></div>
+          <div style="height: 44px; box-sizing: border-box; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px 0 16px;">
+            <span style="min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">募集要項ページの原稿確認</span>
+            <x-import component-from-global-scope="Aizome.Badge" tone="warning" dot="{{yes}}">待ち</x-import>
+          </div>
+          <div style="height: 44px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px 0 16px;">
+            <span style="min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">応募フォームの項目見直し</span>
+            <x-import component-from-global-scope="Aizome.Badge" tone="neutral" dot="{{yes}}">未着手</x-import>
+          </div>
+        </div>
+
+        <div style="flex: 0 0 832px; position: relative;">
+          <div aria-hidden="true" style="position: absolute; top: 53px; bottom: 0; left: 160px; width: 64px; background: var(--bg-subtle);"></div>
+          <div aria-hidden="true" style="position: absolute; top: 53px; bottom: 0; left: 384px; width: 64px; background: var(--bg-subtle);"></div>
+          <div aria-hidden="true" style="position: absolute; top: 53px; bottom: 0; left: 608px; width: 64px; background: var(--bg-subtle);"></div>
+
+          <div style="height: 53px; box-sizing: border-box; border-bottom: 1px solid var(--border); background: var(--bg-subtle);">
+            <div style="display: flex; height: 24px; font-size: 12px; line-height: 23px; font-weight: 500; letter-spacing: 0.02em; color: var(--text-muted);">
+              <span style="flex: 0 0 704px; box-sizing: border-box; padding: 0 8px; border-bottom: 1px solid var(--border); border-right: 1px solid var(--border);">2026年11月</span>
+              <span style="flex: 0 0 128px; box-sizing: border-box; padding: 0 8px; border-bottom: 1px solid var(--border);">12月</span>
+            </div>
+            <div style="display: flex; height: 28px; font-size: 12px; line-height: 28px; text-align: center; color: var(--text-muted); font-variant-numeric: tabular-nums;">
+              <span style="flex: 0 0 32px;">9</span>
+              <span style="flex: 0 0 32px;">10</span>
+              <span style="flex: 0 0 32px;">11</span>
+              <span style="flex: 0 0 32px;">12</span>
+              <span style="flex: 0 0 32px;">13</span>
+              <span style="flex: 0 0 32px;">14</span>
+              <span style="flex: 0 0 32px;">15</span>
+              <span style="flex: 0 0 32px;">16</span>
+              <span style="flex: 0 0 32px;">17</span>
+              <span style="flex: 0 0 32px;">18</span>
+              <span style="flex: 0 0 32px; font-weight: 600; color: var(--primary-text); background: var(--primary-soft);">19</span>
+              <span style="flex: 0 0 32px;">20</span>
+              <span style="flex: 0 0 32px;">21</span>
+              <span style="flex: 0 0 32px;">22</span>
+              <span style="flex: 0 0 32px;">23</span>
+              <span style="flex: 0 0 32px;">24</span>
+              <span style="flex: 0 0 32px;">25</span>
+              <span style="flex: 0 0 32px;">26</span>
+              <span style="flex: 0 0 32px;">27</span>
+              <span style="flex: 0 0 32px;">28</span>
+              <span style="flex: 0 0 32px;">29</span>
+              <span style="flex: 0 0 32px;">30</span>
+              <span style="flex: 0 0 32px;">1</span>
+              <span style="flex: 0 0 32px;">2</span>
+              <span style="flex: 0 0 32px;">3</span>
+              <span style="flex: 0 0 32px;">4</span>
+            </div>
+          </div>
+
+          <div style="height: 32px; box-sizing: border-box; border-bottom: 1px solid var(--border); background: var(--bg-subtle);"></div>
+          <div role="img" aria-label="移行手順書のドラフト:予定 11/11〜11/18、実績 11/12〜、日限 11/19(今日)" style="position: relative; height: 44px; box-sizing: border-box; border-bottom: 1px solid var(--border);">
+            <div style="position: absolute; left: 64px; top: 9px; width: 256px; height: 10px; border-radius: 2px; background: var(--ai-200);"></div>
+            <div style="position: absolute; left: 96px; top: 23px; width: 256px; height: 12px; border-radius: 2px; background: var(--ai-600);"></div>
+            <div style="position: absolute; left: 330px; top: 16px; width: 12px; height: 12px; transform: rotate(45deg); background: var(--warning); box-shadow: 0 0 0 2px var(--surface);"></div>
+          </div>
+          <div role="img" aria-label="API設計書のレビュー対応:予定 11/16〜11/19、実績 11/17〜(11/19から待ち)、日限 11/20" style="position: relative; height: 44px; box-sizing: border-box; border-bottom: 1px solid var(--border);">
+            <div style="position: absolute; left: 224px; top: 9px; width: 128px; height: 10px; border-radius: 2px; background: var(--ai-200);"></div>
+            <div style="position: absolute; left: 256px; top: 23px; width: 64px; height: 12px; border-radius: 2px; background: var(--ai-600);"></div>
+            <div style="position: absolute; left: 320px; top: 23px; width: 32px; height: 12px; box-sizing: border-box; border: 2px solid var(--ai-600); border-radius: 2px; background: var(--surface);"></div>
+            <div style="position: absolute; left: 362px; top: 16px; width: 12px; height: 12px; transform: rotate(45deg); background: var(--text); box-shadow: 0 0 0 2px var(--surface);"></div>
+          </div>
+          <div role="img" aria-label="結合テスト計画の作成:予定 11/20〜11/27、実績なし、日限 11/30" style="position: relative; height: 44px; box-sizing: border-box; border-bottom: 1px solid var(--border);">
+            <div style="position: absolute; left: 352px; top: 9px; width: 256px; height: 10px; border-radius: 2px; background: var(--ai-200);"></div>
+            <div style="position: absolute; left: 682px; top: 16px; width: 12px; height: 12px; transform: rotate(45deg); background: var(--text); box-shadow: 0 0 0 2px var(--surface);"></div>
+          </div>
+          <div role="img" aria-label="性能試験の環境準備:予定 11/17〜11/20、実績なし、日限 12/4" style="position: relative; height: 44px; box-sizing: border-box; border-bottom: 1px solid var(--border);">
+            <div style="position: absolute; left: 256px; top: 9px; width: 128px; height: 10px; border-radius: 2px; background: var(--ai-200);"></div>
+            <div style="position: absolute; left: 810px; top: 16px; width: 12px; height: 12px; transform: rotate(45deg); background: var(--text); box-shadow: 0 0 0 2px var(--surface);"></div>
+          </div>
+          <div role="img" aria-label="要件定義書の改訂:予定 11/9〜11/13、実績 11/10〜11/13、日限 11/13" style="position: relative; height: 44px; box-sizing: border-box; border-bottom: 1px solid var(--border);">
+            <div style="position: absolute; left: 0px; top: 9px; width: 160px; height: 10px; border-radius: 2px; background: var(--ai-200);"></div>
+            <div style="position: absolute; left: 32px; top: 23px; width: 128px; height: 12px; border-radius: 2px; background: var(--ai-600);"></div>
+            <div style="position: absolute; left: 138px; top: 16px; width: 12px; height: 12px; transform: rotate(45deg); background: var(--text); box-shadow: 0 0 0 2px var(--surface);"></div>
+          </div>
+
+          <div style="height: 32px; box-sizing: border-box; border-bottom: 1px solid var(--border); background: var(--bg-subtle);"></div>
+          <div role="img" aria-label="ライセンス棚卸し:予定 11/12〜11/13、実績なし、日限 11/17(2日超過)" style="position: relative; height: 44px; box-sizing: border-box; border-bottom: 1px solid var(--border);">
+            <div style="position: absolute; left: 96px; top: 9px; width: 64px; height: 10px; border-radius: 2px; background: var(--ai-200);"></div>
+            <div style="position: absolute; left: 266px; top: 16px; width: 12px; height: 12px; transform: rotate(45deg); background: var(--danger); box-shadow: 0 0 0 2px var(--surface);"></div>
+            <span style="position: absolute; left: 288px; top: 13px; font-size: 12px; line-height: 18px; font-weight: 500; color: var(--danger); white-space: nowrap;">2日超過</span>
+          </div>
+          <div role="img" aria-label="デプロイ手順書の更新:予定 11/18〜11/19、実績 11/18〜11/19、日限 11/24" style="position: relative; height: 44px; box-sizing: border-box; border-bottom: 1px solid var(--border);">
+            <div style="position: absolute; left: 288px; top: 9px; width: 64px; height: 10px; border-radius: 2px; background: var(--ai-200);"></div>
+            <div style="position: absolute; left: 288px; top: 23px; width: 64px; height: 12px; border-radius: 2px; background: var(--ai-600);"></div>
+            <div style="position: absolute; left: 490px; top: 16px; width: 12px; height: 12px; transform: rotate(45deg); background: var(--text); box-shadow: 0 0 0 2px var(--surface);"></div>
+          </div>
+          <div role="img" aria-label="監視ダッシュボードの整理:予定 11/24〜11/27、実績なし、日限 12/3" style="position: relative; height: 44px; box-sizing: border-box; border-bottom: 1px solid var(--border);">
+            <div style="position: absolute; left: 480px; top: 9px; width: 128px; height: 10px; border-radius: 2px; background: var(--ai-200);"></div>
+            <div style="position: absolute; left: 778px; top: 16px; width: 12px; height: 12px; transform: rotate(45deg); background: var(--text); box-shadow: 0 0 0 2px var(--surface);"></div>
+          </div>
+
+          <div style="height: 32px; box-sizing: border-box; border-bottom: 1px solid var(--border); background: var(--bg-subtle);"></div>
+          <div role="img" aria-label="募集要項ページの原稿確認:予定 11/16〜11/20、実績 11/16〜(11/17から待ち)、日限 11/27" style="position: relative; height: 44px; box-sizing: border-box; border-bottom: 1px solid var(--border);">
+            <div style="position: absolute; left: 224px; top: 9px; width: 160px; height: 10px; border-radius: 2px; background: var(--ai-200);"></div>
+            <div style="position: absolute; left: 224px; top: 23px; width: 32px; height: 12px; border-radius: 2px; background: var(--ai-600);"></div>
+            <div style="position: absolute; left: 256px; top: 23px; width: 96px; height: 12px; box-sizing: border-box; border: 2px solid var(--ai-600); border-radius: 2px; background: var(--surface);"></div>
+            <div style="position: absolute; left: 586px; top: 16px; width: 12px; height: 12px; transform: rotate(45deg); background: var(--text); box-shadow: 0 0 0 2px var(--surface);"></div>
+          </div>
+          <div role="img" aria-label="応募フォームの項目見直し:予定 11/25〜11/27、実績なし、日限 12/2" style="position: relative; height: 44px; box-sizing: border-box;">
+            <div style="position: absolute; left: 512px; top: 9px; width: 96px; height: 10px; border-radius: 2px; background: var(--ai-200);"></div>
+            <div style="position: absolute; left: 746px; top: 16px; width: 12px; height: 12px; transform: rotate(45deg); background: var(--text); box-shadow: 0 0 0 2px var(--surface);"></div>
+          </div>
+
+          <div aria-hidden="true" style="position: absolute; top: 53px; bottom: 0; left: 335px; width: 2px; background: var(--primary-text);"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":960}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      yes: true,
+      navSections: [
+        { items: [
+          { id: 'dashboard', label: 'ダッシュボード', icon: 'home', badge: '5' },
+          { id: 'todos', label: 'TODO', icon: 'inbox' },
+          { id: 'gantt', label: 'ガント', icon: 'chart' },
+          { id: 'report', label: '日報', icon: 'file' }
+        ] },
+        { label: 'プロジェクト', items: [
+          { id: 'p1', label: '基幹システム更改', icon: 'folder', badge: '3' },
+          { id: 'p2', label: '社内ツール整備', icon: 'folder', badge: '1' },
+          { id: 'p3', label: '採用サイト改修', icon: 'folder', badge: '1' }
+        ] },
+        { items: [
+          { id: 'settings', label: '設定', icon: 'settings' }
+        ] }
+      ],
+      unitTabs: [
+        { id: 'day', label: '日' },
+        { id: 'week', label: '週' },
+        { id: 'month', label: '月' }
+      ],
+      projectOptions: [
+        { value: 'all', label: 'すべてのプロジェクト' },
+        { value: 'p1', label: '基幹システム更改' },
+        { value: 'p2', label: '社内ツール整備' },
+        { value: 'p3', label: '採用サイト改修' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

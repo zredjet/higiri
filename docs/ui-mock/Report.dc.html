@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>日報</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="ds/aizome/tokens.css">
+<link rel="stylesheet" href="ds/aizome/components/bundle.css">
+<script src="ds/aizome/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans+JP:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; background: var(--bg); color: var(--text); font-family: var(--font-sans); font-size: 14px; line-height: 22px;">
+  <div style="flex: 0 0 240px; display: flex; background: var(--nav-bg);">
+    <x-import component-from-global-scope="Aizome.SideNav" sections="{{navSections}}" active-id="report" header="TODO管理" label="メインナビゲーション" style="display: block; width: 240px; height: 100%;"></x-import>
+  </div>
+
+  <main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 24px 32px 32px; display: flex; flex-direction: column; gap: 20px;">
+    <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;">
+      <h1 style="margin: 0; font-size: 24px; line-height: 34px; font-weight: 600;">日報</h1>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <x-import component-from-global-scope="Aizome.Button" icon-start="download">.md で保存</x-import>
+        <x-import component-from-global-scope="Aizome.Button" variant="primary">日報をコピー</x-import>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px;">
+      <div style="display: flex; align-items: flex-end; gap: 8px;">
+        <x-import component-from-global-scope="Aizome.Button" variant="ghost" size="sm" icon-start="chevron-left" aria-label="前の日へ"></x-import>
+        <x-import component-from-global-scope="Aizome.TextField" label="対象日" type="date" default-value="2026-11-19" size="sm" style="display: block; width: 170px;"></x-import>
+        <x-import component-from-global-scope="Aizome.Button" variant="ghost" size="sm" icon-start="chevron-right" aria-label="次の日へ"></x-import>
+        <x-import component-from-global-scope="Aizome.Button" size="sm">今日</x-import>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px;">
+        <span style="font-size: 12px; line-height: 18px; letter-spacing: 0.02em; color: var(--text-muted);">作業ログから作り直します。所感・連絡事項は残ります。</span>
+        <x-import component-from-global-scope="Aizome.Button" size="sm">再生成</x-import>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(480px, 100%), 1fr)); gap: 24px; align-items: start;">
+
+      <section style="min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 10px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 20px; border-bottom: 1px solid var(--border);">
+          <h2 style="margin: 0; font-size: 14px; line-height: 20px; font-weight: 600;">Markdown</h2>
+          <span style="font-size: 12px; line-height: 18px; letter-spacing: 0.02em; color: var(--text-muted);">直接編集できます</span>
+        </div>
+        <div style="padding: 16px 20px 20px; font-family: var(--font-mono); font-size: 13px; line-height: 20px; overflow-wrap: anywhere;">
+          <div># 日報 2026-11-19(木)</div>
+          <div style="height: 20px;"></div>
+          <div>## 本日の作業</div>
+          <div style="height: 20px;"></div>
+          <div>### 基幹システム更改</div>
+          <div>- **API設計書のレビュー対応**(待ち / 日限 11/20)1.5h</div>
+          <div style="padding-left: 2ch;">- 指摘12件のうち9件を反映</div>
+          <div style="padding-left: 2ch;">- 残り3件は認証まわり。認証担当に質問を送り、回答待ち</div>
+          <div style="padding-left: 2ch;">- [ ] 指摘10:トークン更新の手順を追記</div>
+          <div>- **移行手順書のドラフト**(作業中 / 日限 11/19)2.0h</div>
+          <div style="padding-left: 2ch;">- 切り戻し手順の章を書き終え、レビューを依頼した</div>
+          <div style="height: 20px;"></div>
+          <div>### 社内ツール整備</div>
+          <div>- **デプロイ手順書の更新**(完了)0.5h</div>
+          <div style="padding-left: 2ch;">- 新しい承認フローに合わせて手順4〜6を書き換えた</div>
+          <div style="height: 20px;"></div>
+          <div>## 本日完了・中止</div>
+          <div>- 【完了】社内ツール整備 / デプロイ手順書の更新</div>
+          <div>- 【中止】基幹システム更改 / 旧帳票の移行検証(理由:旧帳票の廃止が決まったため)</div>
+          <div style="height: 20px;"></div>
+          <div>## 待ち</div>
+          <div>- 採用サイト改修 / 募集要項ページの原稿確認(人事部の原稿確認待ち、3日目、確認日 11/19)</div>
+          <div>- 基幹システム更改 / API設計書のレビュー対応(認証担当の回答待ち、1日目、確認日 11/20)</div>
+          <div style="height: 20px;"></div>
+          <div>## 明日の予定</div>
+          <div>- 基幹システム更改 / 移行手順書のドラフト</div>
+          <div>- 基幹システム更改 / 結合テスト計画の作成(予定 11/20〜11/27)</div>
+          <div>- 基幹システム更改 / 性能試験の環境準備(予定 11/17〜11/20)</div>
+          <div>- 社内ツール整備 / ライセンス棚卸し(予定 11/12〜11/13)</div>
+          <div style="height: 20px;"></div>
+          <div>## 日限注意</div>
+          <div>- 【超過】社内ツール整備 / ライセンス棚卸し(日限 11/17、2日超過)</div>
+          <div>- 【本日】基幹システム更改 / 移行手順書のドラフト(日限 11/19)</div>
+          <div>- 【間近】基幹システム更改 / API設計書のレビュー対応(日限 11/20、あと1日、待ち)</div>
+          <div style="height: 20px;"></div>
+          <div>## 所感・連絡事項</div>
+          <div>- 移行手順書は今日が日限。レビュー結果を受けて、明日の午前に確定する。</div>
+        </div>
+      </section>
+
+      <section style="min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 10px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 20px; border-bottom: 1px solid var(--border);">
+          <h2 style="margin: 0; font-size: 14px; line-height: 20px; font-weight: 600;">プレビュー</h2>
+          <span style="font-size: 12px; line-height: 18px; letter-spacing: 0.02em; color: var(--text-muted);">コピーされる内容の見え方です</span>
+        </div>
+        <div style="padding: 16px 20px 20px; display: flex; flex-direction: column;">
+          <h3 style="margin: 0 0 4px; font-size: 20px; line-height: 30px; font-weight: 600; font-variant-numeric: tabular-nums;">日報 2026-11-19(木)</h3>
+
+          <h4 style="margin: 16px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--border); font-size: 16px; line-height: 24px; font-weight: 600;">本日の作業</h4>
+          <h5 style="margin: 6px 0 4px; font-size: 14px; line-height: 22px; font-weight: 600;">基幹システム更改</h5>
+          <ul style="margin: 0; padding-left: 20px;">
+            <li><strong style="font-weight: 600;">API設計書のレビュー対応</strong>(待ち / 日限 11/20)1.5h
+              <ul style="margin: 0; padding-left: 20px;">
+                <li>指摘12件のうち9件を反映</li>
+                <li>残り3件は認証まわり。認証担当に質問を送り、回答待ち</li>
+                <li style="list-style: none; margin-left: -20px;"><label style="display: flex; align-items: center; gap: 8px;"><input type="checkbox" disabled="disabled" style="margin: 0;" /><span>指摘10:トークン更新の手順を追記</span></label></li>
+              </ul>
+            </li>
+            <li><strong style="font-weight: 600;">移行手順書のドラフト</strong>(作業中 / 日限 11/19)2.0h
+              <ul style="margin: 0; padding-left: 20px;">
+                <li>切り戻し手順の章を書き終え、レビューを依頼した</li>
+              </ul>
+            </li>
+          </ul>
+          <h5 style="margin: 10px 0 4px; font-size: 14px; line-height: 22px; font-weight: 600;">社内ツール整備</h5>
+          <ul style="margin: 0; padding-left: 20px;">
+            <li><strong style="font-weight: 600;">デプロイ手順書の更新</strong>(完了)0.5h
+              <ul style="margin: 0; padding-left: 20px;">
+                <li>新しい承認フローに合わせて手順4〜6を書き換えた</li>
+              </ul>
+            </li>
+          </ul>
+
+          <h4 style="margin: 16px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--border); font-size: 16px; line-height: 24px; font-weight: 600;">本日完了・中止</h4>
+          <ul style="margin: 0; padding-left: 20px;">
+            <li>【完了】社内ツール整備 / デプロイ手順書の更新</li>
+            <li>【中止】基幹システム更改 / 旧帳票の移行検証(理由:旧帳票の廃止が決まったため)</li>
+          </ul>
+
+          <h4 style="margin: 16px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--border); font-size: 16px; line-height: 24px; font-weight: 600;">待ち</h4>
+          <ul style="margin: 0; padding-left: 20px;">
+            <li>採用サイト改修 / 募集要項ページの原稿確認(人事部の原稿確認待ち、3日目、確認日 11/19)</li>
+            <li>基幹システム更改 / API設計書のレビュー対応(認証担当の回答待ち、1日目、確認日 11/20)</li>
+          </ul>
+
+          <h4 style="margin: 16px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--border); font-size: 16px; line-height: 24px; font-weight: 600;">明日の予定</h4>
+          <ul style="margin: 0; padding-left: 20px;">
+            <li>基幹システム更改 / 移行手順書のドラフト</li>
+            <li>基幹システム更改 / 結合テスト計画の作成(予定 11/20〜11/27)</li>
+            <li>基幹システム更改 / 性能試験の環境準備(予定 11/17〜11/20)</li>
+            <li>社内ツール整備 / ライセンス棚卸し(予定 11/12〜11/13)</li>
+          </ul>
+
+          <h4 style="margin: 16px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--border); font-size: 16px; line-height: 24px; font-weight: 600;">日限注意</h4>
+          <ul style="margin: 0; padding-left: 20px;">
+            <li>【超過】社内ツール整備 / ライセンス棚卸し(日限 11/17、2日超過)</li>
+            <li>【本日】基幹システム更改 / 移行手順書のドラフト(日限 11/19)</li>
+            <li>【間近】基幹システム更改 / API設計書のレビュー対応(日限 11/20、あと1日、待ち)</li>
+          </ul>
+
+          <h4 style="margin: 16px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--border); font-size: 16px; line-height: 24px; font-weight: 600;">所感・連絡事項</h4>
+          <ul style="margin: 0; padding-left: 20px;">
+            <li>移行手順書は今日が日限。レビュー結果を受けて、明日の午前に確定する。</li>
+          </ul>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1320}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      navSections: [
+        { items: [
+          { id: 'dashboard', label: 'ダッシュボード', icon: 'home', badge: '5' },
+          { id: 'todos', label: 'TODO', icon: 'inbox' },
+          { id: 'gantt', label: 'ガント', icon: 'chart' },
+          { id: 'report', label: '日報', icon: 'file' }
+        ] },
+        { label: 'プロジェクト', items: [
+          { id: 'p1', label: '基幹システム更改', icon: 'folder', badge: '3' },
+          { id: 'p2', label: '社内ツール整備', icon: 'folder', badge: '1' },
+          { id: 'p3', label: '採用サイト改修', icon: 'folder', badge: '1' }
+        ] },
+        { items: [
+          { id: 'settings', label: '設定', icon: 'settings' }
+        ] }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

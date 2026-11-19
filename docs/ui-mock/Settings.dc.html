@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>設定</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="ds/aizome/tokens.css">
+<link rel="stylesheet" href="ds/aizome/components/bundle.css">
+<script src="ds/aizome/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans+JP:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; background: var(--bg); color: var(--text); font-family: var(--font-sans); font-size: 14px; line-height: 22px;">
+  <div style="flex: 0 0 240px; display: flex; background: var(--nav-bg);">
+    <x-import component-from-global-scope="Aizome.SideNav" sections="{{navSections}}" active-id="settings" header="TODO管理" label="メインナビゲーション" style="display: block; width: 240px; height: 100%;"></x-import>
+  </div>
+
+  <main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 24px 32px 32px; display: flex; flex-direction: column; gap: 24px;">
+    <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 16px; max-width: 760px;">
+      <h1 style="margin: 0; font-size: 24px; line-height: 34px; font-weight: 600;">設定</h1>
+      <span style="font-size: 12px; line-height: 18px; letter-spacing: 0.02em; color: var(--text-muted);">変更はすぐに保存されます</span>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 24px; max-width: 760px;">
+      <x-import component-from-global-scope="Aizome.Card" title="リマインド" description="日限注意を知らせる頻度と、区分の基準を決めます。">
+        <div style="display: flex; flex-direction: column; gap: 20px;">
+          <x-import component-from-global-scope="Aizome.RadioGroup" label="起動時リマインドの表示" options="{{reminderOptions}}" default-value="always" name="reminder-frequency"></x-import>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 16px;">
+            <x-import component-from-global-scope="Aizome.TextField" label="「間近」とみなす日数" default-value="3" suffix="日以内" description="日限がこの日数以内に来るTODOを「間近」に出します。"></x-import>
+            <x-import component-from-global-scope="Aizome.TextField" label="確認日の初期値" default-value="3" suffix="日後" description="「待ち」にした日から数えます。TODOごとに変えられます。"></x-import>
+          </div>
+        </div>
+      </x-import>
+
+      <x-import component-from-global-scope="Aizome.Card" title="表示">
+        <x-import component-from-global-scope="Aizome.RadioGroup" label="配色" options="{{themeOptions}}" default-value="light" orientation="horizontal" name="theme"></x-import>
+      </x-import>
+
+      <x-import component-from-global-scope="Aizome.Card" title="データ" description="データはこのPCの中だけに保存しています。">
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+          <p style="margin: 0;">1日1回、その日最初の起動時に自動でバックアップし、7日分を残します。</p>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+            <x-import component-from-global-scope="Aizome.Button" icon-start="folder">データフォルダを開く</x-import>
+            <x-import component-from-global-scope="Aizome.Button">バックアップから復元</x-import>
+          </div>
+        </div>
+      </x-import>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":960}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      navSections: [
+        { items: [
+          { id: 'dashboard', label: 'ダッシュボード', icon: 'home', badge: '5' },
+          { id: 'todos', label: 'TODO', icon: 'inbox' },
+          { id: 'gantt', label: 'ガント', icon: 'chart' },
+          { id: 'report', label: '日報', icon: 'file' }
+        ] },
+        { label: 'プロジェクト', items: [
+          { id: 'p1', label: '基幹システム更改', icon: 'folder', badge: '3' },
+          { id: 'p2', label: '社内ツール整備', icon: 'folder', badge: '1' },
+          { id: 'p3', label: '採用サイト改修', icon: 'folder', badge: '1' }
+        ] },
+        { items: [
+          { id: 'settings', label: '設定', icon: 'settings' }
+        ] }
+      ],
+      reminderOptions: [
+        { value: 'always', label: '起動のたびに表示', description: '日限注意が1件でもあれば、起動するたびにダイアログを出します。' },
+        { value: 'daily', label: '1日1回だけ表示', description: 'その日最初の起動のときだけダイアログを出します。' }
+      ],
+      themeOptions: [
+        { value: 'light', label: 'ライト' },
+        { value: 'dark', label: 'ダーク' },
+        { value: 'system', label: 'OSの設定に合わせる' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

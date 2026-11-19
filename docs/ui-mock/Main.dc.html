@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>ダッシュボード</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="ds/aizome/tokens.css">
+<link rel="stylesheet" href="ds/aizome/components/bundle.css">
+<script src="ds/aizome/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans+JP:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; background: var(--bg); color: var(--text); font-family: var(--font-sans); font-size: 14px; line-height: 22px;">
+  <div style="flex: 0 0 240px; display: flex; background: var(--nav-bg);">
+    <x-import component-from-global-scope="Aizome.SideNav" sections="{{navSections}}" active-id="dashboard" header="TODO管理" label="メインナビゲーション" style="display: block; width: 240px; height: 100%;"></x-import>
+  </div>
+  <main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 24px 32px 32px; display: flex; flex-direction: column; gap: 24px;">
+    <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;">
+      <div style="display: flex; align-items: baseline; gap: 12px;">
+        <h1 style="margin: 0; font-size: 24px; line-height: 34px; font-weight: 600;">ダッシュボード</h1>
+        <span style="font-size: 14px; line-height: 22px; color: var(--text-muted); font-variant-numeric: tabular-nums;">2026/11/19(木)</span>
+      </div>
+      <x-import component-from-global-scope="Aizome.Button" variant="primary" icon-start="plus">TODOを追加</x-import>
+    </div>
+
+    <section aria-label="日限注意の件数" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 16px;">
+      <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px;">
+        <x-import component-from-global-scope="Aizome.Badge" tone="danger" dot="{{yes}}">超過</x-import>
+        <div style="display: flex; align-items: baseline; gap: 6px;">
+          <span style="font-size: 24px; line-height: 34px; font-weight: 600; font-variant-numeric: tabular-nums;">1</span>
+          <span style="font-size: 12px; line-height: 18px; color: var(--text-muted);">件</span>
+        </div>
+        <span style="font-size: 12px; line-height: 18px; letter-spacing: 0.02em; color: var(--text-muted);">日限を過ぎています</span>
+      </div>
+      <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px;">
+        <x-import component-from-global-scope="Aizome.Badge" tone="warning" dot="{{yes}}">本日</x-import>
+        <div style="display: flex; align-items: baseline; gap: 6px;">
+          <span style="font-size: 24px; line-height: 34px; font-weight: 600; font-variant-numeric: tabular-nums;">1</span>
+          <span style="font-size: 12px; line-height: 18px; color: var(--text-muted);">件</span>
+        </div>
+        <span style="font-size: 12px; line-height: 18px; letter-spacing: 0.02em; color: var(--text-muted);">今日が日限です</span>
+      </div>
+      <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px;">
+        <x-import component-from-global-scope="Aizome.Badge" tone="primary" dot="{{yes}}">間近</x-import>
+        <div style="display: flex; align-items: baseline; gap: 6px;">
+          <span style="font-size: 24px; line-height: 34px; font-weight: 600; font-variant-numeric: tabular-nums;">1</span>
+          <span style="font-size: 12px; line-height: 18px; color: var(--text-muted);">件</span>
+        </div>
+        <span style="font-size: 12px; line-height: 18px; letter-spacing: 0.02em; color: var(--text-muted);">3日以内に日限が来ます</span>
+      </div>
+      <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px;">
+        <x-import component-from-global-scope="Aizome.Badge" tone="warning" dot="{{yes}}">要確認</x-import>
+        <div style="display: flex; align-items: baseline; gap: 6px;">
+          <span style="font-size: 24px; line-height: 34px; font-weight: 600; font-variant-numeric: tabular-nums;">1</span>
+          <span style="font-size: 12px; line-height: 18px; color: var(--text-muted);">件</span>
+        </div>
+        <span style="font-size: 12px; line-height: 18px; letter-spacing: 0.02em; color: var(--text-muted);">待ちの確認日が来ています</span>
+      </div>
+      <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px;">
+        <x-import component-from-global-scope="Aizome.Badge" tone="neutral" dot="{{yes}}">着手遅れ</x-import>
+        <div style="display: flex; align-items: baseline; gap: 6px;">
+          <span style="font-size: 24px; line-height: 34px; font-weight: 600; font-variant-numeric: tabular-nums;">1</span>
+          <span style="font-size: 12px; line-height: 18px; color: var(--text-muted);">件</span>
+        </div>
+        <span style="font-size: 12px; line-height: 18px; letter-spacing: 0.02em; color: var(--text-muted);">予定開始日を過ぎています</span>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px;">
+        <h2 style="margin: 0; font-size: 16px; line-height: 24px; font-weight: 600;">日限注意</h2>
+        <span style="font-size: 12px; line-height: 18px; letter-spacing: 0.02em; color: var(--text-muted);">区分の重い順、日限の古い順に並べています</span>
+      </div>
+      <x-import component-from-global-scope="Aizome.Table" columns="{{alertCols}}" rows="{{alertRows}}" row-key="id" style="display: block;"></x-import>
+    </section>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 24px; align-items: start;">
+      <x-import component-from-global-scope="Aizome.Card" title="今日の作業" description="作業中と、今日が予定期間に入るTODOです。">
+        <div style="display: flex; flex-direction: column;">
+          <div style="display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border);">
+            <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+              <span style="font-weight: 500;">移行手順書のドラフト</span>
+              <span style="font-size: 12px; line-height: 18px; letter-spacing: 0.02em; color: var(--text-muted);">基幹システム更改 ・ 予定 11/11〜11/18</span>
+            </div>
+            <x-import component-from-global-scope="Aizome.Badge" tone="primary" dot="{{yes}}">作業中</x-import>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 10px 0 0; border-top: 1px solid var(--border);">
+            <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+              <span style="font-weight: 500;">性能試験の環境準備</span>
+              <span style="font-size: 12px; line-height: 18px; letter-spacing: 0.02em; color: var(--text-muted);">基幹システム更改 ・ 予定 11/17〜11/20</span>
+            </div>
+            <x-import component-from-global-scope="Aizome.Badge" tone="neutral" dot="{{yes}}">未着手</x-import>
+          </div>
+        </div>
+      </x-import>
+
+      <x-import component-from-global-scope="Aizome.Card" title="待ち" description="相手の作業を待っているTODOです。">
+        <div style="display: flex; flex-direction: column;">
+          <div style="display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border);">
+            <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+              <span style="font-weight: 500;">募集要項ページの原稿確認</span>
+              <span style="font-size: 12px; line-height: 18px; letter-spacing: 0.02em; color: var(--text-muted);">人事部の原稿確認待ち ・ 3日目</span>
+            </div>
+            <x-import component-from-global-scope="Aizome.Badge" tone="warning" dot="{{yes}}">要確認</x-import>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 10px 0 0; border-top: 1px solid var(--border);">
+            <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+              <span style="font-weight: 500;">API設計書のレビュー対応</span>
+              <span style="font-size: 12px; line-height: 18px; letter-spacing: 0.02em; color: var(--text-muted);">認証担当の回答待ち ・ 1日目</span>
+            </div>
+            <span style="font-size: 12px; line-height: 18px; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap;">確認日 11/20</span>
+          </div>
+        </div>
+      </x-import>
+
+      <x-import component-from-global-scope="Aizome.Card" title="プロジェクトの進捗" description="中止を除いた件数で数えています。">
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px;">
+              <span style="font-weight: 500;">基幹システム更改</span>
+              <span style="font-size: 12px; line-height: 18px; color: var(--text-muted); font-variant-numeric: tabular-nums;">1 / 5 完了 ・ 日限注意 3件</span>
+            </div>
+            <div role="img" aria-label="5件中1件完了" style="height: 8px; border-radius: 2px; background: var(--bg-subtle); overflow: hidden;">
+              <div style="width: 20%; height: 100%; background: var(--primary);"></div>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px;">
+              <span style="font-weight: 500;">社内ツール整備</span>
+              <span style="font-size: 12px; line-height: 18px; color: var(--text-muted); font-variant-numeric: tabular-nums;">1 / 3 完了 ・ 日限注意 1件</span>
+            </div>
+            <div role="img" aria-label="3件中1件完了" style="height: 8px; border-radius: 2px; background: var(--bg-subtle); overflow: hidden;">
+              <div style="width: 33.3%; height: 100%; background: var(--primary);"></div>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px;">
+              <span style="font-weight: 500;">採用サイト改修</span>
+              <span style="font-size: 12px; line-height: 18px; color: var(--text-muted); font-variant-numeric: tabular-nums;">0 / 2 完了 ・ 日限注意 1件</span>
+            </div>
+            <div role="img" aria-label="2件中0件完了" style="height: 8px; border-radius: 2px; background: var(--bg-subtle); overflow: hidden;">
+              <div style="width: 0%; height: 100%; background: var(--primary);"></div>
+            </div>
+          </div>
+        </div>
+      </x-import>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":960}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const R = window.React;
+    const A = window.Aizome || {};
+    const h = R ? R.createElement : null;
+    const badge = (tone, text) => (h && A.Badge ? h(A.Badge, { tone: tone, dot: true }, text) : text);
+    const strong = (text) => (h ? h('span', { style: { fontWeight: 500, whiteSpace: 'nowrap' } }, text) : text);
+    const muted = (text) => (h ? h('span', { className: 'az-table__muted', style: { whiteSpace: 'nowrap' } }, text) : text);
+    const plain = (text) => (h ? h('span', { style: { whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' } }, text) : text);
+    const actions = (row) => (h && A.Button
+      ? h('div', { style: { display: 'flex', gap: 4, justifyContent: 'flex-end' } },
+          h(A.Button, { size: 'sm', variant: 'ghost', iconStart: row.actionIcon }, row.action),
+          h(A.Button, { size: 'sm', variant: 'ghost', iconStart: 'calendar' }, row.action2))
+      : '');
+    return {
+      yes: true,
+      navSections: [
+        { items: [
+          { id: 'dashboard', label: 'ダッシュボード', icon: 'home', badge: '5' },
+          { id: 'todos', label: 'TODO', icon: 'inbox' },
+          { id: 'gantt', label: 'ガント', icon: 'chart' },
+          { id: 'report', label: '日報', icon: 'file' }
+        ] },
+        { label: 'プロジェクト', items: [
+          { id: 'p1', label: '基幹システム更改', icon: 'folder', badge: '3' },
+          { id: 'p2', label: '社内ツール整備', icon: 'folder', badge: '1' },
+          { id: 'p3', label: '採用サイト改修', icon: 'folder', badge: '1' }
+        ] },
+        { items: [
+          { id: 'settings', label: '設定', icon: 'settings' }
+        ] }
+      ],
+      alertCols: [
+        { key: 'kind', header: '区分', width: 100, render: (r) => badge(r.tone, r.kind) },
+        { key: 'title', header: 'TODO', render: (r) => strong(r.title) },
+        { key: 'project', header: 'プロジェクト', render: (r) => muted(r.project) },
+        { key: 'due', header: '日限', width: 100, render: (r) => plain(r.due) },
+        { key: 'state', header: '状況', width: 160, render: (r) => plain(r.state) },
+        { key: 'actions', header: '操作', align: 'right', width: 240, render: actions }
+      ],
+      alertRows: [
+        { id: 'B1', tone: 'danger', kind: '超過', title: 'ライセンス棚卸し', project: '社内ツール整備', due: '2026/11/17', state: '2日超過', action: '完了にする', actionIcon: 'check', action2: '日限を変更' },
+        { id: 'A3', tone: 'warning', kind: '本日', title: '移行手順書のドラフト', project: '基幹システム更改', due: '2026/11/19', state: '今日が日限', action: '完了にする', actionIcon: 'check', action2: '日限を変更' },
+        { id: 'A1', tone: 'primary', kind: '間近', title: 'API設計書のレビュー対応', project: '基幹システム更改', due: '2026/11/20', state: 'あと1日 ・ 待ち', action: '作業に戻す', actionIcon: 'arrow-right', action2: '日限を変更' },
+        { id: 'C1', tone: 'warning', kind: '要確認', title: '募集要項ページの原稿確認', project: '採用サイト改修', due: '2026/11/27', state: '確認日が今日', action: '作業に戻す', actionIcon: 'arrow-right', action2: '確認日を変更' },
+        { id: 'A4', tone: 'neutral', kind: '着手遅れ', title: '性能試験の環境準備', project: '基幹システム更改', due: '2026/12/04', state: '予定開始から2日経過', action: '着手する', actionIcon: 'arrow-right', action2: '日限を変更' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

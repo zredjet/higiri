@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>TODO一覧と詳細パネル</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="ds/aizome/tokens.css">
+<link rel="stylesheet" href="ds/aizome/components/bundle.css">
+<script src="ds/aizome/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans+JP:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; background: var(--bg); color: var(--text); font-family: var(--font-sans); font-size: 14px; line-height: 22px;">
+  <div style="flex: 0 0 240px; display: flex; background: var(--nav-bg);">
+    <x-import component-from-global-scope="Aizome.SideNav" sections="{{navSections}}" active-id="p1" header="TODO管理" label="メインナビゲーション" style="display: block; width: 240px; height: 100%;"></x-import>
+  </div>
+
+  <main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 24px 32px 32px; display: flex; flex-direction: column; gap: 20px;">
+    <div style="display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 16px;">
+      <div style="display: flex; flex-direction: column;">
+        <h1 style="margin: 0; font-size: 24px; line-height: 34px; font-weight: 600;">基幹システム更改</h1>
+        <span style="font-size: 12px; line-height: 18px; letter-spacing: 0.02em; color: var(--text-muted); font-variant-numeric: tabular-nums;">5件中1件完了 ・ 中止 1件 ・ 日限注意 3件</span>
+      </div>
+      <x-import component-from-global-scope="Aizome.Button" variant="primary" icon-start="plus">TODOを追加</x-import>
+    </div>
+
+    <x-import component-from-global-scope="Aizome.Tabs" items="{{statusTabs}}" default-value="all" label="ステータスで絞り込み" style="display: block;"></x-import>
+
+    <x-import component-from-global-scope="Aizome.TextField" label="クイック追加" placeholder="タイトルを入力して Enter で追加" icon="plus" style="display: block;"></x-import>
+
+    <x-import component-from-global-scope="Aizome.Table" columns="{{todoCols}}" rows="{{todoRows}}" row-key="id" selected-key="A1" style="display: block;"></x-import>
+  </main>
+
+  <aside aria-label="TODOの詳細" style="flex: 1 1 440px; max-width: 440px; min-width: 0; box-sizing: border-box; background: var(--surface); border-left: 1px solid var(--border); padding: 16px 24px 24px; display: flex; flex-direction: column; gap: 16px;">
+    <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+      <span style="font-size: 12px; line-height: 18px; letter-spacing: 0.02em; color: var(--text-muted);">基幹システム更改</span>
+      <div style="display: flex; gap: 4px;">
+        <x-import component-from-global-scope="Aizome.Button" variant="ghost" size="sm" icon-start="more" aria-label="その他の操作"></x-import>
+        <x-import component-from-global-scope="Aizome.Button" variant="ghost" size="sm" icon-start="x" aria-label="詳細を閉じる"></x-import>
+      </div>
+    </div>
+
+    <h2 style="margin: 0; font-size: 20px; line-height: 30px; font-weight: 600;">API設計書のレビュー対応</h2>
+
+    <x-import component-from-global-scope="Aizome.Alert" tone="info" style="display: block;">認証担当の回答を待っています。待ち1日目で、日限まであと1日です。</x-import>
+
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 1.4fr); gap: 12px;">
+        <x-import component-from-global-scope="Aizome.Select" label="ステータス" options="{{statusOptions}}" default-value="waiting" size="sm"></x-import>
+        <x-import component-from-global-scope="Aizome.Select" label="優先度" options="{{priorityOptions}}" default-value="1" size="sm"></x-import>
+        <x-import component-from-global-scope="Aizome.TextField" label="日限" type="date" default-value="2026-11-20" size="sm"></x-import>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;">
+        <x-import component-from-global-scope="Aizome.TextField" label="待っている相手" default-value="認証担当の回答" size="sm"></x-import>
+        <x-import component-from-global-scope="Aizome.TextField" label="確認日" type="date" default-value="2026-11-20" size="sm"></x-import>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;">
+        <x-import component-from-global-scope="Aizome.TextField" label="予定開始" type="date" default-value="2026-11-16" size="sm"></x-import>
+        <x-import component-from-global-scope="Aizome.TextField" label="予定終了" type="date" default-value="2026-11-19" size="sm"></x-import>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;">
+        <x-import component-from-global-scope="Aizome.TextField" label="実績開始" type="date" default-value="2026-11-17" size="sm"></x-import>
+        <x-import component-from-global-scope="Aizome.TextField" label="実績終了" type="date" size="sm"></x-import>
+      </div>
+    </div>
+
+    <x-import component-from-global-scope="Aizome.Tabs" items="{{detailTabs}}" default-value="log" label="記録の種類" style="display: block;"></x-import>
+
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      <x-import component-from-global-scope="Aizome.TextField" label="11/19 の作業ログ" multiline="{{yes}}" rows="{{four}}" default-value="{{logDraft}}" description="Markdownで書けます。Ctrl+E でプレビューに切り替わります。" style="display: block;"></x-import>
+      <div style="display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto; gap: 12px; align-items: end;">
+        <x-import component-from-global-scope="Aizome.TextField" label="作業日" type="date" default-value="2026-11-19" size="sm"></x-import>
+        <x-import component-from-global-scope="Aizome.TextField" label="作業時間" default-value="90" suffix="分" size="sm"></x-import>
+        <x-import component-from-global-scope="Aizome.Button" size="sm">ログを保存</x-import>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 16px; border-top: 1px solid var(--border); padding-top: 16px;">
+      <div style="display: flex; align-items: flex-start; gap: 8px; font-size: 12px; line-height: 18px; letter-spacing: 0.02em; color: var(--text-muted);">
+        <x-import component-from-global-scope="Aizome.Icon" name="arrow-right" size="{{n14}}"></x-import>
+        <span>2026/11/19 ステータスを「作業中」から「待ち」に変更。相手は認証担当の回答、確認日は 11/20</span>
+      </div>
+      <article style="display: flex; flex-direction: column; gap: 4px;">
+        <span style="font-size: 12px; line-height: 18px; letter-spacing: 0.02em; color: var(--text-muted); font-variant-numeric: tabular-nums;">2026/11/18(水) ・ 120分</span>
+        <p style="margin: 0;">レビュー指摘の一覧を整理し、対応方針を決めた。</p>
+        <ul style="margin: 0; padding-left: 20px;">
+          <li>仕様の見直しが必要な指摘は3件</li>
+          <li>文言の修正だけで済む指摘は9件</li>
+        </ul>
+      </article>
+      <div style="display: flex; align-items: flex-start; gap: 8px; font-size: 12px; line-height: 18px; letter-spacing: 0.02em; color: var(--text-muted);">
+        <x-import component-from-global-scope="Aizome.Icon" name="arrow-right" size="{{n14}}"></x-import>
+        <span>2026/11/17 ステータスを「未着手」から「作業中」に変更。実績開始日に 11/17 を入力</span>
+      </div>
+    </div>
+  </aside>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1080}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const R = window.React;
+    const A = window.Aizome || {};
+    const h = R ? R.createElement : null;
+    const badge = (tone, text) => (h && A.Badge ? h(A.Badge, { tone: tone, dot: true }, text) : text);
+    const titleCell = (r) => {
+      if (!h) return r.title;
+      const name = h('span', { style: { fontWeight: 500, whiteSpace: 'nowrap', color: r.closed ? 'var(--text-muted)' : 'var(--text)' } }, r.title);
+      if (!r.sub) return name;
+      return h('div', { style: { display: 'flex', flexDirection: 'column' } },
+        name,
+        h('span', { style: { fontSize: 12, lineHeight: '18px', color: 'var(--text-muted)' } }, r.sub));
+    };
+    const dueCell = (r) => {
+      if (!h) return r.due;
+      const note = r.note
+        ? h('span', { style: { display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, lineHeight: '18px', fontWeight: 500, color: r.noteColor } },
+            A.Icon ? h(A.Icon, { name: r.noteIcon, size: 14 }) : null,
+            r.note)
+        : null;
+      return h('div', { style: { display: 'flex', flexDirection: 'column' } },
+        h('span', { style: { fontVariantNumeric: 'tabular-nums' } }, r.due),
+        note);
+    };
+    const periodCell = (r) => {
+      if (!h) return r.plan;
+      return h('div', { style: { display: 'flex', flexDirection: 'column', fontSize: 13, lineHeight: '20px', fontVariantNumeric: 'tabular-nums' } },
+        h('span', null, '予定 ' + r.plan),
+        h('span', { className: 'az-table__muted' }, '実績 ' + r.actual));
+    };
+    return {
+      yes: true,
+      four: 4,
+      n14: 14,
+      logDraft: '- 指摘12件のうち9件を反映\n- 残り3件は認証まわり。認証担当に質問を送り、回答待ち\n- [ ] 指摘10:トークン更新の手順を追記',
+      navSections: [
+        { items: [
+          { id: 'dashboard', label: 'ダッシュボード', icon: 'home', badge: '5' },
+          { id: 'todos', label: 'TODO', icon: 'inbox' },
+          { id: 'gantt', label: 'ガント', icon: 'chart' },
+          { id: 'report', label: '日報', icon: 'file' }
+        ] },
+        { label: 'プロジェクト', items: [
+          { id: 'p1', label: '基幹システム更改', icon: 'folder', badge: '3' },
+          { id: 'p2', label: '社内ツール整備', icon: 'folder', badge: '1' },
+          { id: 'p3', label: '採用サイト改修', icon: 'folder', badge: '1' }
+        ] },
+        { items: [
+          { id: 'settings', label: '設定', icon: 'settings' }
+        ] }
+      ],
+      statusTabs: [
+        { id: 'all', label: 'すべて', count: 6 },
+        { id: 'todo', label: '未着手', count: 2 },
+        { id: 'doing', label: '作業中', count: 1 },
+        { id: 'waiting', label: '待ち', count: 1 },
+        { id: 'hold', label: '保留', count: 0 },
+        { id: 'done', label: '完了', count: 1 },
+        { id: 'cancelled', label: '中止', count: 1 }
+      ],
+      detailTabs: [
+        { id: 'log', label: '作業ログ', count: 2 },
+        { id: 'memo', label: 'メモ' }
+      ],
+      statusOptions: [
+        { value: 'todo', label: '未着手' },
+        { value: 'doing', label: '作業中' },
+        { value: 'waiting', label: '待ち' },
+        { value: 'hold', label: '保留' },
+        { value: 'done', label: '完了' },
+        { value: 'cancelled', label: '中止' }
+      ],
+      priorityOptions: [
+        { value: '1', label: '高' },
+        { value: '2', label: '中' },
+        { value: '3', label: '低' }
+      ],
+      todoCols: [
+        { key: 'title', header: 'TODO', render: titleCell },
+        { key: 'status', header: 'ステータス', width: 96, render: (r) => badge(r.tone, r.status) },
+        { key: 'due', header: '日限', width: 120, render: dueCell },
+        { key: 'period', header: '期間', width: 140, render: periodCell }
+      ],
+      todoRows: [
+        { id: 'A3', title: '移行手順書のドラフト', tone: 'primary', status: '作業中', due: '2026/11/19', note: '今日が日限', noteIcon: 'alert-triangle', noteColor: 'var(--warning)', plan: '11/11〜11/18', actual: '11/12〜' },
+        { id: 'A1', title: 'API設計書のレビュー対応', sub: '認証担当の回答待ち ・ 確認日 11/20', tone: 'warning', status: '待ち', due: '2026/11/20', note: 'あと1日', noteIcon: 'bell', noteColor: 'var(--primary-text)', plan: '11/16〜11/19', actual: '11/17〜' },
+        { id: 'A2', title: '結合テスト計画の作成', tone: 'neutral', status: '未着手', due: '2026/11/30', note: '', plan: '11/20〜11/27', actual: 'なし' },
+        { id: 'A4', title: '性能試験の環境準備', tone: 'neutral', status: '未着手', due: '2026/12/04', note: '着手遅れ', noteIcon: 'alert-circle', noteColor: 'var(--text-muted)', plan: '11/17〜11/20', actual: 'なし' },
+        { id: 'A5', title: '要件定義書の改訂', closed: true, tone: 'success', status: '完了', due: '2026/11/13', note: '', plan: '11/9〜11/13', actual: '11/10〜11/13' },
+        { id: 'A6', title: '旧帳票の移行検証', sub: '中止の理由:旧帳票の廃止が決まったため', closed: true, tone: 'neutral', status: '中止', due: '2026/11/27', note: '', plan: '11/24〜11/26', actual: 'なし' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
