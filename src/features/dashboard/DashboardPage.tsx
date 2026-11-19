@@ -5,7 +5,6 @@ import type { Dashboard, ProjectSummary, Status, TodoItem, Urgency } from "../..
 import { formatDate, formatDateWithWeekday, monthDay } from "../../lib/date";
 import { errorMessage } from "../../lib/errors";
 import { useChangeStatus, useDashboard } from "../../lib/queries";
-import { NewTodoDialog } from "../todos/NewTodoDialog";
 import {
   periodText,
   situationText,
@@ -18,12 +17,13 @@ import { ChangeDateDialog, type DateTarget } from "./ChangeDateDialog";
 
 interface DashboardPageProps {
   onOpenTodo: (id: number) => void;
+  /** 「TODOを追加」 (the dialog belongs to the app, so Ctrl+N opens the same one). */
+  onAddTodo: () => void;
 }
 
 /** ダッシュボード (docs/ui-mock/Main.dc.html): 日限注意, 今日の作業, 待ち, 進捗. */
-export function DashboardPage({ onOpenTodo }: DashboardPageProps) {
+export function DashboardPage({ onOpenTodo, onAddTodo }: DashboardPageProps) {
   const dash = useDashboard();
-  const [adding, setAdding] = useState(false);
   const d = dash.data;
 
   return (
@@ -32,7 +32,7 @@ export function DashboardPage({ onOpenTodo }: DashboardPageProps) {
         title="ダッシュボード"
         meta={d ? formatDateWithWeekday(d.today) : undefined}
         actions={
-          <Button variant="primary" iconStart="plus" onClick={() => setAdding(true)}>
+          <Button variant="primary" iconStart="plus" onClick={onAddTodo}>
             TODOを追加
           </Button>
         }
@@ -49,15 +49,6 @@ export function DashboardPage({ onOpenTodo }: DashboardPageProps) {
           </div>
         </>
       ) : null}
-      <NewTodoDialog
-        open={adding}
-        projectId={null}
-        onClose={() => setAdding(false)}
-        onCreated={(item) => {
-          setAdding(false);
-          onOpenTodo(item.todo.id);
-        }}
-      />
     </>
   );
 }

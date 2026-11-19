@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from "react";
 import { Button } from "../components/aizome";
+import { overlayOpen } from "../lib/keys";
 
 interface DetailPanelProps {
   /** Small line above the content (the TODO's project in the mock). */
@@ -8,11 +9,6 @@ interface DetailPanelProps {
   /** Buttons next to the close button. */
   actions?: ReactNode;
   children: ReactNode;
-}
-
-/** A dialog or menu is open: Esc belongs to it, not to the panel. */
-function overlayOpen(): boolean {
-  return document.querySelector(".az-dialog__overlay, .menu__popover") !== null;
 }
 
 /**

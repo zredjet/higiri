@@ -65,6 +65,15 @@ export const commands = {
 	 *  text as a .md file. Returns the path, or null when the user cancelled.
 	 */
 	exportReportFile: (key: ReportKey, bodyMd: string, options?: InvokeOptions) => __TAURI_INVOKE<string | null>("export_report_file", { key, bodyMd }, options),
+	/**  Backups in the data folder, newest first. */
+	listBackups: (options?: InvokeOptions) => __TAURI_INVOKE<Backup[]>("list_backups", undefined, options),
+	/**
+	 *  Replaces all data with the chosen backup. The current data is copied to a
+	 *  「復元する前の状態」 backup first, so the restore can be undone.
+	 */
+	restoreBackup: (fileName: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("restore_backup", { fileName }, options),
+	/**  Opens the data folder in Finder / Explorer. */
+	openDataFolder: (options?: InvokeOptions) => __TAURI_INVOKE<null>("open_data_folder", undefined, options),
 };
 
 /* Types */
@@ -92,6 +101,24 @@ export type Assessment = {
 	/**  Days since the follow-up date (0 = 「確認日が今日」). 要確認 only. */
 	days_since_follow_up: number | null,
 };
+
+/**  A backup file as the settings screen lists it. */
+export type Backup = {
+	/**  File name in the backups folder; restore_backup takes it back. */
+	file_name: string,
+	kind: BackupKind,
+	/**  自動バックアップ: the day it was taken for. */
+	date: string | null,
+	/**  When the file was written. */
+	created_at: string,
+	size_bytes: number,
+};
+
+export type BackupKind = 
+/**  自動バックアップ (first launch of the day). */
+"daily" | 
+/**  復元する前の状態 (taken just before a restore). */
+"before_restore";
 
 export type Dashboard = {
 	today: string,

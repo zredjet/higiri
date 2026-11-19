@@ -83,7 +83,7 @@ pub async fn export_report_file(
     };
     let path = picked.into_path().map_err(|_| write_error())?;
     std::fs::write(&path, body_md).map_err(|e| {
-        eprintln!("export failed: {e}");
+        log::error!("report export failed: {e}");
         write_error()
     })?;
     Ok(Some(path.display().to_string()))

@@ -27,6 +27,9 @@ const APP_COMMANDS: &[&str] = &[
     "save_report",
     "get_report",
     "export_report_file",
+    "list_backups",
+    "restore_backup",
+    "open_data_folder",
 ];
 
 fn main() {

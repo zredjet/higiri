@@ -6,6 +6,9 @@ import "./components/aizome/tokens.css";
 import "./components/aizome/aizome.css";
 import "./styles/app.css";
 import App from "./app/App";
+import { installGlobalErrorLogging } from "./lib/log";
+
+installGlobalErrorLogging();
 
 // Commands are local and either work or fail for a reason retrying will not fix.
 const queryClient = new QueryClient({

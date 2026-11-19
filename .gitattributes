@@ -1,0 +1,8 @@
+# LF everywhere, also on Windows checkouts: tests compare generated files
+# (src/lib/bindings.ts) and fixtures byte for byte, and sqlx checksums the
+# migration files.
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.icns binary
+*.woff2 binary

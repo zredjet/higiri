@@ -64,8 +64,7 @@ impl From<RepoError> for AppError {
                 .into(),
             },
             other => {
-                // TODO(phase 8): write to the log file via tauri-plugin-log.
-                eprintln!("internal error: {other}");
+                log::error!("internal error: {other}");
                 AppError::internal()
             }
         }

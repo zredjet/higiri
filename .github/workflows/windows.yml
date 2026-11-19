@@ -1,0 +1,45 @@
+# Windows installer (NSIS, per-user, no administrator rights needed).
+# Start it from the Actions tab ("Run workflow"), or push a tag such as v1.0.0.
+# The installer is attached to the run as the artifact "higiri-windows".
+name: Windows build
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install packages
+        run: npm ci
+
+      - name: Check (types, Vitest, cargo test, clippy)
+        run: npm run check
+
+      - name: Build the installer
+        run: npm run tauri -- build --bundles nsis
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: higiri-windows
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error

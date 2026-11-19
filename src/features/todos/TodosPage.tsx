@@ -5,7 +5,6 @@ import type { ProjectSummary, Status, TodoQuery } from "../../lib/bindings";
 import { errorMessage } from "../../lib/errors";
 import { useProjects, useTodoList } from "../../lib/queries";
 import { projectStatsText } from "../projects/projectText";
-import { NewTodoDialog } from "./NewTodoDialog";
 import { QuickAdd } from "./QuickAdd";
 import { DEFAULT_FILTERS, TodoFilters, type FilterState } from "./TodoFilters";
 import { TodoTable } from "./TodoTable";
@@ -17,6 +16,8 @@ interface TodosPageProps {
   selectedTodoId: number | null;
   onOpenTodo: (id: number) => void;
   onEditProject: (summary: ProjectSummary) => void;
+  /** 「TODOを追加」 (the dialog belongs to the app, so Ctrl+N opens the same one). */
+  onAddTodo: () => void;
 }
 
 type Tab = Status | "all";
@@ -27,11 +28,10 @@ export function TodosPage(props: TodosPageProps) {
   return <TodosView key={props.projectId ?? "all"} {...props} />;
 }
 
-function TodosView({ projectId, selectedTodoId, onOpenTodo, onEditProject }: TodosPageProps) {
+function TodosView({ projectId, selectedTodoId, onOpenTodo, onEditProject, onAddTodo }: TodosPageProps) {
   const projects = useProjects(false);
   const [tab, setTab] = useState<Tab>("all");
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
-  const [adding, setAdding] = useState(false);
 
   const query: TodoQuery = {
     project_id: projectId,
@@ -68,7 +68,7 @@ function TodosView({ projectId, selectedTodoId, onOpenTodo, onEditProject }: Tod
         actions={
           <>
             {summary ? <Button onClick={() => onEditProject(summary)}>プロジェクトを編集</Button> : null}
-            <Button variant="primary" iconStart="plus" onClick={() => setAdding(true)}>
+            <Button variant="primary" iconStart="plus" onClick={onAddTodo}>
               TODOを追加
             </Button>
           </>
@@ -87,15 +87,6 @@ function TodosView({ projectId, selectedTodoId, onOpenTodo, onEditProject }: Tod
           emptyText={emptyText}
         />
       ) : null}
-      <NewTodoDialog
-        open={adding}
-        projectId={projectId}
-        onClose={() => setAdding(false)}
-        onCreated={(item) => {
-          setAdding(false);
-          onOpenTodo(item.todo.id);
-        }}
-      />
     </>
   );
 }

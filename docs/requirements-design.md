@@ -455,7 +455,7 @@ macOSではCtrlをCommandに読み替える。
 | ガント | `get_gantt` | 表示期間とプロジェクトを受け、行データを返す |
 | 日報 | `generate_report` `save_report` `get_report` `export_report_file` | 生成、保存、呼び出し、.mdへの書き出し。種類(日報・週報)と期間を引数に取る |
 | 設定 | `get_settings` `update_settings` | |
-| バックアップ | `list_backups` `restore_backup` | |
+| バックアップ | `list_backups` `restore_backup` `open_data_folder` | 復元の前に今のデータを退避する。`open_data_folder` は設定画面の「データフォルダを開く」(フェーズ8で追加) |
 
 ### ディレクトリ構成
 

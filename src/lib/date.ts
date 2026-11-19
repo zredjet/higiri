@@ -27,6 +27,12 @@ export function formatTimestampDate(iso: string): string {
   return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
 }
 
+/** UTC timestamp -> local "2026/11/19 20:30". */
+export function formatTimestampDateTime(iso: string): string {
+  const d = new Date(iso);
+  return `${formatTimestampDate(iso)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function pad(n: number): string {
   return String(n).padStart(2, "0");
 }

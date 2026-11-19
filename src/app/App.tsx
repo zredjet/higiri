@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, SideNav } from "../components/aizome";
 import { DashboardPage } from "../features/dashboard/DashboardPage";
 import { ReminderDialog } from "../features/dashboard/ReminderDialog";
@@ -8,12 +8,16 @@ import { ProjectFormDialog } from "../features/projects/ProjectFormDialog";
 import { ReportPage } from "../features/report/ReportPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { TodoDetailPanel } from "../features/todos/detail/TodoDetailPanel";
+import { NewTodoDialog } from "../features/todos/NewTodoDialog";
 import { TodosPage } from "../features/todos/TodosPage";
 import type { ProjectSummary } from "../lib/bindings";
 import { errorMessage } from "../lib/errors";
+import { overlayOpen } from "../lib/keys";
+import { logInfo } from "../lib/log";
 import { useDashboard, useProjects, useSettings } from "../lib/queries";
 import { buildNavSections } from "./nav";
 import { NEW_PROJECT_NAV_ID, navIdToRoute, routeToNavId, type Route } from "./routes";
+import { shortcutFor } from "./shortcuts";
 import { useAppliedTheme } from "./theme";
 import { useStartupReminder } from "./useStartupReminder";
 
@@ -34,12 +38,40 @@ export default function App() {
   /** Project dialog: closed, creating, or editing the project with this id. */
   const [projectForm, setProjectForm] = useState<null | "new" | number>(null);
   const [deleteTarget, setDeleteTarget] = useState<ProjectSummary | null>(null);
+  /** 「TODOを追加」 dialog, with the project it starts on (null: the first project). */
+  const [newTodo, setNewTodo] = useState<{ projectId: number | null } | null>(null);
 
   const projects = useProjects(false);
   const settings = useSettings();
   const dashboard = useDashboard();
   const { reminder, acknowledge } = useStartupReminder();
   useAppliedTheme(settings.data?.theme);
+
+  // Startup time for the operation log (once per launch).
+  const startupLogged = useRef(false);
+  useEffect(() => {
+    if (dashboard.data && !startupLogged.current) {
+      startupLogged.current = true;
+      logInfo(`dashboard shown ${Math.round(performance.now())} ms after the page started loading`);
+    }
+  }, [dashboard.data]);
+
+  const currentProjectId = route.page === "todos" ? route.projectId : null;
+  const openNewTodo = useCallback(() => setNewTodo({ projectId: currentProjectId }), [currentProjectId]);
+
+  // Ctrl+N (new TODO) and Ctrl+1〜4 (screens); Command on macOS.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.defaultPrevented || e.isComposing || overlayOpen()) return;
+      const shortcut = shortcutFor(e);
+      if (!shortcut) return;
+      e.preventDefault();
+      if (shortcut.kind === "new_todo") openNewTodo();
+      else setRoute(shortcut.route);
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [openNewTodo, setRoute]);
 
   // Leave a project's page once it is archived or deleted.
   useEffect(() => {
@@ -83,13 +115,14 @@ export default function App() {
 
       <main className={route.page === "gantt" ? "app__main app__main--fill" : "app__main"}>
         {projects.error ? <Alert tone="danger">{errorMessage(projects.error)}</Alert> : null}
-        {route.page === "dashboard" && <DashboardPage onOpenTodo={setOpenTodoId} />}
+        {route.page === "dashboard" && <DashboardPage onOpenTodo={setOpenTodoId} onAddTodo={openNewTodo} />}
         {route.page === "todos" && (
           <TodosPage
             projectId={route.projectId}
             selectedTodoId={openTodoId}
             onOpenTodo={setOpenTodoId}
             onEditProject={(s) => setProjectForm(s.project.id)}
+            onAddTodo={openNewTodo}
           />
         )}
         {route.page === "gantt" && <GanttPage selectedTodoId={openTodoId} onOpenTodo={setOpenTodoId} />}
@@ -103,6 +136,17 @@ export default function App() {
 
       {reminder ? <ReminderDialog reminder={reminder} onClose={acknowledge} /> : null}
 
+      <NewTodoDialog
+        open={newTodo !== null}
+        projectId={newTodo?.projectId ?? null}
+        onClose={() => setNewTodo(null)}
+        onCreated={(item) => {
+          setNewTodo(null);
+          // 日報 and 設定 have no detail panel: show the new TODO in the list.
+          if (!PANEL_PAGES.includes(route.page)) setRouteState(ALL_TODOS);
+          setOpenTodoId(item.todo.id);
+        }}
+      />
       <ProjectFormDialog
         target={formTarget}
         onClose={() => setProjectForm(null)}

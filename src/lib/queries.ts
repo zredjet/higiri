@@ -27,6 +27,7 @@ export const queryKeys = {
   gantt: (query: GanttQuery) => ["todos", "gantt", query] as const,
   settings: ["settings"] as const,
   report: (key: ReportKey) => ["reports", key] as const,
+  backups: ["backups"] as const,
 };
 
 export function useProjects(includeArchived = false) {
@@ -231,4 +232,22 @@ export function useExportReport() {
     mutationFn: ({ key, bodyMd }: { key: ReportKey; bodyMd: string }) =>
       commands.exportReportFile(key, bodyMd),
   });
+}
+
+/** Backups in the data folder, newest first (read again each time the dialog opens). */
+export function useBackups() {
+  return useQuery({ queryKey: queryKeys.backups, queryFn: () => commands.listBackups(), gcTime: 0 });
+}
+
+/** Replaces all data with a backup, then reloads everything on screen. */
+export function useRestoreBackup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (fileName: string) => commands.restoreBackup(fileName),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useOpenDataFolder() {
+  return useMutation({ mutationFn: () => commands.openDataFolder() });
 }

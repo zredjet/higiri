@@ -652,9 +652,12 @@ input[type="date"][data-empty="true"]:not(:focus) {
 }
 
 /* ---------- Reminder dialog ---------- */
+/* Long lists scroll inside the dialog, so 「確認しました」 stays in view. */
 .reminder-list {
   display: flex;
   flex-direction: column;
+  max-height: min(400px, 50vh);
+  overflow-y: auto;
   border-bottom: 1px solid var(--border);
 }
 
@@ -698,6 +701,20 @@ input[type="date"][data-empty="true"]:not(:focus) {
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
+}
+
+.settings-card__body--tight {
+  gap: var(--space-4);
+}
+
+.settings-card__text {
+  margin: 0;
+}
+
+.settings-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 .settings-card__grid {
