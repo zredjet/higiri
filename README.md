@@ -13,7 +13,12 @@
 
 ## インストール
 
-Windows 版のインストーラーは、[Actions](../../actions/workflows/windows.yml) の「Windows build」の実行結果(higiri-windows)からダウンロードできます。ダウンロードには GitHub へのログインが必要です。
+Actions の実行結果からダウンロードできます。ダウンロードには GitHub へのログインが必要です。
+
+- Windows: [Windows build](../../actions/workflows/windows.yml) の higiri-windows(インストーラー。管理者権限は不要)
+- macOS(Apple Silicon): [macOS build](../../actions/workflows/macos.yml) の higiri-macos(.dmg)
+
+macOS 版は Apple の公証を受けていないため、初めて開くときに確認が出ます。開けないときは「システム設定」→「プライバシーとセキュリティ」で「このまま開く」を選んでください。
 
 ## 開発
 
