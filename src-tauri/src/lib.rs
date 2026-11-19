@@ -11,6 +11,10 @@ pub mod sample;
 use std::path::PathBuf;
 
 use tauri::Manager;
+// Registered in release builds only (see run()); referenced here so the
+// dependency does not count as unused in development builds.
+#[cfg(all(desktop, debug_assertions))]
+use tauri_plugin_single_instance as _;
 
 use crate::commands::backup::DataDir;
 use crate::repo::db;

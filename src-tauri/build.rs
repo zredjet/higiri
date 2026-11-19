@@ -35,8 +35,24 @@ const APP_COMMANDS: &[&str] = &[
 fn main() {
     // `sqlx::migrate!` embeds the migration files at compile time.
     println!("cargo:rerun-if-changed=migrations");
+
+    // Windows: embed the application manifest (Common Controls v6, which the
+    // dialog plugin needs) into every binary of the package, test binaries
+    // included. tauri-build's own manifest reaches only the app executable,
+    // and `cargo test` then fails to start with STATUS_ENTRYPOINT_NOT_FOUND.
+    // The file is tauri-build's default manifest.
+    let windows = tauri_build::WindowsAttributes::new_without_app_manifest();
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        let dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
+        let manifest = std::path::Path::new(&dir).join("windows-app-manifest.xml");
+        println!("cargo:rerun-if-changed={}", manifest.display());
+        println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
+        println!("cargo:rustc-link-arg=/MANIFESTINPUT:{}", manifest.display());
+    }
+
     tauri_build::try_build(
         tauri_build::Attributes::new()
+            .windows_attributes(windows)
             .app_manifest(tauri_build::AppManifest::new().commands(APP_COMMANDS)),
     )
     .expect("failed to run tauri-build");

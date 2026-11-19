@@ -538,19 +538,23 @@ mod tests {
             .unwrap();
         assert_eq!(project_names(&pool).await, ["A", "B"]);
 
-        let kinds: Vec<BackupKind> = list(tmp.path())
-            .unwrap()
-            .into_iter()
-            .map(|b| b.kind)
+        // Both kept copies are listed, newest first, next to the daily backup.
+        // (The daily backup's time is its file time, so its place in the list
+        // depends on the clock; only the kept copies' order is checked.)
+        let listed = list(tmp.path()).unwrap();
+        let kept_names: Vec<&str> = listed
+            .iter()
+            .filter(|b| b.kind == BackupKind::BeforeRestore)
+            .map(|b| b.file_name.as_str())
             .collect();
         assert_eq!(
-            kinds,
+            kept_names,
             [
-                BackupKind::BeforeRestore,
-                BackupKind::BeforeRestore,
-                BackupKind::Daily
+                "before-restore-20261119T120500.000Z.db",
+                "before-restore-20261119T120000.000Z.db"
             ]
         );
+        assert!(listed.iter().any(|b| b.file_name == "todo-2026-11-19.db"));
         // The work file is gone, and the pool still works (foreign keys on).
         assert!(!dir(tmp.path()).join(RESTORE_WORK_FILE).exists());
         let fk: (i64,) = sqlx::query_as("PRAGMA foreign_keys")
@@ -586,10 +590,10 @@ mod tests {
 
         // A backup with a migration this version does not know.
         run_daily(&pool, tmp.path(), d("2026-11-16")).await.unwrap();
-        let newer = SqlitePool::connect(&format!(
-            "sqlite://{}",
-            bdir.join("todo-2026-11-16.db").display()
-        ))
+        // Options, not a URL: a Windows path is not a valid URL.
+        let newer = SqlitePool::connect_with(
+            SqliteConnectOptions::new().filename(bdir.join("todo-2026-11-16.db")),
+        )
         .await
         .unwrap();
         sqlx::query(
