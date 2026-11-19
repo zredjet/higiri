@@ -1,6 +1,6 @@
-# macOS disk image (.dmg) for Apple Silicon Macs.
+# macOS (Apple Silicon): Higiri.app in a ZIP (no disk image; unzip and run).
 # Start it from the Actions tab ("Run workflow"), or push a tag such as v1.0.0.
-# The disk image is attached to the run as the artifact "higiri-macos".
+# The ZIP is attached to the run as is (Higiri_<version>_macos_arm64.zip).
 # The app is ad-hoc signed only (no Apple Developer ID), so macOS asks for
 # confirmation the first time it is opened.
 name: macOS build
@@ -27,21 +27,29 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # Compiled dependencies, kept between runs (also after a failed run).
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
 
       - name: Install packages
         run: npm ci
 
-      - name: Check (types, Vitest, cargo test, clippy)
-        run: npm run check
+      # Types are checked by the build (build:web); clippy runs in `npm run check`
+      # before committing, so CI skips it to save time.
+      - name: Test the screens (Vitest)
+        run: npm test
 
-      - name: Build the disk image
-        run: npm run tauri -- build --bundles dmg
+      - name: Test the Rust side (cargo test)
+        run: npm run test:rust
 
+      - name: Build and pack the ZIP
+        run: npm run build
+
+      # archive: false uploads the ZIP itself, so the download is not zipped twice.
       - uses: actions/upload-artifact@v7
         with:
-          name: higiri-macos
-          path: src-tauri/target/release/bundle/dmg/*.dmg
+          path: release/*.zip
+          archive: false
           if-no-files-found: error

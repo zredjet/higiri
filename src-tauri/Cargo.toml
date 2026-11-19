@@ -36,10 +36,11 @@ tauri-specta = { version = "=2.0.0-rc.29", features = ["derive", "typescript"] }
 tokio = { version = "1.54.1", features = ["macros", "rt"] }
 tempfile = "3.27.0"
 
-# https://tauri.app/concept/size/#cargo-configuration
+# No LTO and the default codegen units: the binary is about 10% larger
+# (14.4 -> 15.8 MB), but a release build takes half the time from scratch
+# (101 s -> 46 s on an M-series Mac), and seconds instead of about a minute when
+# only the app changed (CI keeps the dependencies cached).
 [profile.release]
-codegen-units = 1
-lto = true
 opt-level = 3
 panic = "abort"
 strip = true

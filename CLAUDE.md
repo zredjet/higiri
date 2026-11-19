@@ -145,8 +145,8 @@ SQLite(アプリのデータフォルダ内の todo.db)
 | Rust の lint(警告はエラー扱い) | `npm run lint:rust` |
 | まとめて確認(型チェック、Vitest、cargo test、clippy) | `npm run check` |
 | 性能の確認(TODO 5,000件・作業ログ 20,000件でコマンドの時間を測る。最適化ビルド) | `npm run test:perf` |
-| 配布物のビルド | `npm run build` |
+| 配布物のビルド(実行ファイルの ZIP を `release/` に作る) | `npm run build` |
 
-- Windows のインストーラー(NSIS、ユーザー単位で管理者権限不要、日本語)は GitHub Actions の `.github/workflows/windows.yml` で作る。Actions のページから手動で動かすか、`v` で始まるタグを push する。テスト(`npm run check`)も Windows 上で通してから作る。改行は `.gitattributes` で LF に揃えている(生成物とフィクスチャをバイト単位で比べるテストがあるため)。
+- 配布物は実行ファイルの ZIP で、インストーラーと .dmg は作らない。`npm run build`(`scripts/package.mjs`)が、Windows では `Higiri.exe`、macOS では ad-hoc 署名した `Higiri.app` を ZIP にして `release/` に置く(macOS は `ditto` で固めて、署名と実行権限を保つ)。GitHub Actions の `.github/workflows/windows.yml` と `macos.yml` も同じスクリプトで作り、ZIP を包み直さずに(`archive: false`)成果物に上げる。Actions では Vitest と cargo test を通してから作る(型チェックは build:web の中で行い、clippy は手元の `npm run check` だけで動かす)。配布版の設定(`[profile.release]`)は、ビルド時間を優先して LTO を使わない。Actions のページから手動で動かすか、`v` で始まるタグを push する。改行は `.gitattributes` で LF に揃えている(生成物とフィクスチャをバイト単位で比べるテストがあるため)。
 - 開発ビルドの DB は、配布版と混ざらないように、データフォルダの下の `dev/todo.db` を使う(macOS は `~/Library/Application Support/com.redjet.higiri/dev/`、Windows は `%APPDATA%\com.redjet.higiri\dev\`)。サンプルデータを入れ直すときは、アプリを閉じてこの `dev` フォルダを消してから `npm run dev:sample` で起動する。
 - サンプルデータはモックの3プロジェクト・11件で、日付は「モックの今日(2026-11-19)」が実際の今日になるようにずらして入れる。ステータスの変化は `change_status` と同じ遷移関数で再現するので、変更履歴も残る。
