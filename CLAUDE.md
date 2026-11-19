@@ -24,7 +24,7 @@
 
 v1.1 までを作る。設計書の「段階」が将来(v2)のものは作らない。データ構造の備え(`todos.parent_id`、`reports.kind`)は設計書どおり入れたままにする。
 
-MVP(v1.0)は完成している。v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ順に作り、仕様は設計書の「v1.1の詳細」に従う。v1.1 の決めごとは下の「v1.1 の決めごと」にまとめてあり、まだ作っていないものを含む。
+MVP(v1.0)は完成している。v1.1 も `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作った。仕様は設計書の「v1.1の詳細」、決めごとは下の「v1.1 の決めごと」にある。
 
 設計書の「未決事項」6点のうち、残り日数の数え方は v1.1 で利用者が決めた(設定で暦日と営業日を切り替え、初期値は暦日)。残る5点は、書いてある仮定のまま進める。仮定を変える判断は利用者がする。
 
@@ -49,7 +49,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
   - 型のフィールド名は Rust と同じ snake_case のまま(`project_id` など)。コマンドの引数名だけは Tauri の規則で camelCase になる。
   - i64 は TS の `number` として出す(`dangerously_cast_bigints_to_number`)。ID と件数は 2^53 を超えない。
 - コマンドを足すときは、`commands::specta_builder()`、`src-tauri/build.rs` の `APP_COMMANDS`、`capabilities/default.json` の `allow-*` の3か所を揃える。capability とバインディングのずれはテストで検出する。
-- コマンドは「時計を読んで内側の関数を呼ぶだけの `#[tauri::command]`」と「`&SqlitePool` と `today` / `now` を受け取る内側の関数」に分け、テストは内側の関数をメモリ上の DB で呼ぶ。v1.1 で足す OS 側への反映(自動起動の登録、通知のタイマーの計算し直し、×ボタンの動き)は `#[tauri::command]` の層で行い、内側の関数は DB だけを扱う。
+- コマンドは「時計を読んで内側の関数を呼ぶだけの `#[tauri::command]`」と「`&SqlitePool` と `today` / `now` を受け取る内側の関数」に分け、テストは内側の関数をメモリ上の DB で呼ぶ。v1.1 の OS 側への反映(自動起動の登録、通知のタイマーの計算し直し、×ボタンの動き)は `#[tauri::command]` の層で行い、内側の関数は DB だけを扱う。
 - 画面に返すエラーは `AppError { kind, message }` の1種類。`message` は利用者向けの日本語で「何が起きたか+どうすればよいか」。DB の詳細は画面に出さない。
 - ステータスの遷移: 開いている4状態(未着手・作業中・待ち・保留)の間は自由。完了と中止にはその4状態から入れる。完了から戻せるのは作業中(再開)だけ、中止から戻せるのは未着手だけ。完了と中止の間は行き来できない。待ちから抜けると待ちの3項目(`waiting_on`、`waiting_since`、`follow_up_date`)を空にする。
 - 公式の sql プラグインは使わない(画面側からSQLを発行する方式のため)。
@@ -76,7 +76,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
 
   - 入力をそのまま入れる列(`waiting_on`、`follow_up_date`、`close_reason`)は、空に戻したときだけ `auto` に入る。入力した値は `waiting_on` / `follow_up_date` / `reason` のキーに入る。
   - 例: 作業中から待ちにした行は `{"waiting_on":"認証担当の回答","follow_up_date":"2026-11-20","auto":{"waiting_since":"2026-11-19"}}`。完了から再開した行は `{"auto":{"actual_end":null,"closed_at":null}}`。
-- `settings` は1キー1行で、値は JSON。キーは `reminder_frequency`(`"every_launch"` / `"once_per_day"`)、`soon_days`(数値)、`follow_up_days`(数値)、`last_reminded_on`(`"YYYY-MM-DD"` か `null`)、`theme`(`"light"` / `"dark"` / `"system"`)。読めない値は既定値として扱う。v1.1 で足すキーは「v1.1 の決めごと」にある。
+- `settings` は1キー1行で、値は JSON。キーは `reminder_frequency`(`"every_launch"` / `"once_per_day"`)、`soon_days`(数値)、`follow_up_days`(数値)、`last_reminded_on`(`"YYYY-MM-DD"` か `null`)、`theme`(`"light"` / `"dark"` / `"system"`)。読めない値は既定値として扱う。v1.1 で足したキーは「v1.1 の決めごと」にある。
 - 接続のたびに外部キー制約を有効にし、WALモードにする。
 - 適用済みのマイグレーションファイルは書き換えない。変更は新しいファイルを足す。
 - DBへの接続なしで `cargo build` が通る構成にする(`query!` 系マクロを使うなら `cargo sqlx prepare` の成果物をコミットする)。
@@ -111,7 +111,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
 - ガント: 行データ(予定・実績・待ちの区間、区分)は `get_gantt`(`domain/gantt.rs`)。待ちの区間は変更履歴から「待ちに入った日〜抜けた前日」(待ち中は今日まで)。日付から座標への変換、目盛り、表示期間、見えている行だけを描く処理は `src/features/gantt/geometry.ts`(Vitest でモックの座標と照合)。表示する日数は画面の幅に収まる分で、初期表示は今日が左から3分の1。日限のひし形はモックどおり超過(朱)と本日(琥珀)だけ色を付ける。予定のバーはドラッグで動かせる(v1.1 のフェーズ13)。
 - TODO 一覧は200件を超えると、画面の近くの行だけを描く(`src/features/todos/virtualRows.ts` と `useVirtualRows.ts`)。行の高さは描いたあとに測り、それまでは見積もりを使う。Aizome の Table には見えている行だけを渡し、上下の行の分の高さは外側の要素の CSS(`tbody::before` / `::after`)で取る。Table の DOM は変えない。
 - キーボードショートカット: Ctrl+N(新規TODO)、Ctrl+F(検索ダイアログ、v1.1)、Ctrl+1〜4(ダッシュボード、TODO、ガント、日報)は `src/app/shortcuts.ts`。macOS は Command。ダイアログやメニューが開いているときは効かない(Ctrl+F は、そのときも `preventDefault` だけはして WebView の検索バーを出さない)。「TODOを追加」と検索のダイアログは App が持ち、画面のボタン(サイドナビ)とショートカットで同じものを開く。Esc、Ctrl+Enter、Ctrl+E は詳細パネルとエディタ側にある。
-- 動作ログは log プラグイン(OS のログフォルダの `higiri.log`、開発ビルドは `higiri-dev.log`。1 MB で切り替えて5個残す)。起動、バックアップ、復元、想定外のエラーだけを書き、TODO の中身は書かない。画面側は `src/lib/log.ts` の `logUnexpected` を使う(`errorMessage` が AppError 以外のエラーを渡す)。
+- 動作ログは log プラグイン(OS のログフォルダの `higiri.log`、開発ビルドは `higiri-dev.log`。1 MB で切り替えて5個残す)。起動、バックアップ、復元、JSON の書き出しと取り込み、通知と自動起動の結果、想定外のエラーだけを書き、TODO の中身は書かない。起動のたびに、画面の読み込みが始まってからダッシュボードを出すまでの時間も書く(`App.tsx` の「dashboard shown … ms after the page started loading」)。画面側は `src/lib/log.ts` の `logUnexpected` を使う(`errorMessage` が AppError 以外のエラーを渡す)。
 - 多重起動の防止(single-instance)は配布版だけで有効にする。開発ビルドは別のDBを使うので、インストールした版と同時に動かせるようにしている。2つ目の起動は既存のウィンドウを前面に出す(`--autostart` つきなら出さない)。ウィンドウの位置・大きさ・最大化は window-state で次回に戻す。
 - 権限(`capabilities/default.json`)は、アプリのコマンドと、opener の http/https、clipboard-manager の `allow-write-text`、log の `allow-log` だけ。`core:default` は付けない(画面は Tauri のウィンドウ・イベント・パスの API を使わない)。notification と autostart のプラグインは Rust からだけ使い、画面側には権限を付けない。notification プラグインは画面に `window.Notification` の差し替えを入れ、Windows 以外では読み込み時に `is_permission_granted` を呼ぶが、権限がないので断られる(画面はこれを使わない)。
 - 日報: 節の組み立ては `domain/report.rs`。過去の日は、本日の作業と本日完了・中止をその日の記録から、待ち・明日の予定・日限注意を今の TODO の状態から対象日を今日として作る(待ちは、対象日より後に待ちに入ったものを除く)。中身のない節は「- なし」。節の並び・見出し・出す節・添える項目は日報テンプレート(v1.1 のフェーズ14)で変えられ、所感・連絡事項はいつも最後で、その見出しより後ろが再生成しても残る(見出しの探し方は下の「v1.1 の決めごと」のフェーズ14)。既定のテンプレートでの、設計書の出力例との完全一致を `commands/reports.rs` のテスト(`tests/fixtures/daily_report_2026-11-19.md`)で確かめている。
@@ -126,10 +126,10 @@ SQLite(アプリのデータフォルダ内の todo.db)
 
 ## v1.1 の決めごと
 
-v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作る。この節には、まだ作っていないものも含む。ファイルの場所など実装で決まることは、作ったフェーズでこのファイルの各節に足す。仕様の詳細は設計書の「v1.1の詳細」にある。
+v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作った。仕様の詳細は設計書の「v1.1の詳細」にある。フェーズごとに作ったもの(ファイルの場所と細かい決めごと)は、下の各項目の「作ったもの」にある。
 
 - テーブル定義は変えない(マイグレーションを足さない)。新しい値は `settings` のキーに入れ、検索は既存の列を `LIKE` で引く(FTS5 は使わない)。
-- 足すコマンドは次の5つだけ(27個から32個になる。フェーズ15の `export_data`、`import_data` で32個そろった)。上の「構成」の3か所をそろえ、件数のテスト(`commands/mod.rs`)も直す。
+- v1.1 で足したコマンドは次の5つだけで、コマンドは全部で32個(MVP の27個と合わせて)。コマンドを足すときは、上の「構成」の3か所をそろえ、件数のテスト(`commands/mod.rs`)も直す。
 
   | コマンド | フェーズ | 用途 |
   | --- | --- | --- |
@@ -140,7 +140,7 @@ v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作る。�
   | `import_data` | 15 | JSON を取り込む。ファイルを選ぶダイアログは Rust 側で開き、検査してから全データを置き換える |
 
 - 自動起動、×ボタンの動き、通知の時刻、日数の数え方、日報テンプレートは `update_settings` で扱う。OS 側への反映は `#[tauri::command]` の層で行う(上の「構成」)。復元と取り込みで settings が入れ替わったときも同じく反映する。
-- `settings` に足すキー(読めない値は既定値として扱う)
+- `settings` に足したキー(読めない値は既定値として扱う)
 
   | キー | 値 | 既定値 | フェーズ |
   | --- | --- | --- | --- |
@@ -282,7 +282,7 @@ v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作る。�
 | 型チェック | `npm run typecheck` |
 | Rust の lint(警告はエラー扱い) | `npm run lint:rust` |
 | まとめて確認(型チェック、Vitest、cargo test、clippy) | `npm run check` |
-| 性能の確認(TODO 5,000件・作業ログ 20,000件でコマンドの時間を測る。最適化ビルド) | `npm run test:perf` |
+| 性能の確認(TODO 5,000件・作業ログ 20,000件でコマンドの時間を測る。最適化ビルド。検索、営業日の設定、TODO の保存(`get_todo` と `update_todo`)、起動の Rust 側、JSON の書き出しと取り込みも測る) | `npm run test:perf` |
 | アプリアイコンを原画から作り直す | `npm run icons` |
 | 配布物のビルド(実行ファイルの ZIP を `release/` に作る) | `npm run build` |
 

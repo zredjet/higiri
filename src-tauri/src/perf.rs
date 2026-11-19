@@ -15,6 +15,7 @@
 //! Set `HIGIRI_PERF_DB=/path/to/todo.db` to keep the generated database (for
 //! trying it in the app); otherwise it is written to a temporary folder.
 
+use std::cell::Cell;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -24,7 +25,7 @@ use sqlx::SqlitePool;
 use crate::commands::{dashboard, gantt, projects, reports, search, settings, todos};
 use crate::domain::date::{format_date, format_timestamp};
 use crate::domain::listing::{DueFilter, TodoSort};
-use crate::domain::model::{Priority, Status};
+use crate::domain::model::{Priority, Status, Todo};
 use crate::domain::report::ReportKind;
 use crate::domain::settings::{CustomHoliday, DayCount, Settings};
 use crate::repo::db;
@@ -222,8 +223,28 @@ where
 }
 
 fn ms(d: Duration) -> String {
-    format!("{:>7.1} ms", d.as_secs_f64() * 1000.0)
+    format!("{:>8.2} ms", d.as_secs_f64() * 1000.0)
 }
+
+/// The fields `update_todo` takes, as the screen's `fieldsOf` builds them.
+fn fields_of(t: &Todo) -> todos::TodoFields {
+    todos::TodoFields {
+        title: t.title.clone(),
+        priority: t.priority,
+        due_date: t.due_date,
+        planned_start: t.planned_start,
+        planned_end: t.planned_end,
+        actual_start: t.actual_start,
+        actual_end: t.actual_end,
+        waiting_on: t.waiting_on.clone(),
+        follow_up_date: t.follow_up_date,
+        close_reason: t.close_reason.clone(),
+        memo_md: t.memo_md.clone(),
+    }
+}
+
+/// Label of the commands the first screen calls (see `measure`).
+const FIRST_SCREEN: &str = "first screen (4 commands)";
 
 /// The median time of each measured command.
 async fn measure(pool: &SqlitePool, today: NaiveDate) -> Vec<(&'static str, Duration)> {
@@ -304,6 +325,72 @@ async fn measure(pool: &SqlitePool, today: NaiveDate) -> Vec<(&'static str, Dura
             median(runs, || search::search(pool, words, today)).await,
         ));
     }
+
+    // Saving a TODO (since フェーズ13, useUpdateTodo in queries.ts): get_todo
+    // reads the TODO as saved right now, then update_todo sends it with only
+    // the caller's change. Measured on an open TODO, one call after the other.
+    let (id,): (i64,) =
+        sqlx::query_as("SELECT id FROM todos WHERE status = 'doing' ORDER BY id LIMIT 1")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    times.push((
+        "get_todo",
+        median(runs, || todos::get(pool, id, today)).await,
+    ));
+    // A Gantt drag: the planned span moves a day (back and forth), which
+    // also records a `planned` event.
+    let back = Cell::new(false);
+    times.push((
+        "get_todo + update_todo (drag)",
+        median(runs, || {
+            let days = if back.replace(!back.get()) { -1 } else { 1 };
+            async move {
+                let current = todos::get(pool, id, today).await.unwrap();
+                let mut fields = fields_of(&current.todo);
+                fields.planned_start = fields.planned_start.map(|d| shift(d, days));
+                fields.planned_end = fields.planned_end.map(|d| shift(d, days));
+                todos::update(pool, id, fields, today, Utc::now())
+                    .await
+                    .unwrap();
+            }
+        })
+        .await,
+    ));
+    // The detail panel's autosave of the memo (no event).
+    let n = Cell::new(0);
+    times.push((
+        "get_todo + update_todo (memo)",
+        median(runs, || {
+            n.set(n.get() + 1);
+            let memo = format!("- 進め方のメモ\n- 確認したいこと {}", n.get());
+            async move {
+                let current = todos::get(pool, id, today).await.unwrap();
+                let fields = todos::TodoFields {
+                    memo_md: memo,
+                    ..fields_of(&current.todo)
+                };
+                todos::update(pool, id, fields, today, Utc::now())
+                    .await
+                    .unwrap();
+            }
+        })
+        .await,
+    ));
+
+    // What the first screen asks for (App.tsx: settings, projects, the
+    // dashboard and its badge, the startup reminder). The screen sends them
+    // at once; here they run one after the other.
+    times.push((
+        FIRST_SCREEN,
+        median(runs, || async {
+            settings::get(pool).await.unwrap();
+            projects::list(pool, false, today).await.unwrap();
+            dashboard::get(pool, today).await.unwrap();
+            dashboard::reminder(pool, today).await.unwrap();
+        })
+        .await,
+    ));
     times
 }
 
@@ -330,7 +417,8 @@ async fn perf_5000_todos_20000_logs() {
 
     let t = Instant::now();
     let pool = db::open(&path).await.unwrap();
-    println!("open + migrations check      {}", ms(t.elapsed()));
+    let opened = t.elapsed();
+    println!("{:<30} {}", "open + migrations check", ms(opened));
 
     let calendar = measure(&pool, today).await;
 
@@ -354,11 +442,11 @@ async fn perf_5000_todos_20000_logs() {
     let business = measure(&pool, today).await;
 
     println!(
-        "{:<28} {:>10} {:>10}",
+        "{:<30} {:>11} {:>11}",
         "command (ms)", "calendar", "business"
     );
     for ((name, c), (_, b)) in calendar.iter().zip(&business) {
-        println!("{name:<28} {} {}", ms(*c), ms(*b));
+        println!("{name:<30} {} {}", ms(*c), ms(*b));
     }
     settings::update(&pool, settings::SettingsInput::from(&Settings::default()))
         .await
@@ -386,7 +474,7 @@ async fn perf_5000_todos_20000_logs() {
     for (label, words) in SEARCHES {
         let found = search::search(&pool, words, today).await.unwrap();
         println!(
-            "{label:<28} 「{words}」 total {} / returned {}",
+            "{label:<30} 「{words}」 total {} / returned {}",
             found.total,
             found.hits.len()
         );
@@ -396,7 +484,25 @@ async fn perf_5000_todos_20000_logs() {
     crate::backup::run_daily(&pool, tmp.path(), today)
         .await
         .unwrap();
-    println!("daily backup (VACUUM INTO)   {}", ms(t.elapsed()));
+    let backed_up = t.elapsed();
+    println!("{:<30} {}", "daily backup (VACUUM INTO)", ms(backed_up));
+
+    // 起動2秒 (Rust side): what setup does before the window (open the
+    // database, the first launch of the day's backup) and the first screen's
+    // commands. The WebView's own loading is not in this number.
+    let first_screen = |times: &[(&str, Duration)]| {
+        times
+            .iter()
+            .find(|(label, _)| *label == FIRST_SCREEN)
+            .map(|(_, d)| *d)
+            .unwrap()
+    };
+    println!(
+        "{:<30} {} {}",
+        "startup, Rust side",
+        ms(opened + backed_up + first_screen(&calendar)),
+        ms(opened + backed_up + first_screen(&business))
+    );
 
     // C-2: export everything to JSON, then import it back (into the same
     // database: the work database, the checks, the kept copy and the swap).
@@ -408,15 +514,15 @@ async fn perf_5000_todos_20000_logs() {
         .unwrap();
     let size = std::fs::metadata(&file).unwrap().len();
     println!(
-        "export_data (JSON, {:.1} MB)  {}",
-        size as f64 / 1_000_000.0,
+        "{:<30} {}",
+        format!("export_data (JSON, {:.1} MB)", size as f64 / 1_000_000.0),
         ms(t.elapsed())
     );
     let t = Instant::now();
     crate::json_data::import(&pool, tmp.path(), &file, now)
         .await
         .unwrap();
-    println!("import_data (JSON)           {}", ms(t.elapsed()));
+    println!("{:<30} {}", "import_data (JSON)", ms(t.elapsed()));
     let counts: (i64, i64) =
         sqlx::query_as("SELECT (SELECT COUNT(*) FROM todos), (SELECT COUNT(*) FROM work_logs)")
             .fetch_one(&pool)
