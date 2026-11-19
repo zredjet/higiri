@@ -1,12 +1,11 @@
 # Windows: Higiri.exe in a ZIP (no installer; unzip and run).
-# Start it from the Actions tab ("Run workflow"), or push a tag such as v1.0.0.
+# Start it from the Actions tab ("Run workflow"). Releases come from release.yml.
 # The ZIP is attached to the run as is (Higiri_<version>_windows_x64.zip).
 name: Windows build
 
+# Manual only; a tag push runs release.yml instead.
 on:
   workflow_dispatch:
-  push:
-    tags: ["v*"]
 
 permissions:
   contents: read

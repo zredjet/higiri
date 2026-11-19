@@ -1,0 +1,79 @@
+# Release: pushing a tag such as v0.1.0 builds the Windows and macOS ZIPs and
+# publishes them on the Releases page (downloadable without signing in).
+#   git tag v0.1.0 && git push origin v0.1.0
+# The release stays a draft until both ZIPs are attached.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  # Same as the build workflows (shares their cache): no debug info in tests.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Create a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag
+          --title "Higiri $GITHUB_REF_NAME" --notes-file .github/release-notes.md
+
+  # Same job id and steps as windows.yml / macos.yml, so the Rust cache is shared.
+  build:
+    needs: draft
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          cache-on-failure: true
+
+      - name: Install packages
+        run: npm ci
+
+      - name: Test the screens (Vitest)
+        run: npm test
+
+      - name: Test the Rust side (cargo test)
+        run: npm run test:rust
+
+      - name: Build and pack the ZIP
+        run: npm run build
+
+      - name: Attach the ZIP to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" release/*.zip --clobber
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest

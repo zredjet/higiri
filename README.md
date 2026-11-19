@@ -13,10 +13,10 @@
 
 ## インストール
 
-Actions の実行結果から ZIP をダウンロードし、展開して使います。インストーラーはありません。ダウンロードには GitHub へのログインが必要です。
+[Releases](../../releases/latest) から ZIP をダウンロードし、展開して使います。インストーラーはありません。
 
-- Windows: [Windows build](../../actions/workflows/windows.yml) の `Higiri_<版>_windows_x64.zip`。展開した `Higiri.exe` を実行します。
-- macOS(Apple Silicon): [macOS build](../../actions/workflows/macos.yml) の `Higiri_<版>_macos_arm64.zip`。展開した `Higiri.app` を「アプリケーション」フォルダに移して開きます。
+- Windows(64ビット): `Higiri_<版>_windows_x64.zip`。展開した `Higiri.exe` を実行します。
+- macOS(Apple Silicon): `Higiri_<版>_macos_arm64.zip`。展開した `Higiri.app` を「アプリケーション」フォルダに移して開きます。
 
 どちらも有料の署名を受けていないため、初めて開くときに確認が出ます。
 
@@ -37,6 +37,13 @@ npm run build    # 配布用の ZIP を release/ に作る
 ```
 
 要件・設計・画面モックは `docs/` にあります。
+
+リリースは、版のタグを push すると GitHub Actions が Windows 版と macOS 版の ZIP を作り、Releases に置きます。
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
 
 ## ライセンス
 

@@ -1,14 +1,13 @@
 # macOS (Apple Silicon): Higiri.app in a ZIP (no disk image; unzip and run).
-# Start it from the Actions tab ("Run workflow"), or push a tag such as v1.0.0.
+# Start it from the Actions tab ("Run workflow"). Releases come from release.yml.
 # The ZIP is attached to the run as is (Higiri_<version>_macos_arm64.zip).
 # The app is ad-hoc signed only (no Apple Developer ID), so macOS asks for
 # confirmation the first time it is opened.
 name: macOS build
 
+# Manual only; a tag push runs release.yml instead.
 on:
   workflow_dispatch:
-  push:
-    tags: ["v*"]
 
 permissions:
   contents: read
