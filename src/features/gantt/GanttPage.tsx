@@ -1,15 +1,19 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Alert, Badge, Button, Checkbox, Select, Tabs } from "../../components/aizome";
 import { PageHeader } from "../../components/PageHeader";
-import type { GanttProject, GanttRow } from "../../lib/bindings";
+import type { DaySpan, GanttProject, GanttRow } from "../../lib/bindings";
 import { formatDate } from "../../lib/date";
 import { errorMessage } from "../../lib/errors";
 import { useGantt, useHolidays, useProjects } from "../../lib/queries";
 import { STATUS_LABEL, STATUS_TONE } from "../todos/todoText";
 import {
   addDays,
+  barGrips,
+  canDrag,
   DAY_WIDTH,
   dayCenter,
+  dragLabelX,
+  GRIP,
   headerRows,
   holidayLabels,
   holidayNames,
@@ -19,14 +23,17 @@ import {
   spanRect,
   startAround,
   step,
+  textWidth,
   visibleDays,
   visibleRows,
   weekendRuns,
+  type DragMode,
   type LaidOutRow,
   type Range,
   type Scale,
 } from "./geometry";
-import { dueMarkText, rowLabel } from "./rowLabel";
+import { dragText, dueMarkText, rowLabel } from "./rowLabel";
+import { useBarDrag, type DragPreview } from "./useBarDrag";
 
 interface GanttPageProps {
   selectedTodoId: number | null;
@@ -93,6 +100,7 @@ export function GanttPage({ selectedTodoId, onOpenTodo }: GanttPageProps) {
   );
   const bodyHeight = Math.max(0, size.height - LAYOUT.headerHeight);
   const shown = visibleRows(layout.rows, scrollTop, bodyHeight);
+  const drag = useBarDrag();
 
   useEffect(() => {
     // Keep the scroll position valid when rows disappear (filters).
@@ -164,6 +172,11 @@ export function GanttPage({ selectedTodoId, onOpenTodo }: GanttPageProps) {
         <Legend />
       </div>
       {gantt.error ? <Alert tone="danger">{errorMessage(gantt.error)}</Alert> : null}
+      {drag.error ? (
+        <Alert tone="danger" onClose={drag.clearError}>
+          {errorMessage(drag.error)}
+        </Alert>
+      ) : null}
 
       <div className="gantt">
         <div className="gantt__scroll" ref={scrollRef} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
@@ -194,7 +207,17 @@ export function GanttPage({ selectedTodoId, onOpenTodo }: GanttPageProps) {
                     holidays={names}
                     selectedTodoId={selectedTodoId}
                     onOpen={onOpenTodo}
+                    drag={drag}
                   />
+                  {drag.preview ? (
+                    <DragLabel
+                      preview={drag.preview}
+                      rows={layout.rows}
+                      range={range}
+                      scale={scale}
+                      chartWidth={svgWidth(range, scale, chartWidthAvailable)}
+                    />
+                  ) : null}
                 </div>
               )}
             </>
@@ -334,6 +357,41 @@ function NameCell({ row, selected, onOpen }: { row: Row; selected: boolean; onOp
   );
 }
 
+/** Rough width of the dates shown while dragging (12px text, --space-2 padding and a border). */
+function dragLabelWidth(text: string): number {
+  return Math.ceil(textWidth(text, 12)) + 2 * 8 + 2;
+}
+
+/**
+ * The dates of the bar being dragged (「11/20〜11/27」), just above it. Drawn
+ * over the chart, so it is not clipped by the rows around it.
+ */
+function DragLabel({
+  preview,
+  rows,
+  range,
+  scale,
+  chartWidth,
+}: {
+  preview: DragPreview;
+  rows: Row[];
+  range: Range;
+  scale: Scale;
+  chartWidth: number;
+}) {
+  const row = rows.find((r) => r.todo?.item.todo.id === preview.todoId);
+  if (!row) return null;
+  const text = dragText(preview.span);
+  const x = dragLabelX(range, preview.span, DAY_WIDTH[scale], dragLabelWidth(text), chartWidth);
+  return (
+    <div className="gantt-drag-label" style={{ left: LAYOUT.nameWidth + x, top: row.top + LAYOUT.plannedTop - GRIP.padY }}>
+      {text}
+    </div>
+  );
+}
+
+type BarDrag = ReturnType<typeof useBarDrag>;
+
 function Chart({
   range,
   minWidth,
@@ -344,6 +402,7 @@ function Chart({
   holidays,
   selectedTodoId,
   onOpen,
+  drag,
 }: {
   range: Range;
   minWidth: number;
@@ -354,6 +413,7 @@ function Chart({
   holidays: Map<string, string>;
   selectedTodoId: number | null;
   onOpen: (id: number) => void;
+  drag: BarDrag;
 }) {
   const w = DAY_WIDTH[scale];
   const width = svgWidth(range, scale, minWidth);
@@ -375,12 +435,15 @@ function Chart({
           <TodoBars
             key={r.key}
             row={r.todo!}
+            planned={drag.plannedOf(r.todo!.item.todo.id, r.todo!.planned)}
+            dragging={drag.preview?.todoId === r.todo!.item.todo.id}
             top={r.top}
             range={range}
             dayWidth={w}
             width={width}
             selected={r.todo!.item.todo.id === selectedTodoId}
             onOpen={onOpen}
+            onGrab={(e, span, mode) => drag.begin(e, r.todo!.item.todo.id, span, mode, w)}
           />
         ),
       )}
@@ -391,23 +454,33 @@ function Chart({
 
 function TodoBars({
   row,
+  planned: plannedSpan,
+  dragging,
   top,
   range,
   dayWidth,
   width,
   selected,
   onOpen,
+  onGrab,
 }: {
   row: GanttRow;
+  /** The planned span to draw (moved while dragging and saving). */
+  planned: DaySpan | null;
+  dragging: boolean;
   top: number;
   range: Range;
   dayWidth: number;
   width: number;
   selected: boolean;
   onOpen: (id: number) => void;
+  onGrab: (e: ReactPointerEvent<Element>, span: DaySpan, mode: DragMode) => void;
 }) {
   const { todo, assessment } = row.item;
-  const planned = row.planned ? spanRect(range, row.planned, dayWidth) : null;
+  const planned = plannedSpan ? spanRect(range, plannedSpan, dayWidth) : null;
+  const grips = canDrag(todo.status, plannedSpan) ? barGrips(range, plannedSpan, dayWidth) : null;
+  const gripY = top + LAYOUT.plannedTop - GRIP.padY;
+  const gripHeight = LAYOUT.plannedHeight + 2 * GRIP.padY;
   const actual = row.actual ? spanRect(range, row.actual, dayWidth) : null;
   const dueX = todo.due_date ? dayCenter(range, todo.due_date, dayWidth) : null;
   const dueClass =
@@ -420,7 +493,14 @@ function TodoBars({
       <rect className={selected ? "gantt-row__hit is-selected" : "gantt-row__hit"} x={0} y={top} width={width} height={LAYOUT.todoRow} />
       <line className="gantt-grid" x1={0} x2={width} y1={top + LAYOUT.todoRow - 0.5} y2={top + LAYOUT.todoRow - 0.5} />
       {planned ? (
-        <rect className="gantt-planned" x={planned.x} y={top + LAYOUT.plannedTop} width={planned.width} height={LAYOUT.plannedHeight} rx={2} />
+        <rect
+          className={dragging ? "gantt-planned is-dragging" : "gantt-planned"}
+          x={planned.x}
+          y={top + LAYOUT.plannedTop}
+          width={planned.width}
+          height={LAYOUT.plannedHeight}
+          rx={2}
+        />
       ) : null}
       {actual ? (
         <rect className="gantt-actual" x={actual.x} y={top + LAYOUT.actualTop} width={actual.width} height={LAYOUT.actualHeight} rx={2} />
@@ -458,6 +538,39 @@ function TodoBars({
             >
               {mark}
             </text>
+          ) : null}
+        </>
+      ) : null}
+      {grips && plannedSpan ? (
+        // Drawn last, over the due diamond: the middle moves the bar, the ends resize it.
+        <>
+          <rect
+            className="gantt-grip gantt-grip--move"
+            x={grips.move.x}
+            y={gripY}
+            width={grips.move.width}
+            height={gripHeight}
+            onPointerDown={(e) => onGrab(e, plannedSpan, "move")}
+          />
+          {grips.start ? (
+            <rect
+              className="gantt-grip gantt-grip--resize"
+              x={grips.start.x}
+              y={gripY}
+              width={grips.start.width}
+              height={gripHeight}
+              onPointerDown={(e) => onGrab(e, plannedSpan, "start")}
+            />
+          ) : null}
+          {grips.end ? (
+            <rect
+              className="gantt-grip gantt-grip--resize"
+              x={grips.end.x}
+              y={gripY}
+              width={grips.end.width}
+              height={gripHeight}
+              onPointerDown={(e) => onGrab(e, plannedSpan, "end")}
+            />
           ) : null}
         </>
       ) : null}

@@ -1,4 +1,4 @@
-import type { Assessment, GanttRow } from "../../lib/bindings";
+import type { Assessment, DaySpan, GanttRow } from "../../lib/bindings";
 import { monthDay } from "../../lib/date";
 import { overdueText, SHIFTED_TEXT } from "../todos/todoText";
 
@@ -29,8 +29,13 @@ export function rowLabel(row: GanttRow): string {
   return `${todo.title}:${planned}、${actual}、${due}`;
 }
 
+/** The dates shown while dragging a planned bar: 「11/20〜11/27」. */
+export function dragText(span: DaySpan): string {
+  return `${monthDay(span.start)}〜${monthDay(span.end)}`;
+}
+
 /**
- * Text drawn right of the due diamond: 「2日超過」 for an overdue TODO, and
+ * Text drawn right of the due diamond:「2日超過」 for an overdue TODO, and
  * 「休日のため前倒し」 when the due date was moved off a holiday (overdue or today).
  */
 export function dueMarkText(a: Assessment): string | null {

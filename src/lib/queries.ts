@@ -9,6 +9,7 @@ import {
   type ReportKey,
   type SettingsInput,
   type StatusChange,
+  type Todo,
   type TodoFields,
   type TodoItem,
   type TodoQuery,
@@ -183,10 +184,27 @@ export function useCreateTodo() {
   });
 }
 
+/**
+ * update_todo and change_status run one at a time, in the order they were
+ * started, so no other write lands between an update's read and its write.
+ */
+const TODO_WRITES = { id: "todo-writes" };
+
+/**
+ * Saves a TODO's fields. update_todo takes every field, so `change` gets the
+ * TODO as saved right now (read with get_todo just before the update) and
+ * returns it with only the caller's edits: a Gantt drag changes the planned
+ * span, the detail panel its fields edited by hand. Neither writes back older
+ * values of what the other has just saved.
+ */
 export function useUpdateTodo() {
   const changed = useTodoChanged();
   return useMutation({
-    mutationFn: ({ id, fields }: { id: number; fields: TodoFields }) => commands.updateTodo(id, fields),
+    scope: TODO_WRITES,
+    mutationFn: async ({ id, change }: { id: number; change: (current: Todo) => TodoFields }) => {
+      const current = await commands.getTodo(id);
+      return commands.updateTodo(id, change(current.todo));
+    },
     onSuccess: (item) => changed(item),
   });
 }
@@ -194,6 +212,7 @@ export function useUpdateTodo() {
 export function useChangeStatus() {
   const changed = useTodoChanged();
   return useMutation({
+    scope: TODO_WRITES,
     mutationFn: ({ id, change }: { id: number; change: StatusChange }) => commands.changeStatus(id, change),
     onSuccess: (item) => changed(item),
   });

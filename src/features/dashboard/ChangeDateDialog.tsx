@@ -4,7 +4,7 @@ import { DateField } from "../../components/DateField";
 import type { TodoItem } from "../../lib/bindings";
 import { errorMessage } from "../../lib/errors";
 import { useUpdateTodo } from "../../lib/queries";
-import { fieldsOf } from "../todos/detail/useTodoDraft";
+import { fieldsOf } from "../todos/detail/draft";
 
 export type DateTarget = "due_date" | "follow_up_date";
 
@@ -49,7 +49,7 @@ export function ChangeDateDialog({
         onSubmit={(e) => {
           e.preventDefault();
           update.mutate(
-            { id: item.todo.id, fields: { ...fieldsOf(item.todo), [target]: value } },
+            { id: item.todo.id, change: (current) => ({ ...fieldsOf(current), [target]: value }) },
             { onSuccess: onClose },
           );
         }}

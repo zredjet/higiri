@@ -93,16 +93,20 @@ SQLite(アプリのデータフォルダ内の todo.db)
 - フォントは `@fontsource/ibm-plex-sans-jp`(400/500/600/700)と `@fontsource/ibm-plex-mono`(400/500)を `src/styles/fonts.ts` で読み込む。`vite.config.ts` のプラグインで .woff を外し、.woff2 だけを同梱する。
 - 画面の切り替えはルーティングのライブラリを使わず、`src/app/routes.ts` の `Route` を状態で持つ。サイドナビの id と画面は `routes.ts` で対応させる。
 - データの取得と更新は TanStack Query。フックは `src/lib/queries.ts` にまとめ、更新したら影響する一覧(プロジェクトと TODO は両方)を取り直す。
+  - TODO の書き込み(`update_todo` と `change_status`)は、mutation の `scope`(`TODO_WRITES`)で1本の列に並べ、始めた順に1つずつ動かす。
+  - `update_todo` はすべての項目を受け取るので、`useUpdateTodo` は `{ id, change }` を受け取り、送る直前に `get_todo` で今の TODO を読んで `change(今の todo)` の結果を送る。呼び出し側は `{ ...fieldsOf(current), 変える項目 }` のように自分が変える項目だけを重ねる(ガントのドラッグ、詳細パネル、ダッシュボードの日付の変更)。ほかの保存が入れたばかりの値を古い値で上書きしないため。
 - 入力の検証は Rust 側で行い、返ってきた `AppError.message` を表示する(`src/lib/errors.ts` の `errorMessage`)。フォームには `noValidate` を付け、ブラウザ標準の英語の吹き出しを出さない。
 - 一覧の絞り込み・並べ替え(`domain/listing.rs`)、ステータスの選択肢(`TodoItem.next_statuses`)、タイムラインの文(`domain/timeline.rs`)は Rust 側で作る。画面は受け取ったものを並べるだけ。
 - 日付の入力は `src/components/DateField.tsx` を使う(空を null にし、macOS の WebKit が空欄に今日の日付を出すのを薄く表示する)。
 - Enter で確定する入力は `src/lib/keys.ts` の `isComposing` で日本語変換中の Enter を除く。
 - 詳細パネルの項目は `useTodoDraft` で入力が止まって1秒後に `update_todo` で保存する。閉じるときと別のTODOに切り替えるときにも保存する。ステータスを変える前にも保存してから `change_status` を呼ぶ。
+  - 項目ごとに「手で変えて、まだ保存していないか」(`touched`)を持つ。TODO がほかで変わったとき(ガントのドラッグ)は、手で変えていない項目だけが新しい値を取る。保存では手で変えた項目だけを、その時点の TODO に重ねて送る(どちらも `src/features/todos/detail/draft.ts` の `mergeDraft`)。保存が終わったら、送ったあとに打ち直していない項目は手で変えた印を外し、保存された値を出す(`settleSave`。タイトルの前後の空白が除かれるなど)。
+  - `fieldsOf` も `draft.ts` にある。
 - Markdown の編集は CodeMirror 6(`src/components/markdown/MarkdownEditor.tsx`)、表示は react-markdown + remark-gfm + rehype-sanitize(`MarkdownView.tsx`)。表示のリンクはアプリ内で開かず、http/https だけを opener プラグインの `openUrl` で既定のブラウザに渡す。
 - CSP: CodeMirror が実行時に `<style>` を差し込むため、`style-src` だけ `'unsafe-inline'` を許し、`dangerousDisableAssetCspModification: ["style-src"]` で Tauri の nonce 付与を止めている。`script-src` は厳しいまま。opener の権限は `capabilities/default.json` で http/https に絞る。
 - ダッシュボードの集計(日限注意の一覧と件数、今日の作業、待ち、進捗)と起動時リマインドの判定は `domain/dashboard.rs`。サイドナビのダッシュボードのバッジは `get_dashboard` の `attention_total` を使う。
 - 起動時リマインドは起動時に1回 `get_startup_reminder` を呼び、「確認しました」のボタンでだけ閉じられ(画面外のクリック、Esc、× では閉じない)、閉じたら `ack_reminder`。ウィンドウが前面に来たときに日付が変わっていれば、すべての一覧を取り直して判定をやり直す(`src/app/useStartupReminder.ts`)。
-- ガント: 行データ(予定・実績・待ちの区間、区分)は `get_gantt`(`domain/gantt.rs`)。待ちの区間は変更履歴から「待ちに入った日〜抜けた前日」(待ち中は今日まで)。日付から座標への変換、目盛り、表示期間、見えている行だけを描く処理は `src/features/gantt/geometry.ts`(Vitest でモックの座標と照合)。表示する日数は画面の幅に収まる分で、初期表示は今日が左から3分の1。日限のひし形はモックどおり超過(朱)と本日(琥珀)だけ色を付ける。
+- ガント: 行データ(予定・実績・待ちの区間、区分)は `get_gantt`(`domain/gantt.rs`)。待ちの区間は変更履歴から「待ちに入った日〜抜けた前日」(待ち中は今日まで)。日付から座標への変換、目盛り、表示期間、見えている行だけを描く処理は `src/features/gantt/geometry.ts`(Vitest でモックの座標と照合)。表示する日数は画面の幅に収まる分で、初期表示は今日が左から3分の1。日限のひし形はモックどおり超過(朱)と本日(琥珀)だけ色を付ける。予定のバーはドラッグで動かせる(v1.1 のフェーズ13)。
 - TODO 一覧は200件を超えると、画面の近くの行だけを描く(`src/features/todos/virtualRows.ts` と `useVirtualRows.ts`)。行の高さは描いたあとに測り、それまでは見積もりを使う。Aizome の Table には見えている行だけを渡し、上下の行の分の高さは外側の要素の CSS(`tbody::before` / `::after`)で取る。Table の DOM は変えない。
 - キーボードショートカット: Ctrl+N(新規TODO)、Ctrl+F(検索ダイアログ、v1.1)、Ctrl+1〜4(ダッシュボード、TODO、ガント、日報)は `src/app/shortcuts.ts`。macOS は Command。ダイアログやメニューが開いているときは効かない(Ctrl+F は、そのときも `preventDefault` だけはして WebView の検索バーを出さない)。「TODOを追加」と検索のダイアログは App が持ち、画面のボタン(サイドナビ)とショートカットで同じものを開く。Esc、Ctrl+Enter、Ctrl+E は詳細パネルとエディタ側にある。
 - 動作ログは log プラグイン(OS のログフォルダの `higiri.log`、開発ビルドは `higiri-dev.log`。1 MB で切り替えて5個残す)。起動、バックアップ、復元、想定外のエラーだけを書き、TODO の中身は書かない。画面側は `src/lib/log.ts` の `logUnexpected` を使う(`errorMessage` が AppError 以外のエラーを渡す)。
@@ -210,6 +214,12 @@ v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作る。�
     - perf(`perf.rs` の `SEARCHES`): 全件に当たる「作業」、待っている相手の「回答」、中止の理由の「不要」、2語で数件の「作業ログ 1234」、英字の大文字・小文字の「todo 0042」、0件の「該当なし」を測る。
 - ガントのドラッグ(フェーズ13)
   - 予定期間は `update_todo` で保存し、新しいコマンドは足さない。ドラッグの日数の計算は `geometry.ts` の純粋関数にして Vitest で確かめる。
+  - 作ったもの(フェーズ13)
+    - `geometry.ts`: `canDrag`(開いている4状態で、予定の開始日と終了日が両方あるもの)、`isDrag`(縦横どちらかに3px(`DRAG_THRESHOLD`)以上動いたらドラッグ。それ未満はクリック)、`dayDelta`(px から日数。最も近い日に吸着し、左右で同じ丸め)、`dragSpan`(`move` は長さを変えない。`start` と `end` は1日の長さで止める)、`barGrips`(つかむ範囲)、`dragLabelX`(日付の表示の位置)。日数は暦日で数える(営業日の設定でも休日を飛ばさない)。
+    - つかむ範囲(`GRIP`): 端はバーの外側4pxと内側6pxまで。ただし中央に移動の範囲を8px残し、バーがそれより短ければバー全体を移動にする。月表示の1日のバー(4px)は、バーをつかむと移動、すぐ外側をつかむと伸び縮み。範囲の外に出ている端にはつかむ所を作らない。上下はバーより3pxずつ広い。
+    - `useBarDrag.ts`: ドラッグの状態(`preview`)、保存中の位置(`saving`)、保存のエラーを `GanttPage` の高さで持つ(行は見えている分だけ描くので、行が描かれなくなっても続く)。ポインターは `window` で追い、つかんだ所は `setPointerCapture` する。ドラッグを始めたら `saveOpenDrafts`(`useTodoDraft.ts`)で詳細パネルの保存待ちの入力を先に保存する。Esc で取り消す(詳細パネルは閉じない)。ドラッグや Esc のあとのクリックは、どこに落ちても捨てる。`pointercancel` とウィンドウのフォーカスが外れたときは、保存せずにやめる。日付が変わっていなければ保存しない。
+    - 離したら `useUpdateTodo` で、その時点の TODO に新しい予定期間を重ねて保存する。保存して一覧を取り直すまでは新しい位置で描き、失敗したら元の位置に戻して、ガントの上に `Alert`(×で閉じられる。次のドラッグでも消える)で `errorMessage` の文を出す。
+    - ドラッグ中は、バーに `--focus` の枠を付け、バーの上に日付(「11/20〜11/27」。`rowLabel.ts` の `dragText`)を出す。カーソルは `app.css` の `.gantt-grip--move`(grab)、`.gantt-grip--resize`(ew-resize)と、ドラッグ中にルート要素に付ける `gantt-dragging--move` / `--resize`。
 - 日報テンプレート(フェーズ14)
   - 既定のテンプレートでは、今の出力(フィクスチャ)と完全に一致させる。所感・連絡事項は常に最後に置き、見出しを変えても前に書いた所感を残す。
 - JSON のエクスポートとインポート(フェーズ15)

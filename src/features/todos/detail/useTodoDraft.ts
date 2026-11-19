@@ -1,71 +1,91 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Todo, TodoFields, TodoItem } from "../../../lib/bindings";
+import type { TodoFields, TodoItem } from "../../../lib/bindings";
 import { useUpdateTodo } from "../../../lib/queries";
+import { fieldsOf, mergeDraft, settleSave, type FieldKey } from "./draft";
 
 /** Autosave delay after the last keystroke (M-4). */
 export const AUTOSAVE_MS = 1000;
 
-export function fieldsOf(t: Todo): TodoFields {
-  return {
-    title: t.title,
-    priority: t.priority,
-    due_date: t.due_date,
-    planned_start: t.planned_start,
-    planned_end: t.planned_end,
-    actual_start: t.actual_start,
-    actual_end: t.actual_end,
-    waiting_on: t.waiting_on,
-    follow_up_date: t.follow_up_date,
-    close_reason: t.close_reason,
-    memo_md: t.memo_md,
-  };
+/** Save functions of the open detail panels (one at most). */
+const openDrafts = new Set<() => Promise<void>>();
+
+/**
+ * Saves the detail panel's waiting edits now. A Gantt drag calls this when
+ * it starts, so a planned date typed in the panel just before is saved first
+ * and the drag wins.
+ */
+export function saveOpenDrafts(): void {
+  for (const save of openDrafts) void save();
 }
 
 /**
  * Local copy of a TODO's editable fields, saved with update_todo 1 second
  * after the last change and on unmount (closing the panel, switching TODOs).
- * While there are unsaved edits, updates from the server do not overwrite them.
+ * Each field remembers whether it was edited by hand and not saved yet: those
+ * keep their local value when the TODO changes elsewhere (a Gantt drag), the
+ * others take the new value. A save sends only those fields, on top of the
+ * TODO as saved just then (useUpdateTodo).
  */
 export function useTodoDraft(item: TodoItem) {
   const id = item.todo.id;
   const { mutateAsync, error, isPending, reset } = useUpdateTodo();
   const [draft, setDraft] = useState<TodoFields>(() => fieldsOf(item.todo));
+  // The current values for saves and merges between renders.
   const latest = useRef(draft);
-  latest.current = draft;
-  const dirty = useRef(false);
+  const touched = useRef<Set<FieldKey>>(new Set());
   const timer = useRef<number | null>(null);
 
+  const show = useCallback((fields: TodoFields) => {
+    latest.current = fields;
+    setDraft(fields);
+  }, []);
+
   useEffect(() => {
-    if (!dirty.current) setDraft(fieldsOf(item.todo));
-  }, [item.todo]);
+    show(mergeDraft(fieldsOf(item.todo), latest.current, touched.current));
+  }, [item.todo, show]);
 
   const save = useCallback(async () => {
     if (timer.current !== null) {
       window.clearTimeout(timer.current);
       timer.current = null;
     }
-    if (!dirty.current) return;
-    dirty.current = false;
+    if (touched.current.size === 0) return;
+    // Built when the save runs (after any write before it), not now.
+    const request: { sent: TodoFields | null } = { sent: null };
+    let saved: TodoItem;
     try {
-      await mutateAsync({ id, fields: latest.current });
+      saved = await mutateAsync({
+        id,
+        change: (current) => (request.sent = mergeDraft(fieldsOf(current), latest.current, touched.current)),
+      });
     } catch {
       // Keep the edits; the error is shown and the next change retries.
-      dirty.current = true;
+      return;
     }
-  }, [id, mutateAsync]);
+    if (request.sent === null) return;
+    const next = settleSave(latest.current, touched.current, request.sent, fieldsOf(saved.todo));
+    touched.current = next.touched;
+    show(next.draft);
+  }, [id, mutateAsync, show]);
 
   const set = useCallback(
     <K extends keyof TodoFields>(key: K, value: TodoFields[K]) => {
-      setDraft((d) => ({ ...d, [key]: value }));
-      dirty.current = true;
+      show({ ...latest.current, [key]: value });
+      touched.current.add(key);
       reset();
       if (timer.current !== null) window.clearTimeout(timer.current);
       timer.current = window.setTimeout(() => void save(), AUTOSAVE_MS);
     },
-    [save, reset],
+    [save, reset, show],
   );
 
-  useEffect(() => () => void save(), [save]);
+  useEffect(() => {
+    openDrafts.add(save);
+    return () => {
+      openDrafts.delete(save);
+      void save();
+    };
+  }, [save]);
 
   return { draft, set, save, error, saving: isPending };
 }

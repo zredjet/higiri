@@ -1,7 +1,7 @@
 // Gantt geometry: dates -> x, rows -> y, header labels, visible range.
 // Pure functions (tested in geometry.test.ts). Sizes are the mock's
 // (docs/ui-mock/README.md「ガントの寸法」) and the design's day widths.
-import type { DaySpan, Holiday } from "../../lib/bindings";
+import type { DaySpan, Holiday, Status } from "../../lib/bindings";
 
 export type Scale = "day" | "week" | "month";
 
@@ -81,6 +81,96 @@ export function spanRect(r: Range, span: DaySpan, dayWidth: number): { x: number
   const to = Math.min(r.days - 1, dayIndex(r.start, span.end));
   if (to < from) return null;
   return { x: from * dayWidth, width: (to - from + 1) * dayWidth };
+}
+
+// ---- dragging a planned bar (G-6) ------------------------------------------------
+
+/** What a drag changes: the whole span, or only its start or end. */
+export type DragMode = "move" | "start" | "end";
+
+const OPEN_STATUSES: ReadonlySet<Status> = new Set<Status>(["todo", "doing", "waiting", "hold"]);
+
+/** Only the planned bars of open TODOs (both planned dates set) can be dragged. */
+export function canDrag(status: Status, planned: DaySpan | null): planned is DaySpan {
+  return planned !== null && OPEN_STATUSES.has(status);
+}
+
+/** A pointer that moved less than this (px, on both axes) clicked. */
+export const DRAG_THRESHOLD = 3;
+
+/** True once the pointer moved far enough to drag instead of click. */
+export function isDrag(dx: number, dy: number): boolean {
+  return Math.abs(dx) >= DRAG_THRESHOLD || Math.abs(dy) >= DRAG_THRESHOLD;
+}
+
+/**
+ * Whole days a drag of `dx` px moves, snapped to the nearest day (the same
+ * both ways). Works for every scale: pass its day width.
+ */
+export function dayDelta(dx: number, dayWidth: number): number {
+  const days = Math.round(Math.abs(dx) / dayWidth);
+  return days === 0 ? 0 : Math.sign(dx) * days;
+}
+
+/**
+ * The span after a drag of `delta` calendar days (holidays are not skipped,
+ * whatever the day count setting). `move` keeps the length; `start` and
+ * `end` stop where the span is one day long, so the start never passes the end.
+ */
+export function dragSpan(span: DaySpan, mode: DragMode, delta: number): DaySpan {
+  if (mode === "move") return { start: addDays(span.start, delta), end: addDays(span.end, delta) };
+  if (mode === "start") {
+    const start = addDays(span.start, delta);
+    return { start: start > span.end ? span.end : start, end: span.end };
+  }
+  const end = addDays(span.end, delta);
+  return { start: span.start, end: end < span.start ? span.start : end };
+}
+
+/**
+ * Grab areas of a planned bar, in px. An end grip reaches `outside` px
+ * beyond the bar and up to `inside` px into it, leaving at least `moveMin` px
+ * of the bar (all of it when shorter) to move it. `padY` widens every grip
+ * above and below the thin bar.
+ */
+export const GRIP = { outside: 4, inside: 6, moveMin: 8, padY: 3 } as const;
+
+export interface Grips {
+  move: { x: number; width: number };
+  /** null when the start is outside the range (not on screen). */
+  start: { x: number; width: number } | null;
+  end: { x: number; width: number } | null;
+}
+
+/**
+ * Where to grab a planned bar: its ends resize it, the rest moves it. Even a
+ * one-day bar on the month scale (4px) can do both: grabbing the bar moves
+ * it, grabbing just outside an end resizes it. null when the bar is outside
+ * the range.
+ */
+export function barGrips(r: Range, span: DaySpan, dayWidth: number): Grips | null {
+  const rect = spanRect(r, span, dayWidth);
+  if (!rect) return null;
+  const startShown = dayIndex(r.start, span.start) >= 0;
+  const endShown = dayIndex(r.start, span.end) < r.days;
+  const ends = Number(startShown) + Number(endShown);
+  const inside = ends === 0 ? 0 : Math.min(GRIP.inside, Math.max(0, (rect.width - GRIP.moveMin) / ends));
+  const moveFrom = rect.x + (startShown ? inside : 0);
+  const moveTo = rect.x + rect.width - (endShown ? inside : 0);
+  return {
+    move: { x: moveFrom, width: moveTo - moveFrom },
+    start: startShown ? { x: rect.x - GRIP.outside, width: GRIP.outside + inside } : null,
+    end: endShown ? { x: moveTo, width: inside + GRIP.outside } : null,
+  };
+}
+
+/**
+ * Left edge (chart x) of the dates shown while dragging: above the bar's
+ * start, kept inside the chart even when the bar is not.
+ */
+export function dragLabelX(r: Range, span: DaySpan, dayWidth: number, labelWidth: number, chartWidth: number): number {
+  const x = dayIndex(r.start, span.start) * dayWidth;
+  return Math.max(0, Math.min(x, chartWidth - labelWidth));
 }
 
 /** Center x of a day, or null when the day is outside the range. */

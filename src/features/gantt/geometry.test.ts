@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   addDays,
+  barGrips,
+  canDrag,
   DAY_WIDTH,
   dayCenter,
+  dayDelta,
   dayIndex,
+  dragLabelX,
+  dragSpan,
   headerRows,
   holidayLabels,
   holidayNames,
+  isDrag,
   layoutRows,
   rangeEnd,
   spanRect,
@@ -89,6 +95,128 @@ describe("bars (positions from the mock)", () => {
       [17, 1],
       [19, 2],
     ]);
+  });
+});
+
+describe("dragging a planned bar (G-6)", () => {
+  const span = { start: "2026-11-20", end: "2026-11-27" };
+
+  it("drags the planned bars of open TODOs only", () => {
+    for (const status of ["todo", "doing", "waiting", "hold"] as const) expect(canDrag(status, span)).toBe(true);
+    expect(canDrag("done", span)).toBe(false);
+    expect(canDrag("cancelled", span)).toBe(false);
+    // No bar without both planned dates (get_gantt sends planned: null).
+    expect(canDrag("doing", null)).toBe(false);
+  });
+
+  it("treats moves under 3px as clicks", () => {
+    expect(isDrag(0, 0)).toBe(false);
+    expect(isDrag(2, -2)).toBe(false);
+    expect(isDrag(2.9, 2.9)).toBe(false);
+    expect(isDrag(3, 0)).toBe(true);
+    expect(isDrag(0, -3)).toBe(true);
+  });
+
+  it("snaps to whole days on every scale, the same both ways", () => {
+    // 日 (32px a day)
+    expect(dayDelta(0, DAY_WIDTH.day)).toBe(0);
+    expect(dayDelta(15, DAY_WIDTH.day)).toBe(0);
+    expect(dayDelta(-15, DAY_WIDTH.day)).toBe(0); // not -0
+    expect(dayDelta(16, DAY_WIDTH.day)).toBe(1);
+    expect(dayDelta(-16, DAY_WIDTH.day)).toBe(-1);
+    expect(dayDelta(100, DAY_WIDTH.day)).toBe(3);
+    // 週 (12px)
+    expect(dayDelta(30, DAY_WIDTH.week)).toBe(3);
+    expect(dayDelta(-30, DAY_WIDTH.week)).toBe(-3);
+    // 月 (4px): the 3px that start a drag already move a day.
+    expect(dayDelta(1, DAY_WIDTH.month)).toBe(0);
+    expect(dayDelta(3, DAY_WIDTH.month)).toBe(1);
+    expect(dayDelta(-3, DAY_WIDTH.month)).toBe(-1);
+    expect(dayDelta(-61, DAY_WIDTH.month)).toBe(-15);
+  });
+
+  it("moves the span without changing its length", () => {
+    expect(dragSpan(span, "move", 0)).toEqual(span);
+    expect(dragSpan(span, "move", 3)).toEqual({ start: "2026-11-23", end: "2026-11-30" });
+    expect(dragSpan(span, "move", -21)).toEqual({ start: "2026-10-30", end: "2026-11-06" });
+    expect(dragSpan({ start: "2026-12-28", end: "2026-12-31" }, "move", 3)).toEqual({
+      start: "2026-12-31",
+      end: "2027-01-03",
+    });
+  });
+
+  it("counts calendar days: weekends and holidays are not skipped", () => {
+    // Fri 11/20 + 1 is Sat 11/21; + 3 is 11/23 (勤労感謝の日).
+    const day = { start: "2026-11-20", end: "2026-11-20" };
+    expect(dragSpan(day, "move", 1)).toEqual({ start: "2026-11-21", end: "2026-11-21" });
+    expect(dragSpan(day, "end", 3)).toEqual({ start: "2026-11-20", end: "2026-11-23" });
+  });
+
+  it("resizes one end and stops at a one-day span", () => {
+    expect(dragSpan(span, "start", -2)).toEqual({ start: "2026-11-18", end: "2026-11-27" });
+    expect(dragSpan(span, "start", 7)).toEqual({ start: "2026-11-27", end: "2026-11-27" });
+    expect(dragSpan(span, "start", 10)).toEqual({ start: "2026-11-27", end: "2026-11-27" });
+    expect(dragSpan(span, "end", 3)).toEqual({ start: "2026-11-20", end: "2026-11-30" });
+    expect(dragSpan(span, "end", -7)).toEqual({ start: "2026-11-20", end: "2026-11-20" });
+    expect(dragSpan(span, "end", -30)).toEqual({ start: "2026-11-20", end: "2026-11-20" });
+  });
+
+  it("puts grips on both ends and moves with the rest", () => {
+    // 移行手順書のドラフト (planned 11/11–11/18): x 64, 256px wide.
+    expect(barGrips(MOCK, { start: "2026-11-11", end: "2026-11-18" }, W)).toEqual({
+      move: { x: 70, width: 244 },
+      start: { x: 60, width: 10 },
+      end: { x: 314, width: 10 },
+    });
+    // One day on the day scale (32px): 10px grips, 20px to move.
+    expect(barGrips(MOCK, { start: "2026-11-19", end: "2026-11-19" }, W)).toEqual({
+      move: { x: 326, width: 20 },
+      start: { x: 316, width: 10 },
+      end: { x: 346, width: 10 },
+    });
+  });
+
+  it("keeps short bars on the month scale movable and resizable", () => {
+    const year: Range = { start: "2026-11-01", days: 270 };
+    const m = DAY_WIDTH.month;
+    // One day (4px): the bar moves; 4px just outside each end resize it.
+    expect(barGrips(year, { start: "2026-11-19", end: "2026-11-19" }, m)).toEqual({
+      move: { x: 72, width: 4 },
+      start: { x: 68, width: 4 },
+      end: { x: 76, width: 4 },
+    });
+    // Three days (12px): 8px in the middle move it, the ends reach 2px in.
+    expect(barGrips(year, { start: "2026-11-19", end: "2026-11-21" }, m)).toEqual({
+      move: { x: 74, width: 8 },
+      start: { x: 68, width: 6 },
+      end: { x: 82, width: 6 },
+    });
+  });
+
+  it("leaves out the grip of an end outside the range", () => {
+    expect(barGrips(MOCK, { start: "2026-11-01", end: "2026-11-10" }, W)).toEqual({
+      move: { x: 0, width: 58 },
+      start: null,
+      end: { x: 58, width: 10 },
+    });
+    expect(barGrips(MOCK, { start: "2026-12-03", end: "2026-12-31" }, W)).toEqual({
+      move: { x: 774, width: 58 },
+      start: { x: 764, width: 10 },
+      end: null,
+    });
+    expect(barGrips(MOCK, { start: "2026-11-01", end: "2026-12-31" }, W)).toEqual({
+      move: { x: 0, width: 832 },
+      start: null,
+      end: null,
+    });
+    expect(barGrips(MOCK, { start: "2026-10-01", end: "2026-10-31" }, W)).toBeNull();
+  });
+
+  it("keeps the dates shown while dragging inside the chart", () => {
+    expect(dragLabelX(MOCK, span, W, 90, 832)).toBe(352);
+    expect(dragLabelX(MOCK, { start: "2026-11-01", end: "2026-11-12" }, W, 90, 832)).toBe(0);
+    expect(dragLabelX(MOCK, { start: "2026-12-03", end: "2026-12-05" }, W, 90, 832)).toBe(742);
+    expect(dragLabelX(MOCK, { start: "2027-01-10", end: "2027-01-12" }, W, 90, 832)).toBe(742);
   });
 });
 

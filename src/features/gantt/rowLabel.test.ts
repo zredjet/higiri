@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Assessment, GanttRow, Todo } from "../../lib/bindings";
-import { dueMarkText, rowLabel } from "./rowLabel";
+import { dragText, dueMarkText, rowLabel } from "./rowLabel";
 
 function row(todo: Partial<Todo>, assessment: Partial<Assessment> = {}): GanttRow {
   return {
@@ -138,5 +138,13 @@ describe("dueMarkText", () => {
       "休日のため前倒し",
     );
     expect(dueMarkText(a({ urgency: "due_soon", days_until_due: 1, business_days: true, due_shifted: true }))).toBeNull();
+  });
+});
+
+describe("dragText", () => {
+  it("shows the span being dragged as in the design", () => {
+    expect(dragText({ start: "2026-11-20", end: "2026-11-27" })).toBe("11/20〜11/27");
+    expect(dragText({ start: "2026-12-31", end: "2027-01-04" })).toBe("12/31〜1/4");
+    expect(dragText({ start: "2026-11-20", end: "2026-11-20" })).toBe("11/20〜11/20");
   });
 });

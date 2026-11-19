@@ -1135,6 +1135,59 @@ input[type="date"][data-empty="true"]:not(:focus) {
   fill: var(--ai-200);
 }
 
+.gantt-planned.is-dragging {
+  stroke: var(--focus);
+  stroke-width: 1;
+}
+
+/* Grab areas of a planned bar (G-6): the middle moves it, the ends resize it. */
+.gantt-grip {
+  fill: transparent;
+  touch-action: none;
+}
+
+.gantt-grip--move {
+  cursor: grab;
+}
+
+.gantt-grip--resize {
+  cursor: ew-resize;
+}
+
+/* While dragging, the cursor stays the same wherever the pointer goes. */
+:root.gantt-dragging {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+:root.gantt-dragging--move,
+:root.gantt-dragging--move * {
+  cursor: grabbing;
+}
+
+:root.gantt-dragging--resize,
+:root.gantt-dragging--resize * {
+  cursor: ew-resize;
+}
+
+/* The dates of the bar being dragged, just above it (width: dragLabelWidth in GanttPage.tsx). */
+.gantt-drag-label {
+  position: absolute;
+  transform: translateY(-100%);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 .gantt-actual {
   fill: var(--ai-600);
 }
