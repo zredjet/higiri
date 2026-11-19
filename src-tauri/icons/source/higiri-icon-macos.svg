@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Higiri app icon (design D3), macOS version: the same drawing on Apple's
+       icon grid (an 824 px rounded square centered on the 1024 px canvas, with
+       a soft shadow). Used for icon.icns only. -->
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185.4" fill="#f6f7fa" stroke="#d9dee6" stroke-width="6" filter="url(#shadow)"/>
+  <rect x="248.32" y="248.32" width="527.36" height="527.36" rx="82.4" fill="#1d448a"/>
+  <rect x="297.76" y="297.76" width="428.48" height="428.48" rx="49.44" fill="none" stroke="#ffffff" stroke-width="24.72"/>
+  <path d="M396.64 520.24 L479.04 602.64 L635.6 429.6" fill="none" stroke="#ffffff" stroke-width="65.92" stroke-linecap="round" stroke-linejoin="round"/>
+  <polygon points="759.2,190.64 833.36,264.8 759.2,338.96 685.04,264.8" fill="#da452c" stroke="#f6f7fa" stroke-width="24.72" stroke-linejoin="round"/>
+</svg>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Higiri app icon (design D3): an indigo seal with a check, and the
+       vermilion diamond that marks a 日限 (due date). Full-bleed version for
+       Windows (.ico) and the PNG sizes. Colors are Aizome tokens:
+       sumi-50 #f6f7fa, sumi-300 #c5cbd4, ai-700 #1d448a, shu-500 #da452c. -->
+  <rect x="7.68" y="7.68" width="1008.64" height="1008.64" rx="225" fill="#f6f7fa" stroke="#c5cbd4" stroke-width="15.36"/>
+  <rect x="184.32" y="184.32" width="655.36" height="655.36" rx="102.4" fill="#1d448a"/>
+  <rect x="245.76" y="245.76" width="532.48" height="532.48" rx="61.44" fill="none" stroke="#ffffff" stroke-width="30.72"/>
+  <path d="M368.64 522.24 L471.04 624.64 L665.6 409.6" fill="none" stroke="#ffffff" stroke-width="81.92" stroke-linecap="round" stroke-linejoin="round"/>
+  <polygon points="819.2,112.64 911.36,204.8 819.2,296.96 727.04,204.8" fill="#da452c" stroke="#f6f7fa" stroke-width="30.72" stroke-linejoin="round"/>
+</svg>
