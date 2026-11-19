@@ -14,16 +14,19 @@
 | 場所 | 中身 |
 | --- | --- |
 | `docs/README.md` | 資料の一覧、優先順位、写しを作るときに分かっている注意点 |
-| `docs/requirements-design.md` | 要件41件、非機能要件、リリース段階、アーキテクチャ、DDL、主要ロジック、画面構成、コマンド一覧、未決事項 |
+| `docs/requirements-design.md` | 要件41件、非機能要件、リリース段階、アーキテクチャ、DDL、主要ロジック、画面構成、コマンド一覧、未決事項。v1.1 の詳細(「v1.1の詳細」の節) |
 | `docs/implementation-plan.md` | MVPまでのフェーズ分けと、各フェーズの完了条件 |
+| `docs/implementation-plan-v1.1.md` | v1.1 のフェーズ分け(フェーズ10〜16)と、各フェーズの完了条件。進め方(オーケストレーター方式) |
 | `docs/ui-mock/` | 6画面のモック。見た目は `screenshots/`、正確な値と文言は `.dc.html` |
 | `docs/aizome/` | デザインシステム Aizome の方針、トークン、部品のCSS・型定義・参考実装 |
 
 ## 作る範囲
 
-MVP(v1.0)だけを作る。設計書の「段階」が v1.1 と将来のものは作らない。ただしデータ構造の備え(`todos.parent_id`、`reports.kind`)は設計書どおり最初から入れる。
+v1.1 までを作る。設計書の「段階」が将来(v2)のものは作らない。データ構造の備え(`todos.parent_id`、`reports.kind`)は設計書どおり入れたままにする。
 
-設計書の「未決事項」6点は、書いてある仮定のまま進める。仮定を変える判断は利用者がする。
+MVP(v1.0)は完成している。v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ順に作り、仕様は設計書の「v1.1の詳細」に従う。v1.1 の決めごとは下の「v1.1 の決めごと」にまとめてあり、まだ作っていないものを含む。
+
+設計書の「未決事項」6点のうち、残り日数の数え方は v1.1 で利用者が決めた(設定で暦日と営業日を切り替え、初期値は暦日)。残る5点は、書いてある仮定のまま進める。仮定を変える判断は利用者がする。
 
 ## 構成(変えない決めごと)
 
@@ -37,8 +40,8 @@ SQLite(アプリのデータフォルダ内の todo.db)
 ```
 
 - 判定と集計は Rust 側に置く。画面側で日限注意の区分や残り日数を計算し直さない。
-- `domain/` の関数は現在時刻を自分で取らない。今日の日付(と現在時刻)は引数で受け取る。時計を読むのは `commands/` だけ。
-- 日限注意の判定は `classify(todo, today, soon_days)` の1か所。ダッシュボード、リマインド、一覧のバッジ、日報のすべてがこれを使う。
+- `domain/` の関数は現在時刻を自分で取らない。今日の日付(と現在時刻)は引数で受け取る。時計を読むのは `commands/` と常駐のタイマーだけで、どちらも `commands::clock` を使う(常駐のタイマーは v1.1 のフェーズ10で作る)。
+- 日限注意の判定は `classify` の1か所。ダッシュボード、リマインド、一覧のバッジ、日報のすべてがこれを使う。今は `classify(todo, today, soon_days)`。v1.1 のフェーズ11で `classify(todo, today, &rules)` にする(`rules` は `soon_days` と `WorkCalendar` を持つ)。
 - ステータス変更は必ず `change_status` を通す。実績日の自動入力と `todo_events` への記録を1トランザクションで行う。`update_todo` でステータスを直接書き換えない。
 - 画面から呼べるのは設計書のコマンド一覧にあるものだけ。足すときは理由を添えて相談する。
 - 画面側からのコマンド呼び出しは、tauri-specta が生成する `src/lib/bindings.ts` 経由だけにする。画面のコードに `invoke` を直接書かない。
@@ -46,11 +49,11 @@ SQLite(アプリのデータフォルダ内の todo.db)
   - 型のフィールド名は Rust と同じ snake_case のまま(`project_id` など)。コマンドの引数名だけは Tauri の規則で camelCase になる。
   - i64 は TS の `number` として出す(`dangerously_cast_bigints_to_number`)。ID と件数は 2^53 を超えない。
 - コマンドを足すときは、`commands::specta_builder()`、`src-tauri/build.rs` の `APP_COMMANDS`、`capabilities/default.json` の `allow-*` の3か所を揃える。capability とバインディングのずれはテストで検出する。
-- コマンドは「時計を読んで内側の関数を呼ぶだけの `#[tauri::command]`」と「`&SqlitePool` と `today` / `now` を受け取る内側の関数」に分け、テストは内側の関数をメモリ上の DB で呼ぶ。
+- コマンドは「時計を読んで内側の関数を呼ぶだけの `#[tauri::command]`」と「`&SqlitePool` と `today` / `now` を受け取る内側の関数」に分け、テストは内側の関数をメモリ上の DB で呼ぶ。v1.1 で足す OS 側への反映(自動起動の登録、通知のタイマーの計算し直し、×ボタンの動き)は `#[tauri::command]` の層で行い、内側の関数は DB だけを扱う。
 - 画面に返すエラーは `AppError { kind, message }` の1種類。`message` は利用者向けの日本語で「何が起きたか+どうすればよいか」。DB の詳細は画面に出さない。
 - ステータスの遷移: 開いている4状態(未着手・作業中・待ち・保留)の間は自由。完了と中止にはその4状態から入れる。完了から戻せるのは作業中(再開)だけ、中止から戻せるのは未着手だけ。完了と中止の間は行き来できない。待ちから抜けると待ちの3項目(`waiting_on`、`waiting_since`、`follow_up_date`)を空にする。
 - 公式の sql プラグインは使わない(画面側からSQLを発行する方式のため)。
-- ファイルへの書き出し(日報の .md、バックアップ)は Rust 側で行う。保存先ダイアログも Rust 側で開き、画面から任意のパスを渡して書かせない。
+- ファイルへの書き出し(日報の .md、バックアップ、v1.1 の JSON)と、v1.1 の JSON の読み込みは Rust 側で行う。保存先やファイルを選ぶダイアログも Rust 側で開き、画面から任意のパスを渡して読み書きさせない。
 
 ## データの決めごと
 
@@ -73,7 +76,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
 
   - 入力をそのまま入れる列(`waiting_on`、`follow_up_date`、`close_reason`)は、空に戻したときだけ `auto` に入る。入力した値は `waiting_on` / `follow_up_date` / `reason` のキーに入る。
   - 例: 作業中から待ちにした行は `{"waiting_on":"認証担当の回答","follow_up_date":"2026-11-20","auto":{"waiting_since":"2026-11-19"}}`。完了から再開した行は `{"auto":{"actual_end":null,"closed_at":null}}`。
-- `settings` は1キー1行で、値は JSON。キーは `reminder_frequency`(`"every_launch"` / `"once_per_day"`)、`soon_days`(数値)、`follow_up_days`(数値)、`last_reminded_on`(`"YYYY-MM-DD"` か `null`)、`theme`(`"light"` / `"dark"` / `"system"`)。読めない値は既定値として扱う。
+- `settings` は1キー1行で、値は JSON。キーは `reminder_frequency`(`"every_launch"` / `"once_per_day"`)、`soon_days`(数値)、`follow_up_days`(数値)、`last_reminded_on`(`"YYYY-MM-DD"` か `null`)、`theme`(`"light"` / `"dark"` / `"system"`)。読めない値は既定値として扱う。v1.1 で足すキーは「v1.1 の決めごと」にある。
 - 接続のたびに外部キー制約を有効にし、WALモードにする。
 - 適用済みのマイグレーションファイルは書き換えない。変更は新しいファイルを足す。
 - DBへの接続なしで `cargo build` が通る構成にする(`query!` 系マクロを使うなら `cargo sqlx prepare` の成果物をコミットする)。
@@ -104,7 +107,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
 - キーボードショートカット: Ctrl+N(新規TODO)と Ctrl+1〜4(ダッシュボード、TODO、ガント、日報)は `src/app/shortcuts.ts`。macOS は Command。ダイアログやメニューが開いているときは効かない。「TODOを追加」のダイアログは App が持ち、画面のボタンとショートカットで同じものを開く。Esc、Ctrl+Enter、Ctrl+E は詳細パネルとエディタ側にある。
 - 動作ログは log プラグイン(OS のログフォルダの `higiri.log`、開発ビルドは `higiri-dev.log`。1 MB で切り替えて5個残す)。起動、バックアップ、復元、想定外のエラーだけを書き、TODO の中身は書かない。画面側は `src/lib/log.ts` の `logUnexpected` を使う(`errorMessage` が AppError 以外のエラーを渡す)。
 - 多重起動の防止(single-instance)は配布版だけで有効にする。開発ビルドは別のDBを使うので、インストールした版と同時に動かせるようにしている。ウィンドウの位置・大きさ・最大化は window-state で次回に戻す。
-- 権限(`capabilities/default.json`)は、アプリのコマンドと、opener の http/https、clipboard-manager の `allow-write-text`、log の `allow-log` だけ。`core:default` は付けない(画面は Tauri のウィンドウ・イベント・パスの API を使わない)。
+- 権限(`capabilities/default.json`)は、アプリのコマンドと、opener の http/https、clipboard-manager の `allow-write-text`、log の `allow-log` だけ。`core:default` は付けない(画面は Tauri のウィンドウ・イベント・パスの API を使わない)。v1.1 で使う notification と autostart のプラグインは Rust からだけ使い、画面側には権限を付けない。
 - 日報: 節の組み立ては `domain/report.rs`。過去の日は、本日の作業と本日完了・中止をその日の記録から、待ち・明日の予定・日限注意を今の TODO の状態から対象日を今日として作る(待ちは、対象日より後に待ちに入ったものを除く)。中身のない節は「- なし」。所感・連絡事項は `## 所感・連絡事項` の見出しより後ろで、再生成しても残る。設計書の出力例との完全一致を `commands/reports.rs` のテスト(`tests/fixtures/daily_report_2026-11-19.md`)で確かめている。
 - 日報の画面(`src/features/report/`): 日付を開くと保存済みの日報を、なければ生成した日報を出す(開いただけでは保存しない)。編集が止まって1秒後と、再生成・コピー・.md で保存のときに `save_report` で保存する。コピーは clipboard-manager の `writeText`(権限は `clipboard-manager:allow-write-text` だけ)。.md の保存先ダイアログは dialog プラグインを Rust 側で開くので、画面側に dialog の権限は付けない。
 - プロジェクトの作成はサイドナビの「プロジェクトを追加」、編集・アーカイブ・削除はプロジェクトのページの「プロジェクトを編集」から行う。アーカイブしたプロジェクトは設定画面のカードで一覧し、元に戻す・削除する。削除は確認ダイアログを挟む。
@@ -114,6 +117,59 @@ SQLite(アプリのデータフォルダ内の todo.db)
 - 色だけで状態を伝えない。区分名やステータス名を必ず文字で添える。
 - 文言は `docs/aizome/README.md` の「文章の基本」に従う(です・ます調、ボタンは動詞、「!」と絵文字は使わない)。モックにある文言はそのまま使う。
 - Markdown の表示は HTML を無害化し、リンクは OS の既定ブラウザで開く。
+
+## v1.1 の決めごと
+
+v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作る。この節には、まだ作っていないものも含む。ファイルの場所など実装で決まることは、作ったフェーズでこのファイルの各節に足す。仕様の詳細は設計書の「v1.1の詳細」にある。
+
+- テーブル定義は変えない(マイグレーションを足さない)。新しい値は `settings` のキーに入れ、検索は既存の列を `LIKE` で引く(FTS5 は使わない)。
+- 足すコマンドは次の5つだけ(27個から32個になる)。上の「構成」の3か所をそろえ、件数のテスト(`commands/mod.rs`)も直す。
+
+  | コマンド | フェーズ | 用途 |
+  | --- | --- | --- |
+  | `test_notification` | 10 | 設定画面の「通知を試す」 |
+  | `list_holidays` | 11 | 期間(3年まで)の休日(祝日と独自の休日、名前つき)を返す。ガントの網掛けと設定画面に使う |
+  | `search_todos` | 12 | 全文検索。当たった TODO と、当たった場所・前後の文を、最大100件と全体の件数で返す |
+  | `export_data` | 15 | 全データを JSON で書き出す。保存先のダイアログは Rust 側で開く |
+  | `import_data` | 15 | JSON を取り込む。ファイルを選ぶダイアログは Rust 側で開き、検査してから全データを置き換える |
+
+- 自動起動、×ボタンの動き、通知の時刻、日数の数え方、日報テンプレートは `update_settings` で扱う。OS 側への反映は `#[tauri::command]` の層で行う(上の「構成」)。復元と取り込みで settings が入れ替わったときも同じく反映する。
+- `settings` に足すキー(読めない値は既定値として扱う)
+
+  | キー | 値 | 既定値 | フェーズ |
+  | --- | --- | --- | --- |
+  | `notify_enabled` | 真偽 | `true` | 10 |
+  | `notify_times` | `["HH:MM", …]`(1〜5個、重複なし) | `["09:00", "12:55"]` | 10 |
+  | `last_notified_at` | UTC の日時(上の日時の形)か `null` | `null` | 10 |
+  | `close_to_tray` | 真偽 | `true` | 10 |
+  | `autostart` | 真偽 | `false` | 10 |
+  | `tray_hint_shown` | 真偽 | `false` | 10 |
+  | `day_count` | `"calendar"` / `"business"` | `"calendar"` | 11 |
+  | `custom_holidays` | `[{name, start, end, yearly}]` | `[]` | 11 |
+  | `report_template` | 日報テンプレートの構造(設計書の「日報テンプレート」) | 今の日報と同じ形 | 14 |
+
+  - `last_notified_at` と `tray_hint_shown` は、`last_reminded_on` と同じくアプリが書く値で、`update_settings` の入力(`SettingsInput`)には入れない(設定画面の保存で古い値に戻さないため)。
+- 常駐と通知(フェーズ10)
+  - notification と autostart のプラグインは Rust からだけ使う。トレイはプラグインではなく Tauri 本体の `tray-icon` の機能で作る。
+  - 通知は決まった時刻(`notify_times`)にだけ出す。1分おきの監視はしない。常駐のタイマーは、時計を `commands::clock` で読み、件数をダッシュボードと同じ集計(`domain::dashboard`)で出す。どの時刻を通知するか、次に起きるまでの待ち時間(最長10分)は、`domain/` の純粋関数で決める。
+  - 日限注意が0件なら通知しない。その時刻も通知済みとして `last_notified_at` を保存する。
+  - 自動起動は `--autostart` の引数つきで登録し、そのときはウィンドウを出さずにトレイだけで起動する。single-instance の2つ目の起動も、`--autostart` つきならウィンドウを出さない。自動起動を OS に登録するのは配布版だけ。
+  - ×ボタンは、`close_to_tray` がオンなら隠してトレイに残す。トレイを作れなかったときは、隠さずに終了する。
+- 営業日(フェーズ11)
+  - 判定は `classify(todo, today, &rules)` の1か所のまま。休日と営業日の計算も `domain/` の純粋関数にする。
+  - 暦日の設定(初期値)では、今の判定と表示を何も変えない。既存のテストとフィクスチャはそのまま通す。
+  - 待ち日数と確認日からの日数は、営業日の設定でも暦日で数える。
+  - 「営業日」の文言と「休日のため前倒し」は、判定の結果(`business_days`、`due_shifted`)を見て出す。画面で日数を数え直さない。確認日の初期値も Rust 側で計算して返す。
+  - 祝日は規則から計算する(1980〜2099年)。外部から取り込まない。
+- 全文検索(フェーズ12)
+  - 入口は検索ダイアログで、Ctrl+F(macOS は Command+F)とサイドナビの「検索」で開く。ダイアログは App が持つ。「検索」は画面ではないので `Route` には足さない。
+  - 語の分割、前後の文の切り出し、並び順は Rust 側で作る。画面は受け取ったものを並べるだけ。
+- ガントのドラッグ(フェーズ13)
+  - 予定期間は `update_todo` で保存し、新しいコマンドは足さない。ドラッグの日数の計算は `geometry.ts` の純粋関数にして Vitest で確かめる。
+- 日報テンプレート(フェーズ14)
+  - 既定のテンプレートでは、今の出力(フィクスチャ)と完全に一致させる。所感・連絡事項は常に最後に置き、見出しを変えても前に書いた所感を残す。
+- JSON のエクスポートとインポート(フェーズ15)
+  - 取り込みは全データの置き換え。復元と同じく、作業用の DB で検査してから今のデータを `before-restore-<UTC日時>.db` に退避し、`ATTACH` して1トランザクションで入れ替える。自動起動の設定(`autostart`)だけは今の PC の値のまま残す。
 
 ## 品質の決めごと
 
@@ -126,7 +182,8 @@ SQLite(アプリのデータフォルダ内の todo.db)
 
 ## 進め方
 
-- `docs/implementation-plan.md` のフェーズ順に進め、フェーズの終わりにテスト結果と、利用者に画面で確認してほしい操作の一覧を報告して止まる。
+- `docs/implementation-plan.md`(MVP、フェーズ0〜8)と `docs/implementation-plan-v1.1.md`(v1.1、フェーズ10〜16)のフェーズ順に進め、フェーズの終わりにテスト結果と、利用者に画面で確認してほしい操作の一覧を報告して止まる。
+- v1.1 はオーケストレーター方式で進める。フェーズごとにサブセッションが作業してコミットし、オーケストレーターが差分を確かめてから利用者に報告する(`implementation-plan-v1.1.md` の「進め方」)。
 - 設計書と違う実装にしたいとき、設計書に書いていないことを決める必要があるときは、理由と選択肢を添えて先に相談する。
 - 利用者への報告とUIの文言は日本語。コード内の識別子は英語。
 
