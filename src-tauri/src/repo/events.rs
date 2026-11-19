@@ -84,6 +84,17 @@ pub async fn list_by_todo(conn: &mut SqliteConnection, todo_id: i64) -> Result<V
     )
 }
 
+/// Every status change of every TODO (待ち spans of the Gantt chart).
+pub async fn list_status_events(conn: &mut SqliteConnection) -> Result<Vec<TodoEvent>> {
+    collect(
+        sqlx::query_as::<_, EventRow>(
+            "SELECT * FROM todo_events WHERE kind = 'status' ORDER BY todo_id, occurred_at, id",
+        )
+        .fetch_all(&mut *conn)
+        .await?,
+    )
+}
+
 /// Events that happened on one day (daily report material).
 pub async fn list_by_date(conn: &mut SqliteConnection, date: NaiveDate) -> Result<Vec<TodoEvent>> {
     collect(

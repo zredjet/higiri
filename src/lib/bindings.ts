@@ -44,6 +44,12 @@ export const commands = {
 	getStartupReminder: (options?: InvokeOptions) => __TAURI_INVOKE<StartupReminder | null>("get_startup_reminder", undefined, options),
 	/**  Records that today's reminder was seen (closing the dialog). */
 	ackReminder: (options?: InvokeOptions) => __TAURI_INVOKE<null>("ack_reminder", undefined, options),
+	/**
+	 *  Rows of the Gantt chart, grouped by project: planned and actual spans,
+	 *  待ち spans and the TODO with its 日限注意 category. All rows are returned;
+	 *  the screen draws the days it shows.
+	 */
+	getGantt: (query: GanttQuery, options?: InvokeOptions) => __TAURI_INVOKE<Gantt>("get_gantt", { query }, options),
 };
 
 /* Types */
@@ -87,6 +93,12 @@ export type Dashboard = {
 	waiting: TodoItem[],
 	/**  プロジェクトの進捗 (active projects). */
 	projects: ProjectSummary[],
+};
+
+/**  Days `start..=end`. */
+export type DaySpan = {
+	start: string,
+	end: string,
 };
 
 /**  The 日限 filter of the list. */
@@ -135,6 +147,38 @@ export type EventNote = {
 	follow_up_date?: string | null,
 	reason?: string | null,
 	auto?: { [key in string]: string | null } | null,
+};
+
+export type Gantt = {
+	today: string,
+	projects: GanttProject[],
+};
+
+export type GanttProject = {
+	project: Project,
+	rows: GanttRow[],
+};
+
+export type GanttQuery = {
+	/**  Only this project; `null` = all active projects. */
+	project_id: number | null,
+	/**  完了したTODOも表示 (default on in the screen). */
+	include_done: boolean,
+	/**  中止したTODOも表示 (default off in the screen). */
+	include_cancelled: boolean,
+};
+
+export type GanttRow = {
+	item: TodoItem,
+	/**  予定: both planned dates set. */
+	planned: DaySpan | null,
+	/**
+	 *  実績: from the actual start; to the actual end, or to today while
+	 *  作業中・待ち (G-4), or just the start day otherwise.
+	 */
+	actual: DaySpan | null,
+	/**  待ち spans inside the actual bar (G-7). */
+	waiting: DaySpan[],
 };
 
 export type NewTodoInput = {

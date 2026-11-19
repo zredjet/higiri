@@ -22,6 +22,7 @@ const APP_COMMANDS: &[&str] = &[
     "get_dashboard",
     "get_startup_reminder",
     "ack_reminder",
+    "get_gantt",
 ];
 
 fn main() {

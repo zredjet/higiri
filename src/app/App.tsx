@@ -81,7 +81,7 @@ export default function App() {
         />
       </div>
 
-      <main className="app__main">
+      <main className={route.page === "gantt" ? "app__main app__main--fill" : "app__main"}>
         {projects.error ? <Alert tone="danger">{errorMessage(projects.error)}</Alert> : null}
         {route.page === "dashboard" && <DashboardPage onOpenTodo={setOpenTodoId} />}
         {route.page === "todos" && (
@@ -92,7 +92,7 @@ export default function App() {
             onEditProject={(s) => setProjectForm(s.project.id)}
           />
         )}
-        {route.page === "gantt" && <GanttPage />}
+        {route.page === "gantt" && <GanttPage selectedTodoId={openTodoId} onOpenTodo={setOpenTodoId} />}
         {route.page === "report" && <ReportPage />}
         {route.page === "settings" && <SettingsPage />}
       </main>

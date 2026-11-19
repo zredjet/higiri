@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   commands,
+  type GanttQuery,
   type NewTodoInput,
   type ProjectInput,
   type SettingsInput,
@@ -22,6 +23,7 @@ export const queryKeys = {
   timeline: (id: number) => ["todos", "timeline", id] as const,
   // Under "todos" so every TODO change refreshes it too.
   dashboard: ["todos", "dashboard"] as const,
+  gantt: (query: GanttQuery) => ["todos", "gantt", query] as const,
   settings: ["settings"] as const,
 };
 
@@ -98,6 +100,14 @@ export function useUpdateSettings() {
 
 export function useDashboard() {
   return useQuery({ queryKey: queryKeys.dashboard, queryFn: () => commands.getDashboard() });
+}
+
+export function useGantt(query: GanttQuery) {
+  return useQuery({
+    queryKey: queryKeys.gantt(query),
+    queryFn: () => commands.getGantt(query),
+    placeholderData: (previous) => previous,
+  });
 }
 
 // ---- TODOs -------------------------------------------------------------------

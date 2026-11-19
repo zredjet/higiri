@@ -694,3 +694,302 @@ input[type="date"][data-empty="true"]:not(:focus) {
   grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
   gap: var(--space-4);
 }
+
+/* ---------- Gantt ---------- */
+/* The chart fills the rest of the page and scrolls its own rows. */
+.app__main--fill {
+  overflow: hidden;
+  gap: var(--space-4);
+}
+
+.gantt-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.gantt-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.gantt-toolbar__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-6);
+}
+
+.gantt-toolbar__project {
+  width: 220px;
+}
+
+.gantt-toolbar__checks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-5);
+  min-height: var(--control-sm);
+}
+
+.gantt-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  font-size: 12px;
+  line-height: 18px;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+.gantt-legend > span {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.gantt-legend__planned,
+.gantt-legend__actual,
+.gantt-legend__waiting {
+  width: 24px;
+  border-radius: var(--radius-xs);
+  box-sizing: border-box;
+}
+
+.gantt-legend__planned {
+  height: 10px;
+  background: var(--ai-200);
+}
+
+.gantt-legend__actual {
+  height: 12px;
+  background: var(--ai-600);
+}
+
+.gantt-legend__waiting {
+  height: 12px;
+  border: 2px solid var(--ai-600);
+  background: var(--surface);
+}
+
+.gantt-legend__due {
+  width: 10px;
+  height: 10px;
+  transform: rotate(45deg);
+  background: var(--text);
+}
+
+.gantt-legend__today {
+  width: 2px;
+  height: 14px;
+  background: var(--primary-text);
+}
+
+.gantt {
+  flex: 1 1 auto;
+  min-height: 240px;
+  display: flex;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.gantt__scroll {
+  flex: 1;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.gantt__header {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  display: flex;
+  height: 53px;
+  box-sizing: border-box;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+}
+
+.gantt__name-head {
+  flex: 0 0 302px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: flex-end;
+  padding: 0 var(--space-4) 5px;
+  border-right: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+.gantt__header-chart,
+.gantt__chart {
+  display: block;
+  flex: none;
+}
+
+.gantt__body {
+  position: relative;
+  display: flex;
+}
+
+.gantt__names {
+  position: relative;
+  flex: 0 0 302px;
+  box-sizing: border-box;
+  border-right: 1px solid var(--border);
+}
+
+.gantt__empty {
+  padding: var(--space-6) var(--space-4);
+}
+
+.gantt-name {
+  position: absolute;
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 0 var(--space-3) 0 var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.gantt-name--project {
+  background: var(--bg-subtle);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.gantt-name--todo {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gantt-name--todo:hover {
+  background: var(--surface-hover);
+}
+
+.gantt-name--todo.is-selected {
+  background: var(--primary-soft);
+}
+
+.gantt-name--todo:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+
+.gantt-name__title {
+  min-width: 0;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gantt-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.gantt-weekend,
+.gantt-project-row {
+  fill: var(--bg-subtle);
+}
+
+.gantt-row {
+  cursor: pointer;
+}
+
+.gantt-row__hit {
+  fill: transparent;
+}
+
+.gantt-row:hover .gantt-row__hit {
+  fill: var(--surface-hover);
+  opacity: 0.6;
+}
+
+.gantt-row__hit.is-selected,
+.gantt-row:hover .gantt-row__hit.is-selected {
+  fill: var(--primary-soft);
+  opacity: 1;
+}
+
+.gantt-planned {
+  fill: var(--ai-200);
+}
+
+.gantt-actual {
+  fill: var(--ai-600);
+}
+
+.gantt-waiting {
+  fill: var(--surface);
+  stroke: var(--ai-600);
+  stroke-width: 2;
+}
+
+.gantt-due {
+  fill: var(--text);
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+
+.gantt-due.is-overdue {
+  fill: var(--danger);
+}
+
+.gantt-due.is-today {
+  fill: var(--warning);
+}
+
+.gantt-overdue {
+  fill: var(--danger);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.gantt-today {
+  stroke: var(--primary-text);
+  stroke-width: 2;
+}
+
+.gantt-header-top {
+  fill: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.gantt-header-day {
+  fill: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.gantt-header-day.is-today {
+  fill: var(--primary-text);
+  font-weight: 600;
+}
+
+.gantt-today-cell {
+  fill: var(--primary-soft);
+}

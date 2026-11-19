@@ -6,6 +6,7 @@
 pub mod dashboard;
 pub mod date;
 pub mod events;
+pub mod gantt;
 pub mod listing;
 pub mod model;
 pub mod settings;
