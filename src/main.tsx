@@ -11,10 +11,11 @@ import { installGlobalErrorLogging } from "./lib/log";
 installGlobalErrorLogging();
 
 // Commands are local and either work or fail for a reason retrying will not fix.
+// They never use the network, so going offline must not pause loading or saving.
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { retry: false },
-    mutations: { retry: false },
+    queries: { retry: false, networkMode: "always" },
+    mutations: { retry: false, networkMode: "always" },
   },
 });
 

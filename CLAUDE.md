@@ -93,6 +93,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
 - フォントは `@fontsource/ibm-plex-sans-jp`(400/500/600/700)と `@fontsource/ibm-plex-mono`(400/500)を `src/styles/fonts.ts` で読み込む。`vite.config.ts` のプラグインで .woff を外し、.woff2 だけを同梱する。
 - 画面の切り替えはルーティングのライブラリを使わず、`src/app/routes.ts` の `Route` を状態で持つ。サイドナビの id と画面は `routes.ts` で対応させる。
 - データの取得と更新は TanStack Query。フックは `src/lib/queries.ts` にまとめ、更新したら影響する一覧(プロジェクトと TODO は両方)を取り直す。
+  - `main.tsx` の `QueryClient` の既定は、queries と mutations の両方が `retry: false` と `networkMode: "always"`。コマンドは外部と通信しないので、PC がオフラインになっても読み込みと保存を止めない(既定の `"online"` のままだと、ウィンドウの `offline` イベントで止まる)。
   - TODO の書き込み(`update_todo` と `change_status`)は、mutation の `scope`(`TODO_WRITES`)で1本の列に並べ、始めた順に1つずつ動かす。
   - `update_todo` はすべての項目を受け取るので、`useUpdateTodo` は `{ id, change }` を受け取り、送る直前に `get_todo` で今の TODO を読んで `change(今の todo)` の結果を送る。呼び出し側は `{ ...fieldsOf(current), 変える項目 }` のように自分が変える項目だけを重ねる(ガントのドラッグ、詳細パネル、ダッシュボードの日付の変更)。ほかの保存が入れたばかりの値を古い値で上書きしないため。
 - 入力の検証は Rust 側で行い、返ってきた `AppError.message` を表示する(`src/lib/errors.ts` の `errorMessage`)。フォームには `noValidate` を付け、ブラウザ標準の英語の吹き出しを出さない。
