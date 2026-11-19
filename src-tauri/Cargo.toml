@@ -9,7 +9,9 @@ edition = "2024"
 # The `_lib` suffix keeps the lib name distinct from the bin name (needed on Windows).
 # See https://github.com/rust-lang/cargo/issues/8519
 name = "higiri_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# Desktop only: the staticlib / cdylib outputs are for iOS / Android, and
+# linking them made every build (tests included) slower, most of all on Windows.
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2.7.6", features = [] }
