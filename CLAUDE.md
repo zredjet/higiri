@@ -168,7 +168,7 @@ v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作る。�
     - `commands/notify.rs`: `test_notification`。
     - `update_settings` の `#[tauri::command]` は、保存のあとに `resident::apply` と、`autostart` が変わったときの `autostart::apply` を呼ぶ。OS への登録に失敗したら `autostart` を元の値で保存し直してエラーを返す。
     - アプリが書く値は1キーずつ書く(`repo::settings::set_last_reminded_on`、`set_last_notified_at`、`set_tray_hint_shown`)。`update_settings` は利用者が変える値だけを書く(`save_user_settings`)。
-    - 通知のクリックは、notification プラグイン(2.8.1)の `on_action` で `tap` を受けてウィンドウを出す。
+    - 通知のクリックでウィンドウを出すのは Windows だけ(利用者が決定)。notification プラグイン(2.8.1)の `on_action` で `tap` を受ける。macOS では `on_action` を登録しない(登録すると、通知センターに残る通知ごとに、待ちのスレッドとメインスレッドのタイマーが動き続けるため)。macOS のクリックはアプリを前面に出すだけで、ウィンドウは Dock かメニューバーから開く。
     - main ウィンドウは `tauri.conf.json` で `visible: false` にし、setup の最後に出す。macOS の Dock のクリック(`RunEvent::Reopen`)でも出す。
     - 設定画面の「通知と常駐」のカードは `SettingsPage.tsx` の `ResidentCard`。開発ビルドかどうかは `import.meta.env.DEV` で見て、自動起動のスイッチを押せなくする。
 - 営業日(フェーズ11)

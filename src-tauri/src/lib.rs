@@ -17,6 +17,7 @@ mod win_toast;
 use std::path::PathBuf;
 
 use tauri::Manager;
+#[cfg(windows)]
 use tauri_plugin_notification::NotificationExt;
 // Registered in release builds only (see run()); referenced here so the
 // dependencies do not count as unused in development builds.
@@ -131,14 +132,20 @@ pub fn run() {
             };
             app.manage(resident::CloseBehavior::new(&settings, tray_ready));
 
-            // A click on a notification brings the window back (as far as the
-            // OS reports it to the plugin).
-            let handle = app.handle().clone();
-            app.notification().on_action(move |performed| {
-                if performed.action_id() == "tap" {
-                    resident::show_main(&handle);
-                }
-            })?;
+            // Windows: a click on a toast brings the window back (while the
+            // toast is on screen). Not on macOS (the user's decision): there
+            // the plugin keeps a thread and a main-thread timer for every
+            // notification left in Notification Center, so a click only
+            // activates the app, and the Dock or the menu bar opens the window.
+            #[cfg(windows)]
+            {
+                let handle = app.handle().clone();
+                app.notification().on_action(move |performed| {
+                    if performed.action_id() == "tap" {
+                        resident::show_main(&handle);
+                    }
+                })?;
+            }
 
             autostart::sync_at_startup(app.handle(), settings.autostart);
             #[cfg(all(windows, not(debug_assertions)))]
