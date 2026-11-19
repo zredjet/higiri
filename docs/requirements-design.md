@@ -280,6 +280,7 @@ CREATE TABLE settings (
 - ステータスの種類はCHECK制約で縛る。SQLiteでは制約を後から変えるとテーブルの作り直しになるため、待ちと中止は最初から入れておく。
 - reportsは種類(daily / weekly / monthly)と期間の開始日で1行が決まる。MVPで使うのはdailyだけで、開始日と終了日が同じになる。
 - reportsで所感を本文と別に持つのは、作業ログを足して再生成しても手で書いた所感を残すため。
+- todo_eventsのnoteは常にJSONのオブジェクトで持つ。old_value / new_value とnoteの形、noteのキーの一覧は、リポジトリ直下の `CLAUDE.md` の「データの決めごと」にある。
 - サブTODOを入れるときはparent_idに親のidを入れるだけでよい。子は親と同じプロジェクトに属する、という制約はアプリ側で守る。
 - 時間管理を入れるときは、開始・終了時刻を持つtime_entriesテーブルと、todosの見積時間の列を足す。work_logsのminutesはそのときtime_entriesへ移す。既存テーブルの作り直しは要らない。
 
