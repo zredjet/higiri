@@ -5,7 +5,7 @@ import type { Priority, Status, TodoItem } from "../../../lib/bindings";
 import { errorMessage } from "../../../lib/errors";
 import { shortcutText } from "../../../lib/keys";
 import { useChangeStatus, useLatestTodo, useTimeline } from "../../../lib/queries";
-import { nextRoundMadeText } from "../repeatText";
+import { closedRepeatText } from "../repeatText";
 import { cancelChildrenNote, PRIORITIES, PRIORITY_LABEL, STATUSES, STATUS_LABEL, waitingMessage } from "../todoText";
 import { ChildrenSection, ParentField, useFamily } from "./FamilySection";
 import { MarkdownField } from "./MarkdownField";
@@ -31,16 +31,21 @@ export function TodoDetail({ item, onOpenTodo }: { item: TodoItem; onOpenTodo: (
   const openChildren = item.children?.open ?? 0;
   const [tab, setTab] = useState<"log" | "memo">("log");
   const [memoPreview, setMemoPreview] = useState(false);
-  /** The next round's 日限, once closing this repeating TODO made it (T-12). */
-  const [madeNext, setMadeNext] = useState<string | null>(null);
+  /**
+   * Set once closing this repeating TODO went through (T-12): the next
+   * round's 日限, or null when the end day was passed and none was made.
+   */
+  const [closedRepeat, setClosedRepeat] = useState<{ nextDue: string | null } | null>(null);
 
   /**
-   * The next round's 日限 when going `to` closes this TODO and it repeats.
-   * Read after the panel's save, so a 日限 just typed counts.
+   * What closing this TODO (going `to`) does to its repetition: its
+   * `next_due` before the change, read after the panel's save so a 日限 just
+   * typed counts. null when it does not close a repeating TODO.
    */
-  function nextRoundOf(to: Status): string | null {
+  function repeatOnClose(to: Status): { nextDue: string | null } | null {
     if (to !== "done" && to !== "cancelled") return null;
-    return (latest(todo.id) ?? item).repeat?.next_due ?? null;
+    const repeat = (latest(todo.id) ?? item).repeat;
+    return repeat ? { nextDue: repeat.next_due } : null;
   }
 
   async function changeStatus(to: Status) {
@@ -50,10 +55,10 @@ export function TodoDetail({ item, onOpenTodo }: { item: TodoItem; onOpenTodo: (
       return;
     }
     await save();
-    const next = nextRoundOf(to);
+    const closing = repeatOnClose(to);
     status.mutate(
       { id: todo.id, change: { to, waiting_on: null, follow_up_date: null, reason: null } },
-      { onSuccess: () => setMadeNext(next) },
+      { onSuccess: () => setClosedRepeat(closing) },
     );
   }
 
@@ -71,9 +76,9 @@ export function TodoDetail({ item, onOpenTodo }: { item: TodoItem; onOpenTodo: (
       {waiting ? <Alert tone="info">{waiting}</Alert> : null}
       {error ? <Alert tone="danger">{errorMessage(error)}</Alert> : null}
       {status.error && asking === null ? <Alert tone="danger">{errorMessage(status.error)}</Alert> : null}
-      {madeNext ? (
-        <Alert tone="success" onClose={() => setMadeNext(null)}>
-          {nextRoundMadeText(madeNext)}
+      {closedRepeat ? (
+        <Alert tone={closedRepeat.nextDue ? "success" : "info"} onClose={() => setClosedRepeat(null)}>
+          {closedRepeatText(closedRepeat.nextDue)}
         </Alert>
       ) : null}
 
@@ -231,13 +236,13 @@ export function TodoDetail({ item, onOpenTodo }: { item: TodoItem; onOpenTodo: (
           onClose={() => setAsking(null)}
           onConfirm={async () => {
             await save();
-            const next = nextRoundOf("done");
+            const closing = repeatOnClose("done");
             status.mutate(
               { id: todo.id, change: { to: "done", waiting_on: null, follow_up_date: null, reason: null } },
               {
                 onSuccess: () => {
                   setAsking(null);
-                  setMadeNext(next);
+                  setClosedRepeat(closing);
                 },
               },
             );
@@ -252,13 +257,13 @@ export function TodoDetail({ item, onOpenTodo }: { item: TodoItem; onOpenTodo: (
           onClose={() => setAsking(null)}
           onSubmit={async (reason) => {
             await save();
-            const next = nextRoundOf("cancelled");
+            const closing = repeatOnClose("cancelled");
             status.mutate(
               { id: todo.id, change: { to: "cancelled", waiting_on: null, follow_up_date: null, reason } },
               {
                 onSuccess: () => {
                   setAsking(null);
-                  setMadeNext(next);
+                  setClosedRepeat(closing);
                 },
               },
             );

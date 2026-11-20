@@ -5,7 +5,7 @@ import {
   leapDayNote,
   monthEndNote,
   nextDueText,
-  nextRoundMadeText,
+  closedRepeatText,
   repeatMarkTitle,
   repeatRuleText,
   ruleFromDue,
@@ -47,7 +47,8 @@ describe("the next round and the end", () => {
 
   it("names the mark and tells that the next round was made", () => {
     expect(repeatMarkTitle(info("2026-11-30"))).toBe("繰り返し:毎週 月");
-    expect(nextRoundMadeText("2026-12-07")).toBe("次の回(日限 12/7)を作りました。");
+    expect(closedRepeatText("2026-12-07")).toBe("次の回(日限 12/7)を作りました。");
+    expect(closedRepeatText(null)).toBe("繰り返しの終わりの日を過ぎたため、次の回は作りませんでした。");
   });
 });
 

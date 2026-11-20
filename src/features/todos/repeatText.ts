@@ -82,9 +82,14 @@ export function repeatMarkTitle(info: RepeatInfo): string {
   return `${REPEAT_LABEL}:${repeatRuleText(info.rule)}`;
 }
 
-/** Shown once a repeating TODO was closed and its next round made. */
-export function nextRoundMadeText(nextDue: string): string {
-  return `次の回(日限 ${monthDay(nextDue)})を作りました。`;
+/**
+ * Shown once a repeating TODO was closed: the next round was made, or
+ * (`nextDue` null) the end day was passed and none was made.
+ */
+export function closedRepeatText(nextDue: string | null): string {
+  return nextDue
+    ? `次の回(日限 ${monthDay(nextDue)})を作りました。`
+    : "繰り返しの終わりの日を過ぎたため、次の回は作りませんでした。";
 }
 
 // ---- the dialog's first values ---------------------------------------------------

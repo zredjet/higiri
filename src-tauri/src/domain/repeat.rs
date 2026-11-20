@@ -282,9 +282,11 @@ const MAX_SKIPS: usize = 400;
 /// 1. The first day after `prev_due` that the rule falls on.
 /// 2. When that is before `today` (closed late), the first such day from
 ///    `today` on instead: rounds already past are not made.
-/// 3. In 営業日, a day whose 日限 the judgement moves (to the business day
-///    before a holiday) onto or before `prev_due`, or before `today`, is
-///    skipped: a daily round on Saturday would be judged on Friday again.
+/// 3. In 営業日, one rule: a day whose 日限 the judgement moves (to the
+///    business day before a holiday) onto or before `prev_due`, or before
+///    `today`, is skipped. A daily round on Saturday would be judged on
+///    Friday again, and one made on a holiday would be 超過 at once
+///    (decided by the orchestrator, phase 21).
 ///
 /// `every_days` counts from `prev_due`. In 暦日, 3 changes nothing. `None`
 /// only past the last representable date.
@@ -431,6 +433,7 @@ pub fn copied_children(before: &[Todo]) -> impl Iterator<Item = &Todo> {
 mod tests {
     use super::*;
     use crate::domain::testing::{business_rules, d, rules, todo, ts};
+    use crate::domain::urgency::{Urgency, classify};
 
     fn read(s: &str) -> Option<RepeatRule> {
         RepeatRule::from_json(s)
@@ -845,6 +848,22 @@ mod tests {
             next_business(&saturday, "2026-11-21", "2026-11-21"),
             d("2026-11-28")
         );
+    }
+
+    #[test]
+    fn in_business_days_closing_late_on_a_weekday_makes_todays_round() {
+        // Due Thu 11/26, closed Fri 11/27: Friday's round, due today (本日).
+        let r = business_rules(3, vec![]);
+        let today = d("2026-11-27");
+        let due = next_due(&RepeatRule::Daily, d("2026-11-26"), today, &r).unwrap();
+        assert_eq!(due, today);
+        let round = Todo {
+            due_date: Some(due),
+            ..todo(Status::Todo)
+        };
+        assert_eq!(classify(&round, today, &r), Some(Urgency::DueToday));
+        // The same in 暦日.
+        assert_eq!(next(&RepeatRule::Daily, "2026-11-26", "2026-11-27"), today);
     }
 
     fn repeat(rule: RepeatRule, until: Option<&str>) -> TodoRepeat {
