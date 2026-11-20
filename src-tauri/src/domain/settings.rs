@@ -5,7 +5,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
 pub use super::calendar::{CustomHoliday, DayCount};
-pub use super::report_template::ReportTemplate;
+pub use super::report_template::{ReportTemplate, WeeklyReportTemplate};
 
 /// When the startup reminder dialog is shown.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -60,6 +60,8 @@ pub struct Settings {
     pub custom_holidays: Vec<CustomHoliday>,
     /// Sections, headings and items of the daily report (v1.1).
     pub report_template: ReportTemplate,
+    /// Sections, headings and items of the weekly report (v0.3.0).
+    pub weekly_report_template: WeeklyReportTemplate,
 }
 
 pub const DEFAULT_SOON_DAYS: u32 = 3;
@@ -83,6 +85,7 @@ impl Default for Settings {
             day_count: DayCount::Calendar,
             custom_holidays: Vec::new(),
             report_template: ReportTemplate::default(),
+            weekly_report_template: WeeklyReportTemplate::default(),
         }
     }
 }
@@ -108,5 +111,6 @@ mod tests {
         assert_eq!(s.day_count, DayCount::Calendar);
         assert!(s.custom_holidays.is_empty());
         assert_eq!(s.report_template, ReportTemplate::default());
+        assert_eq!(s.weekly_report_template, WeeklyReportTemplate::default());
     }
 }

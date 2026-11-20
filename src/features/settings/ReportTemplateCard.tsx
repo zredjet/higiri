@@ -1,26 +1,37 @@
 import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Card, Checkbox, Dialog, Icon, Switch, TextField } from "../../components/aizome";
-import type { ReportTemplate, Section } from "../../lib/bindings";
+import type { ReportTemplate, WeeklyReportTemplate } from "../../lib/bindings";
 import { errorMessage } from "../../lib/errors";
 import { useUpdateSettings } from "../../lib/queries";
 import {
-  OPTION_ITEMS,
-  defaultReportTemplate,
+  TEMPLATE_SPECS,
   moveSection,
   optionValue,
-  sectionName,
   setEnabled,
   setHeading,
   setOption,
   setTitle,
-  type SectionKind,
+  templateEdits,
+  templateOf,
+  type AnySection,
+  type AnyTemplate,
+  type TemplateSpec,
 } from "./reportTemplate";
 
 /** What a save gives back: the template as saved, or the message to show. */
-type SaveResult = { template: ReportTemplate } | { error: string };
+type SaveResult = { template: AnyTemplate } | { error: string };
 
-/** 日報のテンプレート (R-5, v1.1): title, order, headings, shown sections and items. */
-export function ReportTemplateCard({ template }: { template: ReportTemplate }) {
+type ReportTemplateCardProps =
+  | { kind: "daily"; template: ReportTemplate }
+  | { kind: "weekly"; template: WeeklyReportTemplate };
+
+/**
+ * 日報のテンプレート (R-5, v1.1) and 週報のテンプレート (R-6, v0.3.0): title,
+ * order, headings, shown sections and items. The two cards are built the same
+ * way; `kind` picks the template, its sections and their items.
+ */
+export function ReportTemplateCard({ kind, template }: ReportTemplateCardProps) {
+  const spec = TEMPLATE_SPECS[kind];
   const update = useUpdateSettings();
   const [error, setError] = useState<string | null>(null);
   // A new set of text fields after 「初期値に戻す」, dropping unsaved text.
@@ -28,34 +39,35 @@ export function ReportTemplateCard({ template }: { template: ReportTemplate }) {
   const [resetting, setResetting] = useState(false);
 
   /** Saves `change` applied to the template as saved right now. */
-  async function save(change: (current: ReportTemplate) => ReportTemplate): Promise<SaveResult> {
+  async function save(change: (current: AnyTemplate) => AnyTemplate): Promise<SaveResult> {
     try {
-      const saved = await update.mutateAsync((current) => ({ report_template: change(current.report_template) }));
-      return { template: saved.report_template };
+      const saved = await update.mutateAsync((current) => templateEdits(kind, change(templateOf(kind, current))));
+      return { template: templateOf(kind, saved) };
     } catch (e) {
       return { error: errorMessage(e) };
     }
   }
 
   /** Switches, checkboxes and the order: the error shows at the top of the card. */
-  async function saveNow(change: (current: ReportTemplate) => ReportTemplate) {
+  async function saveNow(change: (current: AnyTemplate) => AnyTemplate) {
     setError(null);
     const result = await save(change);
     if ("error" in result) setError(result.error);
   }
 
-  const movable = template.sections.filter((s) => s.kind !== "note");
+  const sections: AnySection[] = template.sections;
+  const movable = sections.filter((s) => s.kind !== "note");
 
   return (
     <Card
-      title="日報のテンプレート"
-      description="日報の題名、節の並び、見出し、添える項目を決めます。次に作る日報と、再生成した日報から変わります。"
+      title={`${spec.name}のテンプレート`}
+      description={`${spec.name}の題名、節の並び、見出し、添える項目を決めます。次に作る${spec.name}と、再生成した${spec.name}から変わります。`}
     >
       <div className="settings-card__body" key={generation}>
         {error ? <Alert tone="danger">{error}</Alert> : null}
         <DraftTextField
           label="題名"
-          description="「{日付}」と「{曜日}」は、その日の日付と曜日に置き換わります。先頭の「# 」はアプリが付けます。"
+          description={spec.titleDescription}
           maxLength={60}
           value={template.title}
           onSave={async (text) => {
@@ -63,12 +75,13 @@ export function ReportTemplateCard({ template }: { template: ReportTemplate }) {
             return "error" in result ? result : { value: result.template.title };
           }}
         />
-        <div className="report-sections" role="list" aria-label="日報の節">
-          {template.sections.map((s) => {
+        <div className="report-sections" role="list" aria-label={`${spec.name}の節`}>
+          {sections.map((s) => {
             const index = movable.findIndex((m) => m.kind === s.kind);
             return (
               <SectionRow
                 key={s.kind}
+                spec={spec}
                 section={s}
                 first={index === 0}
                 last={index === movable.length - 1}
@@ -78,7 +91,7 @@ export function ReportTemplateCard({ template }: { template: ReportTemplate }) {
                 onHeading={async (text) => {
                   const result = await save((t) => setHeading(t, s.kind, text));
                   if ("error" in result) return result;
-                  const saved = result.template.sections.find((x) => x.kind === s.kind);
+                  const saved = (result.template.sections as AnySection[]).find((x) => x.kind === s.kind);
                   return { value: saved?.heading ?? text };
                 }}
               />
@@ -90,10 +103,11 @@ export function ReportTemplateCard({ template }: { template: ReportTemplate }) {
         </div>
       </div>
       <ResetDialog
+        name={spec.name}
         open={resetting}
         onClose={() => setResetting(false)}
         onReset={async () => {
-          const result = await save(() => defaultReportTemplate());
+          const result = await save(() => spec.defaultTemplate());
           if ("error" in result) return result.error;
           setError(null);
           setGeneration((g) => g + 1);
@@ -106,6 +120,8 @@ export function ReportTemplateCard({ template }: { template: ReportTemplate }) {
 }
 
 interface ResetDialogProps {
+  /** 「日報」「週報」 */
+  name: string;
   open: boolean;
   onClose: () => void;
   /** Saves the default template; resolves to the error message, or null when saved. */
@@ -113,7 +129,7 @@ interface ResetDialogProps {
 }
 
 /** Confirms 「初期値に戻す」: every change on the card is saved at once and cannot be undone. */
-function ResetDialog({ open, onClose, onReset }: ResetDialogProps) {
+function ResetDialog({ name, open, onClose, onReset }: ResetDialogProps) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   if (!open) return null;
@@ -127,8 +143,8 @@ function ResetDialog({ open, onClose, onReset }: ResetDialogProps) {
     <Dialog
       open
       onClose={pending ? undefined : close}
-      title="日報のテンプレートを初期値に戻しますか"
-      description="節の並び、見出し、出す節、項目が、初めの状態に戻ります。保存してある日報は変わりません。"
+      title={`${name}のテンプレートを初期値に戻しますか`}
+      description={`節の並び、見出し、出す節、項目が、初めの状態に戻ります。保存してある${name}は変わりません。`}
       footer={
         <>
           <Button onClick={close} disabled={pending}>
@@ -155,7 +171,8 @@ function ResetDialog({ open, onClose, onReset }: ResetDialogProps) {
 }
 
 interface SectionRowProps {
-  section: Section;
+  spec: TemplateSpec;
+  section: AnySection;
   first: boolean;
   last: boolean;
   onMove: (delta: -1 | 1) => void;
@@ -164,11 +181,11 @@ interface SectionRowProps {
   onHeading: (text: string) => Promise<{ value: string } | { error: string }>;
 }
 
-function SectionRow({ section, first, last, onMove, onEnabled, onOption, onHeading }: SectionRowProps) {
-  const kind: SectionKind = section.kind;
-  const name = sectionName(kind);
+function SectionRow({ spec, section, first, last, onMove, onEnabled, onOption, onHeading }: SectionRowProps) {
+  const kind = section.kind;
+  const name = spec.sectionName(kind);
   const note = kind === "note";
-  const items = OPTION_ITEMS[kind];
+  const items = spec.optionItems(kind);
 
   return (
     <div
@@ -182,7 +199,7 @@ function SectionRow({ section, first, last, onMove, onEnabled, onOption, onHeadi
           <span className="text-caption">いつも最後に出します。再生成しても、書いた内容は残ります。</span>
         ) : (
           <div className="report-section__tools">
-            <Switch label="日報に出す" checked={section.enabled} onChange={onEnabled} />
+            <Switch label={`${spec.name}に出す`} checked={section.enabled} onChange={onEnabled} />
             <Button
               size="sm"
               variant="ghost"

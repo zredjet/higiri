@@ -89,14 +89,14 @@ export const commands = {
 	 */
 	getGantt: (query: GanttQuery, options?: InvokeOptions) => __TAURI_INVOKE<Gantt>("get_gantt", { query }, options),
 	/**
-	 *  Builds the report from that day's records with the report template. The
-	 *  所感・連絡事項 part is taken from `current_md` (the text being edited) when
-	 *  given, otherwise from the saved report. Nothing is saved.
+	 *  Builds the report from that day's (or week's) records with its template.
+	 *  The 所感・連絡事項 part is taken from `current_md` (the text being edited)
+	 *  when given, otherwise from the saved report. Nothing is saved.
 	 */
 	generateReport: (key: ReportKey, currentMd: string | null, options?: InvokeOptions) => __TAURI_INVOKE<string>("generate_report", { key, currentMd }, options),
 	/**  Saves the full text; its 所感・連絡事項 part is stored apart as well. */
 	saveReport: (key: ReportKey, bodyMd: string, options?: InvokeOptions) => __TAURI_INVOKE<Report>("save_report", { key, bodyMd }, options),
-	/**  The saved report of that day, or null. */
+	/**  The saved report of that day (or week), or null. */
 	getReport: (key: ReportKey, options?: InvokeOptions) => __TAURI_INVOKE<Report | null>("get_report", { key }, options),
 	/**
 	 *  Asks where to save (the save dialog opens on the Rust side) and writes the
@@ -147,6 +147,8 @@ export const commands = {
 /* Constants */
 export const DEFAULT_REPORT_TEMPLATE = {"sections":[{"enabled":true,"heading":"本日の作業","kind":"work","options":{"due_date":true,"project_headings":true,"status":true,"work_time":true}},{"enabled":true,"heading":"本日完了・中止","kind":"closed","options":{"close_reason":true}},{"enabled":true,"heading":"待ち","kind":"waiting","options":{"follow_up_date":true,"waiting_days":true,"waiting_on":true}},{"enabled":true,"heading":"明日の予定","kind":"tomorrow","options":{"planned_period":true}},{"enabled":true,"heading":"日限注意","kind":"attention","options":{"days":true,"follow_up_and_late_start":false,"waiting_mark":true}},{"enabled":true,"heading":"所感・連絡事項","kind":"note","options":{}}],"title":"日報 {日付}({曜日})"} as const;
 
+export const DEFAULT_WEEKLY_REPORT_TEMPLATE = {"sections":[{"enabled":true,"heading":"今週の作業","kind":"work","options":{"due_date":true,"log_body":false,"project_headings":true,"status":true,"total_time":true,"work_days":true,"work_time":true}},{"enabled":true,"heading":"今週完了・中止","kind":"closed","options":{"close_reason":true,"closed_date":true}},{"enabled":true,"heading":"待ち","kind":"waiting","options":{"follow_up_date":true,"waiting_days":true,"waiting_on":true}},{"enabled":true,"heading":"来週の予定","kind":"next_week","options":{"due_date":true,"planned_period":true}},{"enabled":true,"heading":"日限注意","kind":"attention","options":{"days":true,"follow_up_and_late_start":false,"waiting_mark":true}},{"enabled":true,"heading":"所感・連絡事項","kind":"note","options":{}}],"title":"週報 {開始日}〜{終了日}"} as const;
+
 /* Types */
 export type AppError = {
 	kind: ErrorKind,
@@ -193,7 +195,7 @@ export type Assessment = {
 	due_shifted: boolean,
 };
 
-/**  日限注意. */
+/**  日限注意 (of the daily and the weekly report). */
 export type AttentionOptions = {
 	/**  「2日超過」「あと1日」 (and 「待ち3日目」「2日経過」 of 要確認 and 着手遅れ). */
 	days: boolean,
@@ -451,6 +453,14 @@ export type NewTodoInput = {
 	memo_md: string | null,
 };
 
+/**  来週の予定. */
+export type NextWeekOptions = {
+	/**  「(予定 11/20〜11/27)」 of 未着手. */
+	planned_period: boolean,
+	/**  「日限 11/19」. */
+	due_date: boolean,
+};
+
 /**  所感・連絡事項 has no options (heading only). */
 export type NoteOptions = Record<string, never>;
 
@@ -552,7 +562,10 @@ export type Report = {
 	updated_at: string,
 };
 
-/**  Which report: kind and the first day of its period. */
+/**
+ *  Which report: kind and a day of its period (for a weekly report, any day
+ *  of the week).
+ */
 export type ReportKey = {
 	kind: ReportKind,
 	date: string,
@@ -649,6 +662,8 @@ export type Settings = {
 	custom_holidays: CustomHoliday[],
 	/**  Sections, headings and items of the daily report (v1.1). */
 	report_template: ReportTemplate,
+	/**  Sections, headings and items of the weekly report (v0.3.0). */
+	weekly_report_template: WeeklyReportTemplate,
 };
 
 /**
@@ -673,6 +688,8 @@ export type SettingsInput = {
 	 *  Saved normalized (see `ReportTemplate::checked`).
 	 */
 	report_template: ReportTemplate,
+	/**  Checked and saved as the daily one (v0.3.0). */
+	weekly_report_template: WeeklyReportTemplate,
 };
 
 /**  What the startup reminder dialog shows. */
@@ -930,7 +947,7 @@ export type UrgencyCounts = {
 	late_start: number,
 };
 
-/**  待ち. */
+/**  待ち (of the daily and the weekly report). */
 export type WaitingOptions = {
 	/**  「人事部の原稿確認待ち」 */
 	waiting_on: boolean,
@@ -946,6 +963,53 @@ export type Warnings = {
 	plan_misses_due: boolean,
 	/**  予定超過: doing or waiting, and the planned end is before today. */
 	plan_overrun: boolean,
+};
+
+/**  今週完了・中止. */
+export type WeeklyClosedOptions = {
+	/**  「(11/19)」: the day it was closed. */
+	closed_date: boolean,
+	/**  「(理由:…)」 of 中止. */
+	close_reason: boolean,
+};
+
+export type WeeklyReportTemplate = {
+	/**  Text only (`# ` is added by the app); `{開始日}` and `{終了日}` are filled in. */
+	title: string,
+	/**  Every kind once, 所感・連絡事項 last (see [`WeeklyReportTemplate::normalized`]). */
+	sections: WeeklySection[],
+};
+
+/**  One section of the weekly report: `{ kind, heading, enabled, options }`. */
+export type WeeklySection = {
+	/**  Text only (`## ` is added by the app). */
+	heading: string,
+	/**  Shown in the report. Always true for 所感・連絡事項. */
+	enabled: boolean,
+} & WeeklySectionBody;
+
+/**  The kind of a weekly section and its options (`"kind"` and `"options"`). */
+export type WeeklySectionBody = { kind: "work"; options: WeeklyWorkOptions } | { kind: "closed"; options: WeeklyClosedOptions } | { kind: "waiting"; options: WaitingOptions } | { kind: "next_week"; options: NextWeekOptions } | { kind: "attention"; options: AttentionOptions } | { kind: "note"; options: NoteOptions };
+
+/**  今週の作業. */
+export type WeeklyWorkOptions = {
+	/**
+	 *  「### プロジェクト名」 above each project's TODOs. Off: each line
+	 *  starts with 「プロジェクト名 / 」.
+	 */
+	project_headings: boolean,
+	/**  「(作業中 …)」 */
+	status: boolean,
+	/**  「… / 日限 11/20」 (open TODOs only). */
+	due_date: boolean,
+	/**  「… / 作業日 11/17・11/19」 */
+	work_days: boolean,
+	/**  「3.5h」 after each TODO (TODOs with a timed log only). */
+	work_time: boolean,
+	/**  「作業時間の合計 8.0h」 at the top (when some log is timed). */
+	total_time: boolean,
+	/**  The logs' text under each TODO, by day (off by default). */
+	log_body: boolean,
 };
 
 export type WorkLog = {

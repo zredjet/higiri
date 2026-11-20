@@ -13,9 +13,10 @@ use super::error::{AppError, CmdResult};
 use super::validate;
 use crate::domain::calendar::{CUSTOM_DAYS_MAX, CUSTOM_NAME_MAX, CustomHolidayError};
 use crate::domain::notify::{self, TimesError};
-use crate::domain::report_template::{HEADING_MAX, SectionKind, TITLE_MAX, TemplateError};
+use crate::domain::report_template::{HEADING_MAX, Kind, TITLE_MAX, TemplateError};
 use crate::domain::settings::{
     CustomHoliday, DayCount, ReminderFrequency, ReportTemplate, Settings, Theme,
+    WeeklyReportTemplate,
 };
 use crate::{autostart, repo, resident};
 
@@ -42,6 +43,8 @@ pub struct SettingsInput {
     /// Title 1 to 60 characters; headings 1 to 40 characters, all different.
     /// Saved normalized (see `ReportTemplate::checked`).
     pub report_template: ReportTemplate,
+    /// Checked and saved as the daily one (v0.3.0).
+    pub weekly_report_template: WeeklyReportTemplate,
 }
 
 impl From<&Settings> for SettingsInput {
@@ -58,6 +61,7 @@ impl From<&Settings> for SettingsInput {
             day_count: s.day_count,
             custom_holidays: s.custom_holidays.clone(),
             report_template: s.report_template.clone(),
+            weekly_report_template: s.weekly_report_template.clone(),
         }
     }
 }
@@ -126,7 +130,14 @@ pub async fn update(pool: &SqlitePool, input: SettingsInput) -> CmdResult<Settin
         .iter()
         .map(|h| h.checked().map_err(|e| holiday_error(h, e)))
         .collect::<CmdResult<Vec<_>>>()?;
-    let report_template = input.report_template.checked().map_err(template_error)?;
+    let report_template = input
+        .report_template
+        .checked()
+        .map_err(|e| template_error(e, "日報"))?;
+    let weekly_report_template = input
+        .weekly_report_template
+        .checked()
+        .map_err(|e| template_error(e, "週報"))?;
     let mut tx = pool.begin().await?;
     let current = repo::settings::load(&mut tx).await?;
     let next = Settings {
@@ -141,6 +152,7 @@ pub async fn update(pool: &SqlitePool, input: SettingsInput) -> CmdResult<Settin
         day_count: input.day_count,
         custom_holidays,
         report_template,
+        weekly_report_template,
         ..current
     };
     repo::settings::save_user_settings(&mut tx, &next).await?;
@@ -164,12 +176,14 @@ fn holiday_error(h: &CustomHoliday, e: CustomHolidayError) -> AppError {
     })
 }
 
-fn template_error(e: TemplateError) -> AppError {
-    let section = |k: SectionKind| k.default_heading();
+/// The error of the daily or the weekly template (`report`: 「日報」「週報」).
+/// Sections are named by their default headings.
+fn template_error<K: Kind>(e: TemplateError<K>, report: &str) -> AppError {
+    let section = |k: K| k.default_heading();
     AppError::validation(match e {
-        TemplateError::EmptyTitle => "日報の題名を入力してください。".to_owned(),
+        TemplateError::EmptyTitle => format!("{report}の題名を入力してください。"),
         TemplateError::TitleTooLong => {
-            format!("日報の題名は{TITLE_MAX}字までにしてください。")
+            format!("{report}の題名は{TITLE_MAX}字までにしてください。")
         }
         TemplateError::EmptyHeading(k) => {
             format!("「{}」の節の見出しを入力してください。", section(k))
@@ -179,7 +193,7 @@ fn template_error(e: TemplateError) -> AppError {
             section(k)
         ),
         TemplateError::LineBreak => {
-            "日報の題名と見出しに改行は使えません。1行で入力してください。".to_owned()
+            format!("{report}の題名と見出しに改行は使えません。1行で入力してください。")
         }
         TemplateError::DuplicateHeading {
             heading,
@@ -213,6 +227,7 @@ fn times_error(e: TimesError) -> AppError {
 mod tests {
     use super::*;
     use crate::commands::error::ErrorKind;
+    use crate::domain::report_template::{SectionKind, WeeklySectionKind};
     use crate::domain::testing::{d, ts};
     use crate::repo::db;
 
@@ -412,6 +427,109 @@ mod tests {
             report_template: t,
             ..SettingsInput::from(&Settings::default())
         }
+    }
+
+    fn weekly(change: impl FnOnce(&mut WeeklyReportTemplate)) -> SettingsInput {
+        let mut t = WeeklyReportTemplate::default();
+        change(&mut t);
+        SettingsInput {
+            weekly_report_template: t,
+            ..SettingsInput::from(&Settings::default())
+        }
+    }
+
+    fn weekly_heading(t: &mut WeeklyReportTemplate, kind: WeeklySectionKind, text: &str) {
+        t.sections
+            .iter_mut()
+            .find(|s| s.kind() == kind)
+            .unwrap()
+            .heading = text.into();
+    }
+
+    #[tokio::test]
+    async fn weekly_report_template_is_saved_normalized() {
+        let pool = db::open_in_memory().await.unwrap();
+        let s = update(
+            &pool,
+            weekly(|t| {
+                t.title = " # {開始日}の週 ".into();
+                weekly_heading(t, WeeklySectionKind::NextWeek, " ## 翌週 ");
+                t.sections.rotate_right(1);
+                t.sections.retain(|s| s.kind() != WeeklySectionKind::Work);
+            }),
+        )
+        .await
+        .unwrap();
+        let t = &s.weekly_report_template;
+        assert_eq!(t.title, "{開始日}の週");
+        assert_eq!(
+            t.section(WeeklySectionKind::NextWeek).unwrap().heading,
+            "翌週"
+        );
+        let kinds: Vec<WeeklySectionKind> = t.sections.iter().map(|s| s.kind()).collect();
+        // 今週の作業 was missing: added before 所感・連絡事項.
+        assert_eq!(
+            kinds,
+            [
+                WeeklySectionKind::Closed,
+                WeeklySectionKind::Waiting,
+                WeeklySectionKind::NextWeek,
+                WeeklySectionKind::Attention,
+                WeeklySectionKind::Work,
+                WeeklySectionKind::Note,
+            ]
+        );
+        assert_eq!(s.report_template, ReportTemplate::default());
+        assert_eq!(get(&pool).await.unwrap(), s);
+    }
+
+    #[tokio::test]
+    async fn weekly_report_template_is_checked_as_the_daily_one() {
+        let pool = db::open_in_memory().await.unwrap();
+        let message = |input| {
+            let pool = pool.clone();
+            async move { update(&pool, input).await.unwrap_err().message }
+        };
+        assert_eq!(
+            message(weekly(|t| t.title = "#".into())).await,
+            "週報の題名を入力してください。"
+        );
+        assert_eq!(
+            message(weekly(|t| t.title = "題".repeat(61))).await,
+            "週報の題名は60字までにしてください。"
+        );
+        assert_eq!(
+            message(weekly(|t| weekly_heading(
+                t,
+                WeeklySectionKind::NextWeek,
+                " "
+            )))
+            .await,
+            "「来週の予定」の節の見出しを入力してください。"
+        );
+        assert_eq!(
+            message(weekly(|t| weekly_heading(
+                t,
+                WeeklySectionKind::Work,
+                &"見".repeat(41)
+            )))
+            .await,
+            "「今週の作業」の節の見出しは40字までにしてください。"
+        );
+        assert_eq!(
+            message(weekly(|t| weekly_heading(
+                t,
+                WeeklySectionKind::Attention,
+                "今週完了・中止"
+            )))
+            .await,
+            "見出し「今週完了・中止」が「今週完了・中止」と「日限注意」の節で重なっています。節ごとに違う見出しにしてください。"
+        );
+        assert_eq!(
+            message(weekly(|t| t.title = "週報\n{開始日}".into())).await,
+            "週報の題名と見出しに改行は使えません。1行で入力してください。"
+        );
+        assert_eq!(get(&pool).await.unwrap(), Settings::default());
     }
 
     fn heading(t: &mut ReportTemplate, kind: SectionKind, text: &str) {

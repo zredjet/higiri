@@ -16,6 +16,7 @@
 //! | `day_count` | `"calendar"` or `"business"` |
 //! | `custom_holidays` | `[{"name", "start", "end", "yearly"}, …]` |
 //! | `report_template` | `{"title", "sections": [{"kind", "heading", "enabled", "options"}, …]}` |
+//! | `weekly_report_template` | the same shape, with the weekly report's kinds and items |
 //!
 //! Missing keys, unknown keys and unreadable values fall back to the defaults
 //! so that a bad row never prevents the app from starting.
@@ -32,7 +33,7 @@ use sqlx::SqliteConnection;
 use super::Result;
 use crate::domain::date::{format_timestamp, parse_timestamp};
 use crate::domain::notify::normalize_times;
-use crate::domain::settings::{CustomHoliday, ReportTemplate, Settings};
+use crate::domain::settings::{CustomHoliday, ReportTemplate, Settings, WeeklyReportTemplate};
 
 pub const REMINDER_FREQUENCY: &str = "reminder_frequency";
 pub const SOON_DAYS: &str = "soon_days";
@@ -48,6 +49,7 @@ pub const TRAY_HINT_SHOWN: &str = "tray_hint_shown";
 pub const DAY_COUNT: &str = "day_count";
 pub const CUSTOM_HOLIDAYS: &str = "custom_holidays";
 pub const REPORT_TEMPLATE: &str = "report_template";
+pub const WEEKLY_REPORT_TEMPLATE: &str = "weekly_report_template";
 
 /// Keys a restore (and the JSON import) leaves as they are on this PC:
 /// `autostart` belongs to the PC, the others are written by the app.
@@ -88,6 +90,17 @@ fn read_report_template(value: &str, fallback: ReportTemplate) -> ReportTemplate
         .unwrap_or(fallback)
 }
 
+/// A stored weekly report template, read by the same rules as the daily one.
+fn read_weekly_report_template(
+    value: &str,
+    fallback: WeeklyReportTemplate,
+) -> WeeklyReportTemplate {
+    serde_json::from_str::<WeeklyReportTemplate>(value)
+        .ok()
+        .and_then(|t| t.checked().ok())
+        .unwrap_or(fallback)
+}
+
 /// A stored UTC timestamp (or null), or the fallback when unreadable.
 fn read_timestamp(value: &str, fallback: Option<DateTime<Utc>>) -> Option<DateTime<Utc>> {
     match serde_json::from_str::<Option<String>>(value) {
@@ -119,6 +132,10 @@ pub async fn load(conn: &mut SqliteConnection) -> Result<Settings> {
             DAY_COUNT => s.day_count = read(&value, s.day_count),
             CUSTOM_HOLIDAYS => s.custom_holidays = read_custom_holidays(&value, s.custom_holidays),
             REPORT_TEMPLATE => s.report_template = read_report_template(&value, s.report_template),
+            WEEKLY_REPORT_TEMPLATE => {
+                s.weekly_report_template =
+                    read_weekly_report_template(&value, s.weekly_report_template)
+            }
             _ => {}
         }
     }
@@ -160,6 +177,7 @@ pub async fn save_user_settings(conn: &mut SqliteConnection, s: &Settings) -> Re
     put(conn, DAY_COUNT, &s.day_count).await?;
     put(conn, CUSTOM_HOLIDAYS, &s.custom_holidays).await?;
     put(conn, REPORT_TEMPLATE, &s.report_template).await?;
+    put(conn, WEEKLY_REPORT_TEMPLATE, &s.weekly_report_template).await?;
     Ok(())
 }
 
@@ -187,7 +205,9 @@ pub async fn set_tray_hint_shown(conn: &mut SqliteConnection, shown: bool) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::report_template::{SectionBody, SectionKind};
+    use crate::domain::report_template::{
+        SectionBody, SectionKind, Template, WeeklySectionBody, WeeklySectionKind,
+    };
     use crate::domain::settings::{DayCount, ReminderFrequency, Theme};
     use crate::domain::testing::{d, ts};
     use crate::repo::testing::conn;
@@ -224,6 +244,10 @@ mod tests {
                 title: "{日付} 業務報告".into(),
                 ..ReportTemplate::default()
             },
+            weekly_report_template: WeeklyReportTemplate {
+                title: "{開始日}の週".into(),
+                ..WeeklyReportTemplate::default()
+            },
         };
         save(&mut c, &s).await.unwrap();
         assert_eq!(load(&mut c).await.unwrap(), s);
@@ -251,6 +275,15 @@ mod tests {
         assert!(
             template.starts_with(r#"{"title":"{日付} 業務報告","sections":[{"heading":"本日の作業","enabled":true,"kind":"work","options":{"project_headings":true,"#),
             "{template}"
+        );
+        let (_, weekly) = rows.remove(
+            rows.iter()
+                .position(|(k, _)| k == "weekly_report_template")
+                .unwrap(),
+        );
+        assert!(
+            weekly.starts_with(r#"{"title":"{開始日}の週","sections":[{"heading":"今週の作業","enabled":true,"kind":"work","options":{"project_headings":true,"#),
+            "{weekly}"
         );
         assert_eq!(
             rows,
@@ -354,6 +387,68 @@ mod tests {
         assert!(matches!(&waiting.body, SectionBody::Waiting(o) if !o.waiting_days));
         assert_eq!(t.note_heading(), "連絡");
         assert!(t.sections[5].enabled);
+    }
+
+    #[tokio::test]
+    async fn weekly_report_templates_are_read_as_the_daily_ones() {
+        let (_pool, mut c) = conn().await;
+        // 所感 first, 来週の予定 twice, the rest missing.
+        let stored = r#"{"title":" # 週報 {開始日} ","sections":[
+            {"kind":"note","heading":"連絡","enabled":false,"options":{}},
+            {"kind":"next_week","heading":"翌週","enabled":false,"options":{"planned_period":false,"due_date":true}},
+            {"kind":"next_week","heading":"来週の予定","enabled":true,"options":{"planned_period":true,"due_date":true}}
+        ]}"#;
+        sqlx::query("INSERT INTO settings (key, value) VALUES ('weekly_report_template', ?1)")
+            .bind(stored)
+            .execute(&mut *c)
+            .await
+            .unwrap();
+        let t = load(&mut c).await.unwrap().weekly_report_template;
+        assert_eq!(t.title, "週報 {開始日}");
+        let kinds: Vec<WeeklySectionKind> = t.sections.iter().map(|s| s.kind()).collect();
+        assert_eq!(
+            kinds,
+            [
+                WeeklySectionKind::NextWeek,
+                WeeklySectionKind::Work,
+                WeeklySectionKind::Closed,
+                WeeklySectionKind::Waiting,
+                WeeklySectionKind::Attention,
+                WeeklySectionKind::Note,
+            ]
+        );
+        assert_eq!(t.sections[0].heading, "翌週");
+        assert!(!t.sections[0].enabled);
+        assert!(matches!(&t.sections[0].body, WeeklySectionBody::NextWeek(o) if !o.planned_period));
+        assert_eq!(t.note_heading(), "連絡");
+        assert!(t.sections[5].enabled);
+
+        // Unreadable or not passing the checks: the default as a whole.
+        for bad in [
+            r#""週報""#,
+            r#"{"title":"","sections":[]}"#,
+            // A daily kind.
+            r#"{"title":"T","sections":[{"kind":"tomorrow","heading":"明日","enabled":true,"options":{"planned_period":true}}]}"#,
+            r#"{"title":"T","sections":[{"kind":"work","heading":"待ち","enabled":true,"options":{"project_headings":true,"status":true,"due_date":true,"work_days":true,"work_time":true,"total_time":true,"log_body":false}}]}"#,
+            // Missing an item.
+            r#"{"title":"T","sections":[{"kind":"closed","heading":"完了","enabled":true,"options":{"close_reason":true}}]}"#,
+        ] {
+            sqlx::query("UPDATE settings SET value = ?1 WHERE key = 'weekly_report_template'")
+                .bind(bad)
+                .execute(&mut *c)
+                .await
+                .unwrap();
+            assert_eq!(
+                load(&mut c).await.unwrap().weekly_report_template,
+                WeeklyReportTemplate::default(),
+                "{bad}"
+            );
+        }
+        // The daily template is not touched by the weekly one.
+        assert_eq!(
+            load(&mut c).await.unwrap().report_template,
+            ReportTemplate::default()
+        );
     }
 
     #[tokio::test]

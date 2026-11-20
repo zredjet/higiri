@@ -69,7 +69,8 @@ export function SettingsPage() {
       {settings.data ? <ReminderCard key={settings.dataUpdatedAt} settings={settings.data} /> : null}
       {settings.data ? <DayCountCard settings={settings.data} /> : null}
       {settings.data ? <ResidentCard settings={settings.data} /> : null}
-      {settings.data ? <ReportTemplateCard template={settings.data.report_template} /> : null}
+      {settings.data ? <ReportTemplateCard kind="daily" template={settings.data.report_template} /> : null}
+      {settings.data ? <ReportTemplateCard kind="weekly" template={settings.data.weekly_report_template} /> : null}
       <TodoTemplateCard />
       <DisplayCard />
       <DataCard />

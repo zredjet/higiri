@@ -397,6 +397,10 @@ async fn measure(pool: &SqlitePool, today: NaiveDate) -> Vec<(&'static str, Dura
         kind: ReportKind::Daily,
         date: today,
     };
+    let weekly_report = reports::ReportKey {
+        kind: ReportKind::Weekly,
+        date: today,
+    };
 
     let runs = 7;
     let mut times = vec![
@@ -434,7 +438,11 @@ async fn measure(pool: &SqlitePool, today: NaiveDate) -> Vec<(&'static str, Dura
         ),
         (
             "generate_report",
-            median(runs, || reports::generate(pool, report, None)).await,
+            median(runs, || reports::generate(pool, report, None, today)).await,
+        ),
+        (
+            "generate_report (weekly)",
+            median(runs, || reports::generate(pool, weekly_report, None, today)).await,
         ),
     ];
     for (label, words) in SEARCHES {

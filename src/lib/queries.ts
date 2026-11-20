@@ -108,6 +108,7 @@ export function settingsInputOf(s: Settings): SettingsInput {
     day_count: s.day_count,
     custom_holidays: s.custom_holidays,
     report_template: s.report_template,
+    weekly_report_template: s.weekly_report_template,
   };
 }
 

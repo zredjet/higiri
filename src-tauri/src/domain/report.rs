@@ -10,6 +10,10 @@
 //! sections, their headings, which are shown and what their lines carry. The
 //! line format stays the MVP's. 所感・連絡事項 is always last.
 //!
+//! The weekly report (v0.3.0, `weekly_report`) builds on the pieces here:
+//! the lines of 待ち and 日限注意, the sections' layout, and the 所感・連絡事項
+//! part ([`compose`] and [`split_note`] work for either template).
+//!
 //! In 営業日 (v1.1), 明日の予定 is for the next business day, the day counts of
 //! 日限注意 read 「あとN営業日」「N営業日超過」, and a due date moved off a
 //! holiday gets 「休日のため前倒し」. In 暦日 the text is the MVP's.
@@ -21,10 +25,10 @@ use serde::{Deserialize, Serialize};
 
 use super::date::{format_date, month_day_slash};
 use super::events::{EventKind, TodoEvent};
-use super::model::{Project, Status, Todo, WorkLog};
+use super::model::{Priority, Project, Status, Todo, WorkLog};
 use super::report_template::{
-    AttentionOptions, ClosedOptions, ReportTemplate, SectionBody, SectionKind, TomorrowOptions,
-    WaitingOptions, WorkOptions,
+    AttentionOptions, ClosedOptions, Kind, ReportTemplate, SectionBody, Template, TemplateSection,
+    TomorrowOptions, WaitingOptions, WorkOptions,
 };
 use super::subtodo::display_title;
 use super::urgency::{Assessment, Rules, Urgency, assess, attention_order, waiting_day};
@@ -66,7 +70,7 @@ pub struct Report {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-const NONE_LINE: &str = "- なし";
+pub(super) const NONE_LINE: &str = "- なし";
 
 /// Added to a due date that falls on a holiday, in 営業日.
 const SHIFTED: &str = "休日のため前倒し";
@@ -98,19 +102,19 @@ pub struct ReportInput<'a> {
     pub events: &'a [TodoEvent],
 }
 
-struct Lookup<'a> {
+/// Projects and TODOs by id (daily and weekly report).
+pub(super) struct Lookup<'a> {
     projects: HashMap<i64, &'a Project>,
-    todos: HashMap<i64, &'a Todo>,
+    pub(super) todos: HashMap<i64, &'a Todo>,
     project_order: HashMap<i64, usize>,
 }
 
 impl<'a> Lookup<'a> {
-    fn new(input: &ReportInput<'a>) -> Self {
+    pub(super) fn new(projects: &'a [Project], todos: &'a [Todo]) -> Self {
         Lookup {
-            projects: input.projects.iter().map(|p| (p.id, p)).collect(),
-            todos: input.todos.iter().map(|t| (t.id, t)).collect(),
-            project_order: input
-                .projects
+            projects: projects.iter().map(|p| (p.id, p)).collect(),
+            todos: todos.iter().map(|t| (t.id, t)).collect(),
+            project_order: projects
                 .iter()
                 .enumerate()
                 .map(|(i, p)| (p.id, i))
@@ -118,7 +122,7 @@ impl<'a> Lookup<'a> {
         }
     }
 
-    fn project_name(&self, t: &Todo) -> &str {
+    pub(super) fn project_name(&self, t: &Todo) -> &str {
         self.projects
             .get(&t.project_id)
             .map(|p| p.name.as_str())
@@ -126,7 +130,7 @@ impl<'a> Lookup<'a> {
     }
 
     /// 「親 / 子」 for a child (S-1), the title otherwise.
-    fn title(&self, t: &Todo) -> String {
+    pub(super) fn title(&self, t: &Todo) -> String {
         let parent = t
             .parent_id
             .and_then(|p| self.todos.get(&p))
@@ -134,15 +138,28 @@ impl<'a> Lookup<'a> {
         display_title(&t.title, parent)
     }
 
-    fn is_active(&self, t: &Todo) -> bool {
+    pub(super) fn is_active(&self, t: &Todo) -> bool {
         self.projects
             .get(&t.project_id)
             .is_some_and(|p| p.archived_at.is_none())
     }
+
+    /// Project order, then priority, then display order (本日の作業 and 今週の作業).
+    pub(super) fn work_order(&self, t: &Todo) -> (usize, Priority, i64, i64) {
+        (
+            self.project_order
+                .get(&t.project_id)
+                .copied()
+                .unwrap_or(usize::MAX),
+            t.priority,
+            t.sort_order,
+            t.id,
+        )
+    }
 }
 
 /// 「(a、b)」, or nothing when there are no parts.
-fn parenthesized(parts: &[String]) -> String {
+pub(super) fn parenthesized(parts: &[String]) -> String {
     if parts.is_empty() {
         String::new()
     } else {
@@ -150,7 +167,7 @@ fn parenthesized(parts: &[String]) -> String {
     }
 }
 
-fn section(out: &mut String, heading: &str, lines: Vec<String>) {
+pub(super) fn section(out: &mut String, heading: &str, lines: Vec<String>) {
     out.push_str("\n## ");
     out.push_str(heading);
     out.push('\n');
@@ -239,17 +256,7 @@ fn work_section(
         out.push('\n');
         return;
     }
-    todos.sort_by_key(|t| {
-        (
-            lk.project_order
-                .get(&t.project_id)
-                .copied()
-                .unwrap_or(usize::MAX),
-            t.priority,
-            t.sort_order,
-            t.id,
-        )
-    });
+    todos.sort_by_key(|t| lk.work_order(t));
     let mut current_project: Option<i64> = None;
     for t in todos {
         if o.project_headings && current_project != Some(t.project_id) {
@@ -313,14 +320,18 @@ fn closed_section(input: &ReportInput, lk: &Lookup, o: &ClosedOptions) -> Vec<St
         .collect()
 }
 
-/// 待ち: waiting TODOs of active projects, next follow-up first.
-fn waiting_section(input: &ReportInput, lk: &Lookup, o: &WaitingOptions) -> Vec<String> {
-    let mut waiting: Vec<&Todo> = input
-        .todos
+/// 待ち: TODOs of active projects waiting on `date`, next follow-up first.
+pub(super) fn waiting_lines(
+    todos: &[Todo],
+    lk: &Lookup,
+    date: NaiveDate,
+    o: &WaitingOptions,
+) -> Vec<String> {
+    let mut waiting: Vec<&Todo> = todos
         .iter()
         .filter(|t| t.status == Status::Waiting && lk.is_active(t))
         // On a past day, a TODO that started waiting later was not waiting yet.
-        .filter(|t| t.waiting_since.is_none_or(|since| since <= input.date))
+        .filter(|t| t.waiting_since.is_none_or(|since| since <= date))
         .collect();
     waiting.sort_by_key(|t| {
         (
@@ -340,7 +351,7 @@ fn waiting_section(input: &ReportInput, lk: &Lookup, o: &WaitingOptions) -> Vec<
             if o.waiting_days
                 && let Some(since) = t.waiting_since
             {
-                parts.push(format!("{}日目", waiting_day(since, input.date)));
+                parts.push(format!("{}日目", waiting_day(since, date)));
             }
             if o.follow_up_date
                 && let Some(f) = t.follow_up_date
@@ -437,15 +448,20 @@ fn attention_parts(t: &Todo, u: Urgency, a: &Assessment, o: &AttentionOptions) -
     parts
 }
 
-/// 日限注意: 超過・本日・間近 (and 要確認・着手遅れ when chosen) with the target
-/// date as today.
-fn attention_section(input: &ReportInput, lk: &Lookup, o: &AttentionOptions) -> Vec<String> {
-    let mut items: Vec<(&Todo, Urgency, Assessment)> = input
-        .todos
+/// 日限注意: 超過・本日・間近 (and 要確認・着手遅れ when chosen) with `date` as
+/// today.
+pub(super) fn attention_lines(
+    todos: &[Todo],
+    lk: &Lookup,
+    date: NaiveDate,
+    rules: &Rules,
+    o: &AttentionOptions,
+) -> Vec<String> {
+    let mut items: Vec<(&Todo, Urgency, Assessment)> = todos
         .iter()
         .filter(|t| lk.is_active(t))
         .filter_map(|t| {
-            let a = assess(t, input.date, input.rules);
+            let a = assess(t, date, rules);
             match a.urgency {
                 Some(u @ (Urgency::Overdue | Urgency::DueToday | Urgency::DueSoon)) => {
                     Some((t, u, a))
@@ -477,7 +493,7 @@ fn attention_section(input: &ReportInput, lk: &Lookup, o: &AttentionOptions) -> 
 /// The generated part: the title and the shown sections in the template's
 /// order, without 所感・連絡事項 (added last by [`compose`]).
 pub fn generate_body(input: &ReportInput, template: &ReportTemplate) -> String {
-    let lk = Lookup::new(input);
+    let lk = Lookup::new(input.projects, input.todos);
     let mut out = title(template, input.date);
     out.push('\n');
     for s in template.sections.iter().filter(|s| s.enabled) {
@@ -485,19 +501,26 @@ pub fn generate_body(input: &ReportInput, template: &ReportTemplate) -> String {
         match &s.body {
             SectionBody::Work(o) => work_section(input, &lk, heading, o, &mut out),
             SectionBody::Closed(o) => section(&mut out, heading, closed_section(input, &lk, o)),
-            SectionBody::Waiting(o) => section(&mut out, heading, waiting_section(input, &lk, o)),
+            SectionBody::Waiting(o) => section(
+                &mut out,
+                heading,
+                waiting_lines(input.todos, &lk, input.date, o),
+            ),
             SectionBody::Tomorrow(o) => section(&mut out, heading, tomorrow_section(input, &lk, o)),
-            SectionBody::Attention(o) => {
-                section(&mut out, heading, attention_section(input, &lk, o))
-            }
+            SectionBody::Attention(o) => section(
+                &mut out,
+                heading,
+                attention_lines(input.todos, &lk, input.date, input.rules, o),
+            ),
             SectionBody::Note(_) => {}
         }
     }
     out
 }
 
-/// Generated part + the hand-written 所感・連絡事項 under the template's heading.
-pub fn compose(body: &str, note: &str, template: &ReportTemplate) -> String {
+/// Generated part + the hand-written 所感・連絡事項 under the template's heading
+/// (daily or weekly).
+pub fn compose<T: Template>(body: &str, note: &str, template: &T) -> String {
     let mut out = body.trim_end().to_owned();
     out.push_str("\n\n## ");
     out.push_str(template.note_heading());
@@ -528,23 +551,21 @@ fn h2(line: &str) -> Option<&str> {
 /// When unsure, more is kept: an older report whose section headings were
 /// changed may keep part of its generated text in the note, but no
 /// hand-written text is lost.
-fn note_line(lines: &[&str], template: &ReportTemplate) -> Option<usize> {
-    let sections = template
-        .sections
-        .iter()
-        .filter(|s| s.kind() != SectionKind::Note);
+fn note_line<T: Template>(lines: &[&str], template: &T) -> Option<usize> {
+    let note = <<T::Section as TemplateSection>::Kind as Kind>::NOTE;
+    let sections = template.sections().iter().filter(|s| s.kind() != note);
     let shown: Vec<&str> = sections
         .clone()
-        .filter(|s| s.enabled)
-        .map(|s| s.heading.as_str())
+        .filter(|s| s.enabled())
+        .map(|s| s.heading())
         .collect();
-    let notes: Vec<&str> = [template.note_heading(), SectionKind::Note.default_heading()]
+    let notes: Vec<&str> = [template.note_heading(), note.default_heading()]
         .into_iter()
         .filter(|h| !shown.contains(h))
         .collect();
-    let mut known: Vec<&str> = sections.map(|s| s.heading.as_str()).collect();
-    for kind in SectionKind::ALL {
-        if kind != SectionKind::Note {
+    let mut known: Vec<&str> = sections.map(|s| s.heading()).collect();
+    for &kind in <<T::Section as TemplateSection>::Kind as Kind>::ALL {
+        if kind != note {
             known.push(kind.default_heading());
         }
     }
@@ -561,8 +582,8 @@ fn note_line(lines: &[&str], template: &ReportTemplate) -> Option<usize> {
 }
 
 /// The hand-written part of a full report: what follows the 所感・連絡事項
-/// heading (see [`note_line`]); empty when there is none.
-pub fn split_note(full: &str, template: &ReportTemplate) -> String {
+/// heading (see [`note_line`]); empty when there is none. Daily or weekly.
+pub fn split_note<T: Template>(full: &str, template: &T) -> String {
     let lines: Vec<&str> = full.lines().collect();
     match note_line(&lines, template) {
         Some(i) => lines[i + 1..].join("\n").trim().to_owned(),
@@ -573,6 +594,7 @@ pub fn split_note(full: &str, template: &ReportTemplate) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::report_template::SectionKind;
     use crate::domain::testing::{business_rules, d, rules, todo, ts};
 
     fn default_template() -> ReportTemplate {

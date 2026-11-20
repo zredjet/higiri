@@ -170,6 +170,23 @@ pub async fn list_by_date(conn: &mut SqliteConnection, date: NaiveDate) -> Resul
     )
 }
 
+/// Logs written from `start` to `end`, both included (weekly report material).
+pub async fn list_between(
+    conn: &mut SqliteConnection,
+    start: NaiveDate,
+    end: NaiveDate,
+) -> Result<Vec<WorkLog>> {
+    collect(
+        sqlx::query_as::<_, WorkLogRow>(
+            "SELECT * FROM work_logs WHERE log_date BETWEEN ?1 AND ?2 ORDER BY log_date, todo_id, id",
+        )
+        .bind(format_date(start))
+        .bind(format_date(end))
+        .fetch_all(&mut *conn)
+        .await?,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,6 +305,32 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[tokio::test]
+    async fn lists_the_logs_of_a_week() {
+        let (_pool, mut c) = conn().await;
+        let tid = todo_id(&mut c).await;
+        let now = ts(2026, 11, 19, 9, 0);
+        for date in [
+            "2026-11-22",
+            "2026-11-15",
+            "2026-11-16",
+            "2026-11-23",
+            "2026-11-19",
+        ] {
+            insert(&mut c, &log(tid, date, date, None), now)
+                .await
+                .unwrap();
+        }
+        let week: Vec<_> = list_between(&mut c, d("2026-11-16"), d("2026-11-22"))
+            .await
+            .unwrap()
+            .iter()
+            .map(|l| l.body_md.clone())
+            .collect();
+        // Both ends included, in date order.
+        assert_eq!(week, ["2026-11-16", "2026-11-19", "2026-11-22"]);
     }
 
     #[tokio::test]

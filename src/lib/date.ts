@@ -51,3 +51,14 @@ export function addDaysYmd(ymd: string, days: number): string {
   const [y, m, d] = ymd.split("-").map(Number);
   return toYmd(new Date(y, m - 1, d + days));
 }
+
+/**
+ * The Monday of the week "YYYY-MM-DD" falls in (週報: weeks run from Monday
+ * to Sunday). Rust moves a weekly report's date to its Monday as well; this
+ * is for the screen's keys and the week shown next to the heading.
+ */
+export function weekStartYmd(ymd: string): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const sinceMonday = (new Date(y, m - 1, d).getDay() + 6) % 7;
+  return toYmd(new Date(y, m - 1, d - sinceMonday));
+}

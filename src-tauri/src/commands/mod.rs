@@ -86,6 +86,10 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             "DEFAULT_REPORT_TEMPLATE",
             crate::domain::report_template::ReportTemplate::default(),
         )
+        .constant(
+            "DEFAULT_WEEKLY_REPORT_TEMPLATE",
+            crate::domain::report_template::WeeklyReportTemplate::default(),
+        )
         // IDs and counts are i64; they stay far below 2^53 in this app.
         .dangerously_cast_bigints_to_number()
         // One TS type per Rust type (no separate *_Serialize / *_Deserialize).

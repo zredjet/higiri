@@ -6,6 +6,7 @@ import {
   formatTimestampDate,
   monthDay,
   todayYmd,
+  weekStartYmd,
 } from "./date";
 
 describe("date formats", () => {
@@ -39,5 +40,22 @@ describe("date defaults", () => {
     expect(addDaysYmd("2026-11-19", 3)).toBe("2026-11-22");
     expect(addDaysYmd("2026-11-29", 3)).toBe("2026-12-02");
     expect(addDaysYmd("2026-12-30", 3)).toBe("2027-01-02");
+  });
+});
+
+describe("weekStartYmd", () => {
+  it("is the Monday of the week, Monday to Sunday", () => {
+    for (const day of ["2026-11-16", "2026-11-17", "2026-11-19", "2026-11-22"]) {
+      expect(weekStartYmd(day)).toBe("2026-11-16");
+    }
+    expect(weekStartYmd("2026-11-23")).toBe("2026-11-23");
+    expect(weekStartYmd("2026-11-15")).toBe("2026-11-09");
+  });
+
+  it("crosses month and year ends", () => {
+    for (const day of ["2026-12-28", "2027-01-01", "2027-01-03"]) {
+      expect(weekStartYmd(day)).toBe("2026-12-28");
+    }
+    expect(weekStartYmd("2028-03-01")).toBe("2028-02-28");
   });
 });

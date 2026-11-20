@@ -24,6 +24,7 @@ pub mod template;
 pub mod timeline;
 pub mod urgency;
 pub mod views;
+pub mod weekly_report;
 
 #[cfg(test)]
 pub(crate) mod testing;

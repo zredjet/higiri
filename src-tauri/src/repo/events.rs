@@ -116,6 +116,23 @@ pub async fn list_by_date(conn: &mut SqliteConnection, date: NaiveDate) -> Resul
     )
 }
 
+/// Events from `start` to `end`, both included (weekly report material).
+pub async fn list_between(
+    conn: &mut SqliteConnection,
+    start: NaiveDate,
+    end: NaiveDate,
+) -> Result<Vec<TodoEvent>> {
+    collect(
+        sqlx::query_as::<_, EventRow>(
+            "SELECT * FROM todo_events WHERE event_date BETWEEN ?1 AND ?2 ORDER BY occurred_at, id",
+        )
+        .bind(format_date(start))
+        .bind(format_date(end))
+        .fetch_all(&mut *conn)
+        .await?,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,6 +274,19 @@ mod tests {
             .map(|e| e.id)
             .collect();
         assert_eq!(by_date, vec![later.id]);
+        let week: Vec<_> = list_between(&mut c, d("2026-11-16"), d("2026-11-22"))
+            .await
+            .unwrap()
+            .iter()
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(week, vec![earlier.id, later.id]);
+        assert!(
+            list_between(&mut c, d("2026-11-18"), d("2026-11-18"))
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]
