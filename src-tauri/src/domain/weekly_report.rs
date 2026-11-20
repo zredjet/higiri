@@ -104,10 +104,9 @@ pub struct WeeklyReportInput<'a> {
 /// One TODO's work in the week.
 #[derive(Default)]
 struct TodoWork<'a> {
-    /// Minutes of the logs with a time.
+    /// Minutes of the logs with a time (shown when more than 0, as in the
+    /// daily report).
     minutes: i64,
-    /// Some log has its time entered.
-    timed: bool,
     /// The days worked, each with its logs' text in the order written.
     days: BTreeMap<NaiveDate, Vec<&'a str>>,
 }
@@ -134,7 +133,7 @@ fn work_line(t: &Todo, w: &TodoWork, o: &WeeklyWorkOptions, lk: &Lookup) -> Stri
     } else {
         format!("({})", meta.join(" / "))
     };
-    let time = if o.work_time && w.timed {
+    let time = if o.work_time && w.minutes > 0 {
         hours(w.minutes)
     } else {
         String::new()
@@ -175,10 +174,7 @@ fn work_section(
     let mut per_todo: HashMap<i64, TodoWork> = HashMap::new();
     for l in logs {
         let w = per_todo.entry(l.todo_id).or_default();
-        if let Some(m) = l.minutes {
-            w.minutes += m;
-            w.timed = true;
-        }
+        w.minutes += l.minutes.unwrap_or(0);
         w.days
             .entry(l.log_date)
             .or_default()
@@ -198,13 +194,8 @@ fn work_section(
         return;
     }
     todos.sort_by_key(|t| lk.work_order(t));
-    let timed: Vec<&TodoWork> = todos
-        .iter()
-        .map(|t| &per_todo[&t.id])
-        .filter(|w| w.timed)
-        .collect();
-    if o.total_time && !timed.is_empty() {
-        let total: i64 = timed.iter().map(|w| w.minutes).sum();
+    let total: i64 = todos.iter().map(|t| per_todo[&t.id].minutes).sum();
+    if o.total_time && total > 0 {
         out.push_str(&format!("\n作業時間の合計 {}\n", hours(total)));
         // A project heading starts with a blank line; a list needs one here.
         if !o.project_headings {
@@ -668,7 +659,7 @@ mod tests {
     }
 
     #[test]
-    fn no_total_without_a_timed_log() {
+    fn no_time_without_minutes() {
         let mut data = worked();
         for l in data.logs.iter_mut() {
             l.minutes = None;
@@ -686,16 +677,43 @@ mod tests {
             "{body}"
         );
         assert!(!body.contains("作業時間の合計"), "{body}");
-        // A log with 0 minutes has its time entered.
+        // Logs of 0 minutes: no time and no total, as in the daily report.
         data.logs[0].minutes = Some(0);
+        data.logs[1].minutes = Some(0);
         let body = data.body(
             "2026-11-19",
             "2026-11-22",
             &rules(3),
             &WeeklyReportTemplate::default(),
         );
-        assert!(body.contains("作業時間の合計 0.0h\n"), "{body}");
-        assert!(body.contains("作業日 11/17・11/19)0.0h\n"), "{body}");
+        assert!(
+            body.contains(
+                "## 今週の作業\n\n### P\n- **A**(作業中 / 日限 11/20 / 作業日 11/17・11/19)\n"
+            ),
+            "{body}"
+        );
+        assert!(!body.contains("作業時間の合計"), "{body}");
+        assert!(!body.contains("0.0h"), "{body}");
+        // One TODO with 0 minutes beside one with time: only the latter has it.
+        data.logs[4].minutes = Some(60);
+        let body = data.body(
+            "2026-11-19",
+            "2026-11-22",
+            &rules(3),
+            &WeeklyReportTemplate::default(),
+        );
+        assert!(
+            body.contains(concat!(
+                "## 今週の作業\n",
+                "\n",
+                "作業時間の合計 1.0h\n",
+                "\n",
+                "### P\n",
+                "- **A**(作業中 / 日限 11/20 / 作業日 11/17・11/19)\n",
+                "- **親 / 子**(未着手 / 作業日 11/22)1.0h\n",
+            )),
+            "{body}"
+        );
     }
 
     fn closed() -> Data {
