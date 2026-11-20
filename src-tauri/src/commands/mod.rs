@@ -8,6 +8,7 @@
 pub mod backup;
 pub mod clock;
 pub mod dashboard;
+pub mod dependencies;
 pub mod error;
 pub mod gantt;
 pub mod holidays;
@@ -54,6 +55,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             templates::save_todo_template,
             templates::rename_todo_template,
             templates::delete_todo_template,
+            dependencies::add_dependency,
+            dependencies::remove_dependency,
+            dependencies::list_dependencies,
             work_logs::list_timeline,
             work_logs::save_work_log,
             work_logs::delete_work_log,
@@ -129,7 +133,7 @@ mod tests {
             .collect();
         allowed.sort();
         assert_eq!(allowed, commands_in_bindings());
-        assert_eq!(allowed.len(), 38);
+        assert_eq!(allowed.len(), 41);
     }
 
     /// Regenerates `src/lib/bindings.ts` and fails when the committed file was

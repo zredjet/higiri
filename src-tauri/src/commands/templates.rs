@@ -97,9 +97,12 @@ pub async fn save(
         ));
     }
     let children = repo::todos::list_children(&mut tx, &[todo.id]).await?;
+    // The dependencies between the children (T-11).
+    let child_ids: Vec<i64> = children.iter().map(|c| c.id).collect();
+    let dependencies = repo::dependencies::among(&mut tx, &child_ids).await?;
     // Titles are required when a TODO is saved; only data from elsewhere (an
     // imported file) can have an empty one.
-    let body = TemplateBody::from_todos(&todo, &children)
+    let body = TemplateBody::from_todos(&todo, &children, &dependencies)
         .checked()
         .map_err(|_| {
             AppError::validation(
@@ -529,6 +532,76 @@ mod tests {
         assert_eq!(
             statuses_and_events(&pool, &ids).await,
             vec![(Status::Todo, 1); 3]
+        );
+    }
+
+    #[tokio::test]
+    async fn the_dependencies_between_the_children_are_kept_and_joined_again() {
+        use crate::commands::dependencies;
+        let (pool, pid) = setup().await;
+        let parent = family(&pool, pid).await;
+        let mut c = pool.acquire().await.unwrap();
+        let kids = repo::todos::list_children(&mut c, &[parent.id])
+            .await
+            .unwrap();
+        drop(c);
+        let (sales, cancelled, report) = (kids[0].id, kids[1].id, kids[2].id);
+        let outside = add(&pool, input(pid, None, "前月の確定", None)).await;
+        // 報告書 waits for 売上 and the cancelled child; 売上 waits for a TODO
+        // outside the family. Only 報告書 → 売上 is kept.
+        for (later, first) in [(report, sales), (report, cancelled), (sales, outside.id)] {
+            dependencies::add(&pool, later, first, today(), now())
+                .await
+                .unwrap();
+        }
+        let t = save(&pool, parent.id, "月次締め", false, now())
+            .await
+            .unwrap();
+        let mut c = pool.acquire().await.unwrap();
+        let body = repo::templates::get(&mut c, t.id).await.unwrap().body;
+        drop(c);
+        assert_eq!(
+            body.children
+                .iter()
+                .map(|k| (k.title.as_str(), k.depends_on.clone()))
+                .collect::<Vec<_>>(),
+            [("売上の集計", vec![]), ("報告書の作成", vec![0])]
+        );
+
+        let made = todos::create(
+            &pool,
+            NewTodoInput {
+                template_id: Some(t.id),
+                ..input(pid, None, "12月の締め", Some("2026-12-31"))
+            },
+            today(),
+            now(),
+        )
+        .await
+        .unwrap();
+        let mut c = pool.acquire().await.unwrap();
+        let new_kids = repo::todos::list_children(&mut c, &[made.todo.id])
+            .await
+            .unwrap();
+        let new_ids: Vec<i64> = new_kids.iter().map(|k| k.id).collect();
+        let joined: Vec<(i64, i64)> = repo::dependencies::list(&mut c)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|d| (d.todo_id, d.depends_on_id))
+            .filter(|(later, _)| new_ids.contains(later))
+            .collect();
+        drop(c);
+        // The new 報告書の作成 waits for the new 売上の集計, nothing else.
+        assert_eq!(joined, [(new_ids[1], new_ids[0])]);
+        let report_item = todos::get(&pool, new_ids[1], today()).await.unwrap();
+        assert_eq!(
+            report_item
+                .blocked_by
+                .iter()
+                .map(|b| b.title.as_str())
+                .collect::<Vec<_>>(),
+            ["売上の集計"]
         );
     }
 

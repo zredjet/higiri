@@ -13,10 +13,9 @@ use serde::Serialize;
 use super::events::{EventKind, TodoEvent};
 use super::listing::tree_rows;
 use super::model::{Project, Status, Todo};
-use super::repeat::RepeatsByTodo;
 use super::subtodo::Family;
 use super::urgency::Rules;
-use super::views::{TodoItem, todo_item};
+use super::views::{Links, TodoItem, todo_item};
 
 /// Days `start..=end`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
@@ -40,6 +39,10 @@ pub struct GanttRow {
     /// A hidden (完了・中止) parent shown only to hold its shown children:
     /// no bars and no due mark (all spans are empty).
     pub bridge: bool,
+    /// The TODOs this one waits for (T-11), finished or not: an arrow from
+    /// the end of each one's planned bar to the start of this one's, when
+    /// both rows are shown with a planned bar.
+    pub depends_on: Vec<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
@@ -122,6 +125,7 @@ pub fn row(item: TodoItem, events: &[&TodoEvent], today: NaiveDate) -> GanttRow 
         waiting,
         child: false,
         bridge: false,
+        depends_on: Vec::new(),
     }
 }
 
@@ -134,6 +138,7 @@ fn bridge_row(item: TodoItem) -> GanttRow {
         waiting: Vec::new(),
         child: false,
         bridge: true,
+        depends_on: Vec::new(),
     }
 }
 
@@ -162,7 +167,7 @@ pub fn build(
     projects: Vec<Project>,
     todos: &[Todo],
     events: &[TodoEvent],
-    repeats: &RepeatsByTodo,
+    links: &Links,
     filter: GanttFilter,
     today: NaiveDate,
     rules: &Rules,
@@ -187,7 +192,7 @@ pub fn build(
                         t.clone(),
                         project.name.clone(),
                         &family,
-                        repeats.get(&t.id),
+                        links,
                         today,
                         rules,
                     );
@@ -197,6 +202,7 @@ pub fn build(
                     let evs = by_todo.get(&t.id).map(Vec::as_slice).unwrap_or(&[]);
                     GanttRow {
                         child: r.child,
+                        depends_on: links.dependencies.depends_on(t.id),
                         ..row(item, evs, today)
                     }
                 })
@@ -421,7 +427,7 @@ mod tests {
             vec![project(1)],
             &todos,
             &[],
-            &RepeatsByTodo::new(),
+            &Links::default(),
             all,
             d("2026-11-19"),
             &rules(3),
@@ -464,7 +470,7 @@ mod tests {
             vec![project(1)],
             &todos,
             &[],
-            &RepeatsByTodo::new(),
+            &Links::default(),
             open_only,
             d("2026-11-19"),
             &rules(3),
@@ -479,6 +485,52 @@ mod tests {
         assert_eq!(
             bridge.item.children.map(|c| (c.done, c.total)),
             Some((1, 2))
+        );
+    }
+
+    #[test]
+    fn rows_carry_the_todos_they_wait_for() {
+        use crate::domain::dependency::{Dependencies, Prerequisite};
+        let todos = vec![node(1, None, Status::Done), node(2, None, Status::Todo)];
+        let first = |id: i64, status: Status| Prerequisite {
+            todo_id: 2,
+            id,
+            title: format!("T{id}"),
+            parent_title: None,
+            project_name: "P".into(),
+            status,
+            planned_end: None,
+        };
+        let links = Links {
+            // 9 is in another project: listed, the screen draws no arrow to it.
+            dependencies: Dependencies::new([first(1, Status::Done), first(9, Status::Todo)]),
+            ..Links::default()
+        };
+        let all = GanttFilter {
+            include_done: true,
+            include_cancelled: true,
+        };
+        let g = build(
+            vec![project(1)],
+            &todos,
+            &[],
+            &links,
+            all,
+            d("2026-11-19"),
+            &rules(3),
+        );
+        let rows = &g.projects[0].rows;
+        assert!(rows[0].depends_on.is_empty());
+        // Finished or not.
+        assert_eq!(rows[1].depends_on, [1, 9]);
+        assert_eq!(
+            rows[1]
+                .item
+                .blocked_by
+                .iter()
+                .map(|b| b.id)
+                .collect::<Vec<_>>(),
+            [9]
         );
     }
 }

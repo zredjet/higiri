@@ -477,6 +477,59 @@ body,
   color: var(--text-muted);
 }
 
+/* 依存関係 (T-11): the mark of the list and the Gantt chart, the detail
+   panel's lists (a row opens the TODO, × takes the dependency off), the
+   search of the picker and the unfinished TODOs of the confirmation. */
+.blocked-mark {
+  flex: 0 0 auto;
+  display: inline-flex;
+  color: var(--text-muted);
+}
+
+.dependency-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding-right: var(--space-1);
+}
+
+.dependency-row .family-item {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dependency-row__remove {
+  flex: 0 0 auto;
+}
+
+.dependency-item__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.dependency-picker {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.dependency-picker .family-item:disabled {
+  cursor: default;
+  color: var(--text-muted);
+}
+
+.dependency-picker .family-item:disabled:hover {
+  background: transparent;
+}
+
+.blocked-list {
+  margin: 0;
+  padding-left: var(--space-5);
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--text);
+}
+
 .repeat-weekdays {
   min-width: 0;
   border: 0;
@@ -1308,6 +1361,10 @@ input[type="date"][data-empty="true"]:not(:focus) {
   background: var(--primary-text);
 }
 
+.gantt-legend__arrow {
+  flex: 0 0 auto;
+}
+
 .gantt {
   flex: 1 1 auto;
   min-height: 240px;
@@ -1578,6 +1635,32 @@ input[type="date"][data-empty="true"]:not(:focus) {
 .gantt-today {
   stroke: var(--primary-text);
   stroke-width: 2;
+}
+
+/* Dependency arrows (T-11): from the end of a planned bar to the start of
+   the bar waiting for it. Over the bars, but clicks go through to them. */
+.gantt-arrows {
+  pointer-events: none;
+}
+
+.gantt-arrow__line {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 1.25;
+  stroke-linejoin: round;
+}
+
+.gantt-arrow__head {
+  fill: var(--text-muted);
+}
+
+.gantt-arrow.is-selected .gantt-arrow__line {
+  stroke: var(--primary-text);
+  stroke-width: 1.75;
+}
+
+.gantt-arrow.is-selected .gantt-arrow__head {
+  fill: var(--primary-text);
 }
 
 .gantt-header-top {

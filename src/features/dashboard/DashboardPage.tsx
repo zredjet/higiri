@@ -5,7 +5,8 @@ import type { Dashboard, ProjectSummary, Status, TodoItem, Urgency } from "../..
 import { formatDate, formatDateWithWeekday, monthDay } from "../../lib/date";
 import { errorMessage } from "../../lib/errors";
 import { useChangeStatus, useDashboard } from "../../lib/queries";
-import { DoneWithChildrenDialog } from "../todos/detail/StatusDialogs";
+import { asksBeforeDoing } from "../todos/dependencyText";
+import { DoneWithChildrenDialog, StartBlockedDialog } from "../todos/detail/StatusDialogs";
 import {
   displayTitle,
   periodText,
@@ -100,12 +101,24 @@ function AttentionSection({ dash, onOpenTodo }: { dash: Dashboard; onOpenTodo: (
   const [dateEdit, setDateEdit] = useState<{ item: TodoItem; target: DateTarget } | null>(null);
   /** A parent with open children, asked about before 完了 (S-1). */
   const [closing, setClosing] = useState<TodoItem | null>(null);
+  /** A TODO waiting for unfinished ones, asked about before 作業中 (T-11). */
+  const [starting, setStarting] = useState<TodoItem | null>(null);
 
   function changeTo(item: TodoItem, to: Status, then?: () => void) {
     status.mutate(
       { id: item.todo.id, change: { to, waiting_on: null, follow_up_date: null, reason: null } },
       { onSuccess: then },
     );
+  }
+
+  /** 着手する and 作業に戻す: asked first while TODOs to finish first are unfinished. */
+  function start(item: TodoItem) {
+    if (asksBeforeDoing(item)) {
+      status.reset();
+      setStarting(item);
+    } else {
+      changeTo(item, "doing");
+    }
   }
 
   function complete(item: TodoItem) {
@@ -122,9 +135,9 @@ function AttentionSection({ dash, onOpenTodo }: { dash: Dashboard; onOpenTodo: (
     const u = item.assessment.urgency;
     const first: RowAction =
       u === "late_start"
-        ? { label: "着手する", icon: "arrow-right", run: () => changeTo(item, "doing") }
+        ? { label: "着手する", icon: "arrow-right", run: () => start(item) }
         : item.todo.status === "waiting"
-          ? { label: "作業に戻す", icon: "arrow-right", run: () => changeTo(item, "doing") }
+          ? { label: "作業に戻す", icon: "arrow-right", run: () => start(item) }
           : { label: "完了にする", icon: "check", run: () => complete(item) };
     const second: RowAction =
       u === "follow_up"
@@ -192,7 +205,7 @@ function AttentionSection({ dash, onOpenTodo }: { dash: Dashboard; onOpenTodo: (
         <h2 className="section-title">日限注意</h2>
         <span className="text-caption">区分の重い順、日限の古い順に並べています</span>
       </div>
-      {status.error && !closing ? <Alert tone="danger">{errorMessage(status.error)}</Alert> : null}
+      {status.error && !closing && !starting ? <Alert tone="danger">{errorMessage(status.error)}</Alert> : null}
       <Table<TodoItem>
         columns={columns}
         rows={dash.attention.map((i) => ({ ...i, id: i.todo.id }))}
@@ -213,6 +226,18 @@ function AttentionSection({ dash, onOpenTodo }: { dash: Dashboard; onOpenTodo: (
             setClosing(null);
           }}
           onConfirm={() => changeTo(closing, "done", () => setClosing(null))}
+        />
+      ) : null}
+      {starting ? (
+        <StartBlockedDialog
+          blockedBy={starting.blocked_by}
+          pending={status.isPending}
+          error={status.error}
+          onClose={() => {
+            status.reset();
+            setStarting(null);
+          }}
+          onConfirm={() => changeTo(starting, "doing", () => setStarting(null))}
         />
       ) : null}
     </section>

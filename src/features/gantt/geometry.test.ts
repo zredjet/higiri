@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   addDays,
+  arrowBetween,
   barGrips,
   canDrag,
   DAY_WIDTH,
   dayCenter,
   dayDelta,
   dayIndex,
+  dependencyArrows,
   dragLabelX,
   dragSpan,
   headerRows,
@@ -22,6 +24,7 @@ import {
   visibleRows,
   weekday,
   weekendRuns,
+  type ArrowRow,
   type Range,
 } from "./geometry";
 
@@ -217,6 +220,87 @@ describe("dragging a planned bar (G-6)", () => {
     expect(dragLabelX(MOCK, { start: "2026-11-01", end: "2026-11-12" }, W, 90, 832)).toBe(0);
     expect(dragLabelX(MOCK, { start: "2026-12-03", end: "2026-12-05" }, W, 90, 832)).toBe(742);
     expect(dragLabelX(MOCK, { start: "2027-01-10", end: "2027-01-12" }, W, 90, 832)).toBe(742);
+  });
+});
+
+describe("dependency arrows (T-11)", () => {
+  // Rows of 基幹システム更改 under its project row (32px), 44px each.
+  const row = (i: number) => 32 + 44 * i;
+
+  it("turns once when the later bar starts far enough right", () => {
+    // 移行手順書のドラフト (11/11–11/18) → 結合テスト計画の作成 (11/20–11/27), two rows down.
+    const a = arrowBetween(
+      MOCK,
+      W,
+      { top: row(0), planned: { start: "2026-11-11", end: "2026-11-18" } },
+      { top: row(2), planned: { start: "2026-11-20", end: "2026-11-27" } },
+    );
+    // From the end of 11/18 (x 320) at the bar's middle (y 46) to the start of 11/20 (x 352, y 134).
+    expect(a.line).toBe("M320 46H328V134H347");
+    expect(a.head).toBe("352,134 347,130.25 347,137.75");
+    expect([a.minX, a.maxX]).toEqual([320, 352]);
+  });
+
+  it("goes round when the later bar starts before the first one ends", () => {
+    // API設計書のレビュー対応 (11/16–11/19) → 性能試験の環境準備 (11/17–11/20), two rows down.
+    const a = arrowBetween(
+      MOCK,
+      W,
+      { top: row(1), planned: { start: "2026-11-16", end: "2026-11-19" } },
+      { top: row(3), planned: { start: "2026-11-17", end: "2026-11-20" } },
+    );
+    // Out of 11/19's end (352), along the first row's bottom edge (y 120), back past 11/17 (256).
+    expect(a.line).toBe("M352 90H360V120H248V178H251");
+    expect(a.head).toBe("256,178 251,174.25 251,181.75");
+    expect([a.minX, a.maxX]).toEqual([248, 360]);
+    // The later TODO above: along the first row's top edge.
+    const up = arrowBetween(
+      MOCK,
+      W,
+      { top: row(3), planned: { start: "2026-11-16", end: "2026-11-19" } },
+      { top: row(1), planned: { start: "2026-11-19", end: "2026-11-20" } },
+    );
+    expect(up.line).toBe("M352 178H360V164H312V90H315");
+  });
+
+  it("counts a bar just one gap away as too close to turn once", () => {
+    // 11/18 ends at x 320; 11/19 starts at 320: no room, so it goes round.
+    const a = arrowBetween(
+      MOCK,
+      W,
+      { top: row(0), planned: { start: "2026-11-11", end: "2026-11-18" } },
+      { top: row(1), planned: { start: "2026-11-19", end: "2026-11-19" } },
+    );
+    expect(a.line).toBe("M320 46H328V76H312V90H315");
+  });
+
+  const rows: ArrowRow[] = [
+    { id: 1, top: row(0), planned: { start: "2026-11-11", end: "2026-11-18" }, dependsOn: [] },
+    { id: 2, top: row(1), planned: { start: "2026-11-20", end: "2026-11-27" }, dependsOn: [1, 9] },
+    { id: 3, top: row(2), planned: null, dependsOn: [1] },
+    { id: 4, top: row(3), planned: { start: "2026-11-24", end: "2026-11-26" }, dependsOn: [2, 3] },
+  ];
+  const all = { top: 0, bottom: 1000 };
+
+  it("joins only rows that are laid out with a planned bar", () => {
+    // 9 is hidden (another project, folded, 完了・中止 not shown); 3 has no planned bar.
+    const arrows = dependencyArrows(rows, MOCK, W, 832, all);
+    expect(arrows.map((a) => a.key)).toEqual(["1-2", "2-4"]);
+    expect(arrows[0]).toMatchObject({ firstId: 1, laterId: 2 });
+  });
+
+  it("leaves out arrows wholly outside the drawn rows or the chart", () => {
+    // Drawn rows from row(2): 1-2 (rows 0–1) is above them; 2-4 reaches into them.
+    expect(dependencyArrows(rows, MOCK, W, 832, { top: row(2), bottom: row(4) }).map((a) => a.key)).toEqual(["2-4"]);
+    // Ending exactly where the view starts is outside.
+    expect(dependencyArrows(rows, MOCK, W, 832, { top: row(2), bottom: row(3) }).map((a) => a.key)).toEqual(["2-4"]);
+    expect(dependencyArrows(rows, MOCK, W, 832, { top: row(4), bottom: row(6) })).toEqual([]);
+    // A range far to the right: every bar lies left of the chart.
+    const later: Range = { start: "2027-01-01", days: 26 };
+    expect(dependencyArrows(rows, later, W, 832, all)).toEqual([]);
+    // Partly in the range: kept (the chart clips the rest).
+    const partly: Range = { start: "2026-11-25", days: 26 };
+    expect(dependencyArrows(rows, partly, W, 832, all).map((a) => a.key)).toEqual(["2-4"]);
   });
 });
 

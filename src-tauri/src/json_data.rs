@@ -834,23 +834,22 @@ mod tests {
     }
 
     /// Rows in the v0.3.0 tables, on the sample TODOs 1 to 4. The sample's
-    /// template gives way to two templates of these tests (one with a
-    /// dependency, one stored with its keys in another order).
+    /// rows of these tables give way to those of these tests (two templates,
+    /// one with a dependency, one stored with its keys in another order).
     async fn add_v0_3_0_rows(c: &mut SqliteConnection) {
         use crate::domain::model::Priority;
         use crate::domain::repeat::{DayOfWeek, RepeatRule};
         use crate::domain::template::{TemplateBody, TemplateChild};
         use crate::repo::templates::TemplateFields;
 
-        // The sample's template and repetition make way for these rows.
-        sqlx::query("DELETE FROM todo_templates")
-            .execute(&mut *c)
-            .await
-            .unwrap();
-        sqlx::query("DELETE FROM todo_repeats")
-            .execute(&mut *c)
-            .await
-            .unwrap();
+        // The sample's template, repetition and dependencies make way for
+        // these rows.
+        for table in ["todo_templates", "todo_repeats", "todo_dependencies"] {
+            sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {table}")))
+                .execute(&mut *c)
+                .await
+                .unwrap();
+        }
         let at = ts(2026, 11, 19, 3, 0);
         let child = |title: &str, depends_on: Vec<usize>| TemplateChild {
             title: title.into(),

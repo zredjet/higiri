@@ -13,8 +13,9 @@
 //! - `due_offset_days`: the child's 日限 minus the parent's, in calendar days;
 //!   `null` when either was empty when the template was saved.
 //! - `depends_on`: positions (from 0) of the children this child waits for
-//!   (T-11). `[]` when the key is missing. Saving leaves it empty until the
-//!   dependencies exist (phase 22).
+//!   (T-11): the dependencies between the children when it was saved (those
+//!   of a left-out child are dropped), joined again when it is used. `[]`
+//!   when the key is missing.
 //!
 //! A template is made from a TODO without a parent and its children
 //! ([`TemplateBody::from_todos`]); a new TODO made from it gets the
@@ -25,7 +26,8 @@ use chrono::{DateTime, NaiveDate, TimeDelta, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::date::days_between;
-use super::model::{Priority, Status, Todo};
+use super::dependency::positions_among;
+use super::model::{Dependency, Priority, Status, Todo};
 
 /// Longest name, in characters (after trimming).
 pub const NAME_MAX: usize = 40;
@@ -61,6 +63,9 @@ pub struct NewChild {
     pub priority: Priority,
     pub memo_md: String,
     pub due_date: Option<NaiveDate>,
+    /// Positions (in the list `new_children` returns) of the children this
+    /// one waits for (T-11).
+    pub depends_on: Vec<usize>,
 }
 
 /// The parent TODO of a template (`todo_templates.body`).
@@ -108,21 +113,32 @@ impl TemplateBody {
     /// title, priority and memo of each, the children in the order they were
     /// made (`id`), 中止 ones left out. A child's `due_offset_days` is its
     /// 日限 minus the parent's in calendar days (also with the 営業日
-    /// setting), `None` when either is empty. Not checked: see
-    /// [`TemplateBody::checked`].
-    pub fn from_todos(parent: &Todo, children: &[Todo]) -> TemplateBody {
+    /// setting), `None` when either is empty. `dependencies` may hold any
+    /// dependencies: those between two kept children become `depends_on`
+    /// (T-11). Not checked: see [`TemplateBody::checked`].
+    pub fn from_todos(
+        parent: &Todo,
+        children: &[Todo],
+        dependencies: &[Dependency],
+    ) -> TemplateBody {
         let mut kept: Vec<&Todo> = children
             .iter()
             .filter(|c| c.status != Status::Cancelled)
             .collect();
         kept.sort_by_key(|c| c.id);
+        let ids: Vec<i64> = kept.iter().map(|c| c.id).collect();
+        let mut waits: Vec<Vec<usize>> = vec![Vec::new(); kept.len()];
+        for (later, first) in positions_among(&ids, dependencies) {
+            waits[later].push(first);
+        }
         TemplateBody {
             title: parent.title.clone(),
             priority: parent.priority,
             memo_md: parent.memo_md.clone(),
             children: kept
                 .into_iter()
-                .map(|c| TemplateChild {
+                .zip(waits)
+                .map(|(c, depends_on)| TemplateChild {
                     title: c.title.clone(),
                     priority: c.priority,
                     memo_md: c.memo_md.clone(),
@@ -130,15 +146,16 @@ impl TemplateBody {
                         (Some(p), Some(d)) => Some(days_between(p, d)),
                         _ => None,
                     },
-                    depends_on: Vec::new(),
+                    depends_on,
                 })
                 .collect(),
         }
     }
 
     /// The children to create under a new parent due on `due`, in the
-    /// template's order. 子の日限 = `due` + `due_offset_days` (calendar
-    /// days), empty when either is empty (or the date would be out of range).
+    /// template's order, each with the positions of the children it waits
+    /// for. 子の日限 = `due` + `due_offset_days` (calendar days), empty when
+    /// either is empty (or the date would be out of range).
     pub fn new_children(&self, due: Option<NaiveDate>) -> Vec<NewChild> {
         self.children
             .iter()
@@ -149,6 +166,7 @@ impl TemplateBody {
                 due_date: due
                     .zip(c.due_offset_days)
                     .and_then(|(due, days)| due.checked_add_signed(TimeDelta::try_days(days)?)),
+                depends_on: c.depends_on.clone(),
             })
             .collect()
     }
@@ -463,7 +481,7 @@ mod tests {
             done,
             task(2, "売上の集計", Status::Waiting, Some("2026-11-27")),
         ];
-        let b = TemplateBody::from_todos(&parent, &children);
+        let b = TemplateBody::from_todos(&parent, &children, &[]);
         assert_eq!(b.title, "月次締め");
         assert_eq!(b.priority, Priority::High);
         assert_eq!(b.memo_md, "## 手順\n- 集計する");
@@ -488,20 +506,71 @@ mod tests {
     }
 
     #[test]
+    fn a_template_keeps_the_dependencies_between_its_children() {
+        let dep = |todo_id: i64, depends_on_id: i64| Dependency {
+            todo_id,
+            depends_on_id,
+            created_at: crate::domain::testing::ts(2026, 11, 19, 0, 0),
+        };
+        let parent = task(1, "月次締め", Status::Todo, Some("2026-11-30"));
+        let children = [
+            task(5, "報告", Status::Todo, None),
+            task(3, "中止した子", Status::Cancelled, None),
+            task(2, "集計", Status::Done, None),
+            task(4, "確認", Status::Todo, None),
+        ];
+        // 報告 waits for 確認 and 集計; 確認 waits for 集計 and the cancelled
+        // child; 集計 waits for a TODO outside the family.
+        let deps = [
+            dep(5, 4),
+            dep(5, 2),
+            dep(4, 2),
+            dep(4, 3),
+            dep(2, 99),
+            dep(3, 2),
+        ];
+        let b = TemplateBody::from_todos(&parent, &children, &deps);
+        let shape: Vec<(&str, &[usize])> = b
+            .children
+            .iter()
+            .map(|c| (c.title.as_str(), c.depends_on.as_slice()))
+            .collect();
+        // Positions: 集計 0, 確認 1, 報告 2.
+        assert_eq!(
+            shape,
+            [("集計", &[][..]), ("確認", &[0][..]), ("報告", &[0, 1][..])]
+        );
+        let b = b.checked().unwrap();
+        // Used again, the children wait for the same positions.
+        let made = b.new_children(None);
+        assert_eq!(
+            made.iter()
+                .map(|c| c.depends_on.clone())
+                .collect::<Vec<_>>(),
+            [vec![], vec![0], vec![0, 1]]
+        );
+    }
+
+    #[test]
     fn an_empty_due_date_leaves_the_offset_out() {
         let parent = task(1, "親", Status::Todo, Some("2026-11-30"));
-        let b = TemplateBody::from_todos(&parent, &[task(2, "日限なし", Status::Todo, None)]);
+        let b = TemplateBody::from_todos(&parent, &[task(2, "日限なし", Status::Todo, None)], &[]);
         assert_eq!(b.children[0].due_offset_days, None);
 
         let undated = task(1, "親", Status::Todo, None);
         let b = TemplateBody::from_todos(
             &undated,
             &[task(2, "日限あり", Status::Todo, Some("2026-11-30"))],
+            &[],
         );
         assert_eq!(b.children[0].due_offset_days, None);
 
         // No children at all: a template of one TODO.
-        assert!(TemplateBody::from_todos(&parent, &[]).children.is_empty());
+        assert!(
+            TemplateBody::from_todos(&parent, &[], &[])
+                .children
+                .is_empty()
+        );
     }
 
     #[test]
@@ -565,7 +634,7 @@ mod tests {
             task(2, "a", Status::Done, Some("2026-11-25")),
             task(3, "b", Status::Todo, Some("2026-12-01")),
         ];
-        let made = TemplateBody::from_todos(&parent, &children).new_children(parent.due_date);
+        let made = TemplateBody::from_todos(&parent, &children, &[]).new_children(parent.due_date);
         assert_eq!(
             made.iter().map(|c| c.due_date).collect::<Vec<_>>(),
             [Some(d("2026-11-25")), Some(d("2026-12-01"))]

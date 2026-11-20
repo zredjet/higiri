@@ -11,6 +11,11 @@
 //! (T-10) 「月次締め」 with three children: templates show on no screen until
 //! one is chosen in 「TODOを追加」. A TODO repeating every week (T-12) in
 //! 社内ツール整備, on the day of the week its shifted 日限 falls on.
+//! Three dependencies (T-11), which change no category: 結合テスト計画の作成
+//! waits for 移行手順書のドラフト (planned after it), 性能試験の環境準備 waits
+//! for API設計書のレビュー対応 (planned to start before it ends: the warning),
+//! and 新メンバーでの試行 waits for its sibling セットアップ手順書の作成.
+//! The template's 報告書の作成 waits for its other two children.
 //! Status changes are replayed through `domain::status::transition`, so the
 //! actual dates, waiting fields and change history come out exactly as the app
 //! itself would record them.
@@ -60,6 +65,13 @@ struct TodoSpec {
 
 /// The TODO that repeats every week (T-12).
 const REPEATING: &str = "社内ツールの更新確認";
+
+/// (later TODO, TODO to finish first) (T-11).
+const DEPENDENCIES: [(&str, &str); 3] = [
+    ("結合テスト計画の作成", "移行手順書のドラフト"),
+    ("性能試験の環境準備", "API設計書のレビュー対応"),
+    ("新メンバーでの試行", "セットアップ手順書の作成"),
+];
 
 const TODOS: [TodoSpec; 16] = [
     TodoSpec {
@@ -254,14 +266,14 @@ const WORK_LOGS: [(&str, &str, i64, &str); 4] = [
 ];
 
 /// The TODO template (T-10): 「月次締め」, its children due 3 and 2 days
-/// before it and on the same day. No dependencies yet (T-11).
+/// before it and on the same day; the report waits for the other two (T-11).
 fn template() -> TemplateFields {
-    let child = |title: &str, priority, days| TemplateChild {
+    let child = |title: &str, priority, days, depends_on: &[usize]| TemplateChild {
         title: title.into(),
         priority,
         memo_md: String::new(),
         due_offset_days: Some(days),
-        depends_on: Vec::new(),
+        depends_on: depends_on.to_vec(),
     };
     TemplateFields {
         name: "月次締め".into(),
@@ -270,9 +282,9 @@ fn template() -> TemplateFields {
             priority: Priority::Medium,
             memo_md: "## 手順\n- 前月分の売上と経費を集計する\n- 報告書にまとめて共有する".into(),
             children: vec![
-                child("売上の集計", Priority::High, -3),
-                child("経費の確認", Priority::Medium, -2),
-                child("報告書の作成", Priority::Medium, 0),
+                child("売上の集計", Priority::High, -3, &[]),
+                child("経費の確認", Priority::Medium, -2, &[]),
+                child("報告書の作成", Priority::Medium, 0, &[0, 1]),
             ],
         },
     }
@@ -412,6 +424,18 @@ pub async fn seed_if_empty(pool: &SqlitePool, today: NaiveDate) -> Result<bool, 
     };
     repo::repeats::insert(&mut tx, *repeating, &weekly, None, shift.at(CREATED_ON, 51)).await?;
 
+    let id_of = |title: &str| {
+        todo_ids
+            .iter()
+            .find(|(t, _)| *t == title)
+            .map(|(_, id)| *id)
+            .expect("a dependency joins sample TODOs")
+    };
+    for (i, (later, first)) in DEPENDENCIES.iter().enumerate() {
+        let at = shift.at(CREATED_ON, 52 + u32::try_from(i).unwrap_or(0));
+        repo::dependencies::insert(&mut tx, id_of(later), id_of(first), at).await?;
+    }
+
     tx.commit().await?;
     Ok(true)
 }
@@ -521,6 +545,7 @@ mod tests {
             .map(|c| c.due_offset_days)
             .collect();
         assert_eq!(days, [Some(-3), Some(-2), Some(0)]);
+        assert_eq!(templates[0].body.children[2].depends_on, [0, 1]);
 
         // One TODO repeats every week, on its due date's day (a Thursday on
         // the mock's day).
@@ -534,6 +559,38 @@ mod tests {
             RepeatRule::Weekly {
                 weekdays: vec![DayOfWeek::Thu]
             }
+        );
+
+        // Three dependencies: two wait for an unfinished TODO; one of them is
+        // planned to start before it ends (the API review: 11/19).
+        let deps = crate::domain::dependency::Dependencies::new(
+            repo::dependencies::prerequisites(&mut c, None)
+                .await
+                .unwrap(),
+        );
+        let title = |id: i64| todos.iter().find(|t| t.id == id).unwrap().title.as_str();
+        let shown: Vec<(&str, Vec<&str>, bool)> = todos
+            .iter()
+            .filter(|t| !deps.depends_on(t.id).is_empty())
+            .map(|t| {
+                (
+                    t.title.as_str(),
+                    deps.blocked_by(t).iter().map(|b| title(b.id)).collect(),
+                    deps.starts_before_dependency(t),
+                )
+            })
+            .collect();
+        assert_eq!(
+            shown,
+            vec![
+                ("結合テスト計画の作成", vec!["移行手順書のドラフト"], false),
+                ("性能試験の環境準備", vec!["API設計書のレビュー対応"], true),
+                (
+                    "新メンバーでの試行",
+                    vec!["セットアップ手順書の作成"],
+                    false
+                ),
+            ]
         );
     }
 

@@ -5,8 +5,9 @@ use std::collections::HashMap;
 use chrono::NaiveDate;
 use serde::Serialize;
 
+use super::dependency::{BlockingTodo, Dependencies};
 use super::model::{Project, Status, Todo};
-use super::repeat::{RepeatInfo, TodoRepeat};
+use super::repeat::{RepeatInfo, RepeatsByTodo};
 use super::status::check_allowed;
 use super::subtodo::{ChildCounts, Family};
 use super::urgency::{Assessment, Rules, assess, classify};
@@ -108,16 +109,30 @@ pub struct TodoItem {
     /// Its repetition (T-12), with the next round's 日限 if it were closed
     /// today. `null` = it does not repeat.
     pub repeat: Option<RepeatInfo>,
+    /// The unfinished TODOs it waits for (T-11): the list's mark and the
+    /// confirmation before 作業中. Empty when closed.
+    pub blocked_by: Vec<BlockingTodo>,
+    /// Open, and planned to start before an unfinished TODO it waits for is
+    /// planned to end (「先のTODOより前に始まる予定」, T-11).
+    pub starts_before_dependency: bool,
+}
+
+/// What TODO items show besides the TODO and its family, for a set of TODOs:
+/// their repetitions (T-12) and the TODOs they wait for (T-11).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Links {
+    pub repeats: RepeatsByTodo,
+    pub dependencies: Dependencies,
 }
 
 /// `family` gives the parent's title and the children counts: build it from
-/// the TODOs around this one (see [`Family`]). `repeat` is this TODO's
-/// repetition, if it has one.
+/// the TODOs around this one (see [`Family`]). `links` holds this TODO's
+/// repetition and dependencies, if it has any.
 pub fn todo_item(
     todo: Todo,
     project_name: String,
     family: &Family,
-    repeat: Option<&TodoRepeat>,
+    links: &Links,
     today: NaiveDate,
     rules: &Rules,
 ) -> TodoItem {
@@ -130,7 +145,12 @@ pub fn todo_item(
         parent_title: family.parent_title(&todo).map(str::to_owned),
         children: family.children(&todo),
         due_after_parent: family.due_after_parent(&todo),
-        repeat: repeat.map(|r| r.info(todo.due_date, today, rules)),
+        repeat: links
+            .repeats
+            .get(&todo.id)
+            .map(|r| r.info(todo.due_date, today, rules)),
+        blocked_by: links.dependencies.blocked_by(&todo),
+        starts_before_dependency: links.dependencies.starts_before_dependency(&todo),
         todo,
         project_name,
         assessment,
@@ -164,7 +184,8 @@ pub struct TodoList {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::repeat::{DayOfWeek, RepeatRule};
+    use crate::domain::dependency::Prerequisite;
+    use crate::domain::repeat::{DayOfWeek, RepeatRule, TodoRepeat};
     use crate::domain::testing::{business_rules, d, rules, todo, ts};
 
     fn project(id: i64, name: &str) -> Project {
@@ -240,7 +261,7 @@ mod tests {
             t(1, Status::Todo, Some("2026-11-17")),
             "社内ツール整備".into(),
             &Family::default(),
-            None,
+            &Links::default(),
             d("2026-11-19"),
             &rules(3),
         );
@@ -265,7 +286,7 @@ mod tests {
             t(1, Status::Done, None),
             "x".into(),
             &Family::default(),
-            None,
+            &Links::default(),
             d("2026-11-19"),
             &rules(3),
         );
@@ -274,7 +295,7 @@ mod tests {
             t(1, Status::Cancelled, None),
             "x".into(),
             &Family::default(),
-            None,
+            &Links::default(),
             d("2026-11-19"),
             &rules(3),
         );
@@ -301,7 +322,14 @@ mod tests {
             ..t(1, Status::Done, None)
         };
         let family = Family::new([&parent, &child, &done]);
-        let p = todo_item(parent.clone(), "P".into(), &family, None, today, &rules(3));
+        let p = todo_item(
+            parent.clone(),
+            "P".into(),
+            &family,
+            &Links::default(),
+            today,
+            &rules(3),
+        );
         assert_eq!(p.parent_title, None);
         assert_eq!(
             p.children,
@@ -312,7 +340,14 @@ mod tests {
             })
         );
         assert!(!p.due_after_parent);
-        let c = todo_item(child, "P".into(), &family, None, today, &rules(3));
+        let c = todo_item(
+            child,
+            "P".into(),
+            &family,
+            &Links::default(),
+            today,
+            &rules(3),
+        );
         assert_eq!(c.parent_title.as_deref(), Some("親"));
         assert_eq!(c.children, None);
         assert!(c.due_after_parent);
@@ -330,12 +365,16 @@ mod tests {
             created_at: ts(2026, 11, 1, 0, 0),
             updated_at: ts(2026, 11, 1, 0, 0),
         };
+        let links = Links {
+            repeats: [(1, repeat.clone())].into(),
+            ..Links::default()
+        };
         let item = |due: &str| {
             todo_item(
                 t(1, Status::Todo, Some(due)),
                 "x".into(),
                 &Family::default(),
-                Some(&repeat),
+                &links,
                 today,
                 &rules(3),
             )
@@ -353,6 +392,65 @@ mod tests {
     }
 
     #[test]
+    fn todo_item_carries_what_it_waits_for() {
+        let today = d("2026-11-19");
+        let links = Links {
+            dependencies: Dependencies::new([
+                Prerequisite {
+                    todo_id: 1,
+                    id: 7,
+                    title: "先".into(),
+                    parent_title: None,
+                    project_name: "P".into(),
+                    status: Status::Doing,
+                    planned_end: Some(d("2026-11-20")),
+                },
+                Prerequisite {
+                    todo_id: 1,
+                    id: 8,
+                    title: "済".into(),
+                    parent_title: None,
+                    project_name: "P".into(),
+                    status: Status::Done,
+                    planned_end: None,
+                },
+            ]),
+            ..Links::default()
+        };
+        let item = |status: Status| {
+            todo_item(
+                Todo {
+                    planned_start: Some(d("2026-11-19")),
+                    ..t(1, status, None)
+                },
+                "P".into(),
+                &Family::default(),
+                &links,
+                today,
+                &rules(3),
+            )
+        };
+        let open = item(Status::Todo);
+        assert_eq!(
+            open.blocked_by.iter().map(|b| b.id).collect::<Vec<_>>(),
+            [7]
+        );
+        assert!(open.starts_before_dependency);
+        let closed = item(Status::Done);
+        assert!(closed.blocked_by.is_empty());
+        assert!(!closed.starts_before_dependency);
+        let none = todo_item(
+            t(1, Status::Todo, None),
+            "P".into(),
+            &Family::default(),
+            &Links::default(),
+            today,
+            &rules(3),
+        );
+        assert!(none.blocked_by.is_empty() && !none.starts_before_dependency);
+    }
+
+    #[test]
     fn follow_up_default_counts_like_the_setting() {
         let today = d("2026-11-19"); // Thursday
         let item = |r: &Rules| {
@@ -360,7 +458,7 @@ mod tests {
                 t(1, Status::Doing, None),
                 "x".into(),
                 &Family::default(),
-                None,
+                &Links::default(),
                 today,
                 r,
             )

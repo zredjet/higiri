@@ -30,6 +30,8 @@ export const queryKeys = {
   gantt: (query: GanttQuery) => ["todos", "gantt", query] as const,
   // Under "todos" too: a changed TODO or work log refreshes the results.
   search: (text: string) => ["todos", "search", text] as const,
+  // Under "todos": a status change of either TODO shows in the lists.
+  dependencies: (id: number) => ["todos", "dependencies", id] as const,
   settings: ["settings"] as const,
   holidays: (start: string, end: string) => ["holidays", start, end] as const,
   allHolidays: ["holidays"] as const,
@@ -277,6 +279,34 @@ export function useSetTodoRepeat() {
   return useMutation({
     scope: TODO_WRITES,
     mutationFn: ({ id, repeat }: { id: number; repeat: RepeatInput | null }) => commands.setTodoRepeat(id, repeat),
+    onSuccess: (item) => changed(item),
+  });
+}
+
+// ---- 依存関係 (T-11) ---------------------------------------------------------------
+
+/** 先に終わらせるTODO and これを待っているTODO of one TODO (the detail panel). */
+export function useDependencies(id: number) {
+  return useQuery({ queryKey: queryKeys.dependencies(id), queryFn: () => commands.listDependencies(id) });
+}
+
+/** Makes `todoId` wait for `dependsOnId`. Rust refuses itself, twins, circles and a parent with its child. */
+export function useAddDependency() {
+  const changed = useTodoChanged();
+  return useMutation({
+    scope: TODO_WRITES,
+    mutationFn: ({ todoId, dependsOnId }: { todoId: number; dependsOnId: number }) =>
+      commands.addDependency(todoId, dependsOnId),
+    onSuccess: (item) => changed(item),
+  });
+}
+
+export function useRemoveDependency() {
+  const changed = useTodoChanged();
+  return useMutation({
+    scope: TODO_WRITES,
+    mutationFn: ({ todoId, dependsOnId }: { todoId: number; dependsOnId: number }) =>
+      commands.removeDependency(todoId, dependsOnId),
     onSuccess: (item) => changed(item),
   });
 }

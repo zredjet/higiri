@@ -92,6 +92,12 @@ describe("list texts", () => {
       "予定超過",
     ]);
     expect(warningTexts(assessment())).toEqual([]);
+    // A child's and a dependency's warnings come last (S-1, T-11).
+    expect(warningTexts(assessment({ warnings: { plan_misses_due: true, plan_overrun: false } }), true, true)).toEqual([
+      "計画が間に合わない",
+      "親の日限より後",
+      "先のTODOより前に始まる予定",
+    ]);
   });
 
   it("shows who we wait for, or why it was cancelled", () => {

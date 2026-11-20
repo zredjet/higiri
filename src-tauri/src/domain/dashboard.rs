@@ -6,11 +6,10 @@ use chrono::NaiveDate;
 use serde::Serialize;
 
 use super::model::{Project, Status, Todo};
-use super::repeat::RepeatsByTodo;
 use super::settings::{ReminderFrequency, Settings};
 use super::subtodo::Family;
 use super::urgency::{Rules, Urgency, attention_order};
-use super::views::{ProjectSummary, TodoItem, project_summaries, todo_item};
+use super::views::{Links, ProjectSummary, TodoItem, project_summaries, todo_item};
 
 /// Number of TODOs in each 日限注意 category.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, specta::Type)]
@@ -77,7 +76,7 @@ pub fn is_today_work(todo: &Todo, today: NaiveDate) -> bool {
 fn items(
     todos: &[Todo],
     names: &HashMap<i64, String>,
-    repeats: &RepeatsByTodo,
+    links: &Links,
     today: NaiveDate,
     rules: &Rules,
 ) -> Vec<TodoItem> {
@@ -87,7 +86,7 @@ fn items(
         .iter()
         .map(|t| {
             let name = names.get(&t.project_id).cloned().unwrap_or_default();
-            todo_item(t.clone(), name, &family, repeats.get(&t.id), today, rules)
+            todo_item(t.clone(), name, &family, links, today, rules)
         })
         .collect()
 }
@@ -113,12 +112,12 @@ pub fn attention_list(items: &[TodoItem]) -> Vec<TodoItem> {
 pub fn build(
     projects: Vec<Project>,
     todos: &[Todo],
-    repeats: &RepeatsByTodo,
+    links: &Links,
     today: NaiveDate,
     rules: &Rules,
 ) -> Dashboard {
     let names: HashMap<i64, String> = projects.iter().map(|p| (p.id, p.name.clone())).collect();
-    let all = items(todos, &names, repeats, today, rules);
+    let all = items(todos, &names, links, today, rules);
 
     let attention = attention_list(&all);
     let mut counts = UrgencyCounts::default();
@@ -360,7 +359,7 @@ mod tests {
                 project(3, "採用サイト改修"),
             ],
             &mock_todos(),
-            &RepeatsByTodo::new(),
+            &Links::default(),
             d("2026-11-19"),
             &rules(3),
         )
@@ -377,7 +376,7 @@ mod tests {
                 project(3, "採用サイト改修"),
             ],
             &mock_todos(),
-            &RepeatsByTodo::new(),
+            &Links::default(),
             d("2026-11-19"),
             &business_rules(3, vec![]),
         );
@@ -560,7 +559,7 @@ mod tests {
         let dash = build(
             vec![project(1, "基幹システム更改"), project(2, "社内ツール整備")],
             &todos,
-            &RepeatsByTodo::new(),
+            &Links::default(),
             today,
             &rules(3),
         );

@@ -32,6 +32,13 @@ pub enum ParentError {
         "子TODOのあるTODOは、ほかのTODOの子にできません(親子は1段だけです)。先に子TODOを親から外してください。"
     )]
     HasChildren,
+
+    /// The two TODOs are joined by a dependency (T-11). Checked by
+    /// `set_todo_parent`, not by [`check_parent`].
+    #[error(
+        "依存で結ばれたTODOどうしは、親子にできません。先に「先に終わらせるTODO」から外してください。"
+    )]
+    Linked,
 }
 
 /// Whether `parent` may become the parent of `todo`. `has_children`: `todo`

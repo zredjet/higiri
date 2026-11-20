@@ -46,12 +46,15 @@ function row(todo: Partial<Todo>, assessment: Partial<Assessment> = {}, more: Pa
       children: null,
       due_after_parent: false,
       repeat: null,
+      blocked_by: [],
+      starts_before_dependency: false,
     },
     planned: null,
     actual: null,
     waiting: [],
     child: false,
     bridge: false,
+    depends_on: [],
     ...more,
   };
 }
@@ -62,6 +65,17 @@ describe("rowLabel", () => {
     child.item.parent_title = "親";
     child.item.due_after_parent = true;
     expect(rowLabel(child)).toBe("親 / 子:予定なし、実績なし、日限 11/25(親の日限より後)");
+  });
+
+  it("ends with the unfinished TODOs it waits for", () => {
+    const later = row({ title: "結合テスト計画の作成" });
+    later.item.blocked_by = [
+      { id: 2, title: "移行手順書のドラフト", parent_title: null, project_name: "基幹システム更改" },
+      { id: 3, title: "手順書", parent_title: "開発環境の標準化", project_name: "社内ツール整備" },
+    ];
+    expect(rowLabel(later)).toBe(
+      "結合テスト計画の作成:予定なし、実績なし、日限なし、先のTODOが未完了(移行手順書のドラフト、開発環境の標準化 / 手順書)",
+    );
   });
 
   it("ends with the repetition of a repeating TODO", () => {

@@ -5,19 +5,22 @@ import type { Priority, Status, TodoItem } from "../../../lib/bindings";
 import { errorMessage } from "../../../lib/errors";
 import { shortcutText } from "../../../lib/keys";
 import { useChangeStatus, useLatestTodo, useTimeline } from "../../../lib/queries";
+import { asksBeforeDoing } from "../dependencyText";
 import { closedRepeatText } from "../repeatText";
 import { cancelChildrenNote, PRIORITIES, PRIORITY_LABEL, STATUSES, STATUS_LABEL, waitingMessage } from "../todoText";
+import { DependencySection } from "./DependencySection";
 import { ChildrenSection, ParentField, useFamily } from "./FamilySection";
 import { MarkdownField } from "./MarkdownField";
 import { RepeatField } from "./RepeatField";
-import { CancelDialog, DoneWithChildrenDialog, WaitDialog } from "./StatusDialogs";
+import { CancelDialog, DoneWithChildrenDialog, StartBlockedDialog, WaitDialog } from "./StatusDialogs";
 import { useTodoDraft } from "./useTodoDraft";
 import { WorkLogSection } from "./WorkLogSection";
 
 /**
  * The fields, memo and work log of one TODO (docs/ui-mock/Todos.dc.html,
- * right side), with its repetition (T-12), parent and children (S-1).
- * `onOpenTodo` opens another TODO in the panel (the parent, a child).
+ * right side), with its repetition (T-12), parent and children (S-1), and
+ * the TODOs it waits for and those waiting for it (T-11). `onOpenTodo` opens
+ * another TODO in the panel (the parent, a child, a dependency).
  */
 export function TodoDetail({ item, onOpenTodo }: { item: TodoItem; onOpenTodo: (id: number) => void }) {
   const { todo, assessment } = item;
@@ -26,7 +29,7 @@ export function TodoDetail({ item, onOpenTodo }: { item: TodoItem; onOpenTodo: (
   const latest = useLatestTodo();
   const timeline = useTimeline(todo.id);
   const family = useFamily(item);
-  const [asking, setAsking] = useState<null | "waiting" | "cancelled" | "done">(null);
+  const [asking, setAsking] = useState<null | "waiting" | "cancelled" | "done" | "doing">(null);
   /** Open children close with the parent (S-1): asked first. */
   const openChildren = item.children?.open ?? 0;
   const [tab, setTab] = useState<"log" | "memo">("log");
@@ -49,7 +52,13 @@ export function TodoDetail({ item, onOpenTodo }: { item: TodoItem; onOpenTodo: (
   }
 
   async function changeStatus(to: Status) {
-    if (to === "waiting" || to === "cancelled" || (to === "done" && openChildren > 0)) {
+    if (
+      to === "waiting" ||
+      to === "cancelled" ||
+      (to === "done" && openChildren > 0) ||
+      // Unfinished TODOs to finish first: asked, not stopped (T-11).
+      (to === "doing" && asksBeforeDoing(item))
+    ) {
       status.reset();
       setAsking(to);
       return;
@@ -180,6 +189,7 @@ export function TodoDetail({ item, onOpenTodo }: { item: TodoItem; onOpenTodo: (
       {todo.parent_id === null ? (
         <ChildrenSection item={item} childItems={family.children} onOpenTodo={onOpenTodo} />
       ) : null}
+      <DependencySection item={item} save={save} onOpenTodo={onOpenTodo} />
 
       <Tabs
         label="記録の種類"
@@ -223,6 +233,21 @@ export function TodoDetail({ item, onOpenTodo }: { item: TodoItem; onOpenTodo: (
             await save();
             status.mutate(
               { id: todo.id, change: { to: "waiting", waiting_on: waitingOn, follow_up_date: followUp, reason: null } },
+              { onSuccess: () => setAsking(null) },
+            );
+          }}
+        />
+      ) : null}
+      {asking === "doing" ? (
+        <StartBlockedDialog
+          blockedBy={item.blocked_by}
+          pending={status.isPending}
+          error={status.error}
+          onClose={() => setAsking(null)}
+          onConfirm={async () => {
+            await save();
+            status.mutate(
+              { id: todo.id, change: { to: "doing", waiting_on: null, follow_up_date: null, reason: null } },
               { onSuccess: () => setAsking(null) },
             );
           }}

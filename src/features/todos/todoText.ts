@@ -115,15 +115,19 @@ export function dueNote(a: Assessment): Note | null {
 /** A child due after its parent (S-1, like 計画が間に合わない). */
 export const DUE_AFTER_PARENT_TEXT = "親の日限より後";
 
+/** A plan that starts before a TODO it waits for is planned to end (T-11). */
+export const STARTS_BEFORE_DEPENDENCY_TEXT = "先のTODOより前に始まる予定";
+
 /**
- * The small warnings of the list (計画が間に合わない, 予定超過, and for a
- * child 親の日限より後).
+ * The small warnings of the list (計画が間に合わない, 予定超過, for a child
+ * 親の日限より後, and 先のTODOより前に始まる予定).
  */
-export function warningTexts(a: Assessment, dueAfterParent = false): string[] {
+export function warningTexts(a: Assessment, dueAfterParent = false, startsBeforeDependency = false): string[] {
   const out: string[] = [];
   if (a.warnings.plan_misses_due) out.push("計画が間に合わない");
   if (a.warnings.plan_overrun) out.push("予定超過");
   if (dueAfterParent) out.push(DUE_AFTER_PARENT_TEXT);
+  if (startsBeforeDependency) out.push(STARTS_BEFORE_DEPENDENCY_TEXT);
   return out;
 }
 

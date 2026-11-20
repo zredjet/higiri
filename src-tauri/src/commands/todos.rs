@@ -13,14 +13,15 @@ use super::clock;
 use super::error::{AppError, CmdResult};
 use super::repeats;
 use super::validate;
+use crate::domain::dependency::Dependencies;
 use crate::domain::events;
 use crate::domain::listing::{DueFilter, TodoSort, due_matches, sort_todos, tree_rows};
 use crate::domain::model::{Priority, Status, Todo};
-use crate::domain::repeat;
+use crate::domain::repeat::{self, RepeatsByTodo};
 use crate::domain::status::{StatusChange, StatusFields, transition};
-use crate::domain::subtodo::{Family, check_new_child, check_parent};
+use crate::domain::subtodo::{Family, ParentError, check_new_child, check_parent};
 use crate::domain::urgency::Rules;
-use crate::domain::views::{StatusCounts, TodoItem, TodoList, TodoListRow, todo_item};
+use crate::domain::views::{Links, StatusCounts, TodoItem, TodoList, TodoListRow, todo_item};
 use crate::repo;
 use crate::repo::todos::{NewTodo, TodoFilter};
 
@@ -153,30 +154,68 @@ async fn rules(conn: &mut SqliteConnection) -> CmdResult<Rules> {
     Ok(Rules::from_settings(&repo::settings::load(conn).await?))
 }
 
-/// One TODO with its parent's title, its children counts and its repetition,
-/// read from the database (its family is not at hand).
+/// The repetitions and dependencies of every TODO (the lists).
+pub(super) async fn all_links(conn: &mut SqliteConnection) -> CmdResult<Links> {
+    Ok(Links {
+        repeats: repeat::by_todo(repo::repeats::list(conn).await?),
+        dependencies: Dependencies::new(repo::dependencies::prerequisites(conn, None).await?),
+    })
+}
+
+/// The repetitions and dependencies of the TODOs `ids` only (a few items).
+pub(super) async fn links_of(conn: &mut SqliteConnection, ids: &[i64]) -> CmdResult<Links> {
+    let mut repeats = RepeatsByTodo::new();
+    for &id in ids {
+        if let Some(r) = repo::repeats::get(conn, id).await? {
+            repeats.insert(id, r);
+        }
+    }
+    Ok(Links {
+        repeats,
+        dependencies: Dependencies::new(repo::dependencies::prerequisites(conn, Some(ids)).await?),
+    })
+}
+
+/// One TODO with its parent's title, its children counts, its repetition and
+/// what it waits for, read from the database (its family is not at hand).
 pub(super) async fn item(
     conn: &mut SqliteConnection,
     todo: Todo,
     today: NaiveDate,
 ) -> CmdResult<TodoItem> {
-    let project = repo::projects::get(conn, todo.project_id).await?;
+    let mut items = items(conn, vec![todo], today).await?;
+    items.pop().ok_or_else(AppError::internal)
+}
+
+/// These TODOs as items, in the order given, each with its family read
+/// from the database (its parent and children).
+pub(super) async fn items(
+    conn: &mut SqliteConnection,
+    todos: Vec<Todo>,
+    today: NaiveDate,
+) -> CmdResult<Vec<TodoItem>> {
+    if todos.is_empty() {
+        return Ok(Vec::new());
+    }
     let rules = rules(conn).await?;
-    let parent = match todo.parent_id {
-        Some(p) => repo::todos::list_by_ids(conn, &[p]).await?,
-        None => Vec::new(),
-    };
-    let children = repo::todos::list_children(conn, &[todo.id]).await?;
-    let family = Family::new(parent.iter().chain(&children).chain([&todo]));
-    let repeat = repo::repeats::get(conn, todo.id).await?;
-    Ok(todo_item(
-        todo,
-        project.name,
-        &family,
-        repeat.as_ref(),
-        today,
-        &rules,
-    ))
+    let names: HashMap<i64, String> = repo::projects::list(conn, true)
+        .await?
+        .into_iter()
+        .map(|p| (p.id, p.name))
+        .collect();
+    let ids: Vec<i64> = todos.iter().map(|t| t.id).collect();
+    let parent_ids: Vec<i64> = todos.iter().filter_map(|t| t.parent_id).collect();
+    let parents = repo::todos::list_by_ids(conn, &parent_ids).await?;
+    let children = repo::todos::list_children(conn, &ids).await?;
+    let family = Family::new(parents.iter().chain(&children).chain(&todos));
+    let links = links_of(conn, &ids).await?;
+    Ok(todos
+        .into_iter()
+        .map(|t| {
+            let name = names.get(&t.project_id).cloned().unwrap_or_default();
+            todo_item(t, name, &family, &links, today, &rules)
+        })
+        .collect())
 }
 
 pub async fn list(pool: &SqlitePool, query: &TodoQuery, today: NaiveDate) -> CmdResult<TodoList> {
@@ -200,7 +239,7 @@ pub async fn list(pool: &SqlitePool, query: &TodoQuery, today: NaiveDate) -> Cmd
     // Every TODO of the list's projects: the counts of children hidden by
     // the filters are still counted.
     let family = Family::new(&todos);
-    let repeats = repeat::by_todo(repo::repeats::list(&mut conn).await?);
+    let links = all_links(&mut conn).await?;
 
     // Each TODO is judged by itself (S-1). Tab counts: every filter except
     // the status one.
@@ -226,9 +265,8 @@ pub async fn list(pool: &SqlitePool, query: &TodoQuery, today: NaiveDate) -> Cmd
         .filter_map(|r| {
             let t = slots[r.index].take()?;
             let name = names.get(&t.project_id).cloned().unwrap_or_default();
-            let repeat = repeats.get(&t.id);
             Some(TodoListRow {
-                item: todo_item(t, name, &family, repeat, today, &rules),
+                item: todo_item(t, name, &family, &links, today, &rules),
                 child: r.child,
                 bridge: r.bridge,
             })
@@ -297,24 +335,37 @@ pub async fn create(
     )
     .await?;
     repo::events::insert(&mut tx, todo.id, &events::created(todo.status, today, now)).await?;
-    // The template's children, in its order, each 未着手 with its own 「作成」.
-    for child in template.iter().flat_map(|b| b.new_children(input.due_date)) {
+    // The template's children, in its order, each 未着手 with its own 「作成」,
+    // then the dependencies between them (T-11).
+    let children = template
+        .map(|b| b.new_children(input.due_date))
+        .unwrap_or_default();
+    let mut made_ids = Vec::with_capacity(children.len());
+    for child in &children {
         let made = repo::todos::insert(
             &mut tx,
             &NewTodo {
                 project_id: project.id,
                 parent_id: Some(todo.id),
-                title: child.title,
+                title: child.title.clone(),
                 priority: child.priority,
                 due_date: child.due_date,
                 planned_start: None,
                 planned_end: None,
-                memo_md: child.memo_md,
+                memo_md: child.memo_md.clone(),
             },
             now,
         )
         .await?;
         repo::events::insert(&mut tx, made.id, &events::created(made.status, today, now)).await?;
+        made_ids.push(made.id);
+    }
+    for (child, &later) in children.iter().zip(&made_ids) {
+        for &first in &child.depends_on {
+            if let Some(&first) = made_ids.get(first) {
+                repo::dependencies::insert(&mut tx, later, first, now).await?;
+            }
+        }
     }
     let out = item(&mut tx, todo, today).await?;
     tx.commit().await?;
@@ -462,6 +513,16 @@ pub async fn set_parent(
             return Err(AppError::validation(
                 "繰り返しのあるTODOは、ほかのTODOの子にできません。先に繰り返しを外してください。",
             ));
+        }
+        // A parent and its own child cannot wait for each other (T-11).
+        if repo::dependencies::get(&mut tx, id, parent_id)
+            .await?
+            .is_some()
+            || repo::dependencies::get(&mut tx, parent_id, id)
+                .await?
+                .is_some()
+        {
+            return Err(AppError::validation(ParentError::Linked.to_string()));
         }
     }
     let saved = repo::todos::set_parent(&mut tx, id, parent_id, now).await?;

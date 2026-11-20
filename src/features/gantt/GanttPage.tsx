@@ -5,6 +5,7 @@ import type { DaySpan, GanttProject, GanttRow } from "../../lib/bindings";
 import { formatDate } from "../../lib/date";
 import { errorMessage } from "../../lib/errors";
 import { useGantt, useHolidays, useProjects } from "../../lib/queries";
+import { BLOCKED_LABEL, blockedMarkTitle } from "../todos/dependencyText";
 import { REPEAT_LABEL, repeatMarkTitle } from "../todos/repeatText";
 import { childProgressText, DUE_AFTER_PARENT_TEXT, STATUS_LABEL, STATUS_TONE } from "../todos/todoText";
 import { foldRows, parentsWithChildRows, type TreeInfo } from "../todos/tree";
@@ -15,6 +16,7 @@ import {
   canDrag,
   DAY_WIDTH,
   dayCenter,
+  dependencyArrows,
   dragLabelX,
   GRIP,
   headerRows,
@@ -30,6 +32,7 @@ import {
   visibleDays,
   visibleRows,
   weekendRuns,
+  type Arrow,
   type DragMode,
   type LaidOutRow,
   type Range,
@@ -112,6 +115,33 @@ export function GanttPage({ selectedTodoId, onOpenTodo }: GanttPageProps) {
   const bodyHeight = Math.max(0, size.height - LAYOUT.headerHeight);
   const shown = visibleRows(layout.rows, scrollTop, bodyHeight);
   const drag = useBarDrag();
+
+  // Dependency arrows (T-11) between rows laid out with a planned bar (moved
+  // while dragging), only those reaching into the drawn rows.
+  const arrowRows = useMemo(
+    () =>
+      layout.rows.flatMap((r) =>
+        r.todo
+          ? [
+              {
+                id: r.todo.item.todo.id,
+                top: r.top,
+                planned: drag.plannedOf(r.todo.item.todo.id, r.todo.planned),
+                dependsOn: r.todo.depends_on,
+              },
+            ]
+          : [],
+      ),
+    [layout.rows, drag.plannedOf],
+  );
+  const view =
+    shown.length > 0
+      ? { top: shown[0].top, bottom: shown[shown.length - 1].top + shown[shown.length - 1].height }
+      : { top: 0, bottom: 0 };
+  const arrows =
+    range !== null
+      ? dependencyArrows(arrowRows, range, DAY_WIDTH[scale], svgWidth(range, scale, chartWidthAvailable), view)
+      : [];
 
   useEffect(() => {
     // Keep the scroll position valid when rows disappear (filters).
@@ -227,6 +257,7 @@ export function GanttPage({ selectedTodoId, onOpenTodo }: GanttPageProps) {
                     selectedTodoId={selectedTodoId}
                     onOpen={onOpenTodo}
                     drag={drag}
+                    arrows={arrows}
                   />
                   {drag.preview ? (
                     <DragLabel
@@ -269,6 +300,13 @@ function Legend() {
       <span>
         <span aria-hidden="true" className="gantt-legend__today" />
         今日
+      </span>
+      <span>
+        <svg aria-hidden="true" className="gantt-legend__arrow" width={24} height={12}>
+          <path className="gantt-arrow__line" d="M1 6H18" />
+          <polygon className="gantt-arrow__head" points="23,6 18,2.25 18,9.75" />
+        </svg>
+        依存
       </span>
     </div>
   );
@@ -397,6 +435,11 @@ function NameCell({
               <Icon name="repeat" size={14} label={REPEAT_LABEL} />
             </span>
           ) : null}
+          {item.blocked_by.length > 0 && !bridge ? (
+            <span className="blocked-mark" title={blockedMarkTitle(item.blocked_by)}>
+              <Icon name="link" size={14} label={BLOCKED_LABEL} />
+            </span>
+          ) : null}
           {progress ? <span className="todo-cell__progress">{progress}</span> : null}
           {item.due_after_parent ? (
             <span className="gantt-name__warning" title={DUE_AFTER_PARENT_TEXT}>
@@ -470,6 +513,7 @@ function Chart({
   selectedTodoId,
   onOpen,
   drag,
+  arrows,
 }: {
   range: Range;
   minWidth: number;
@@ -481,6 +525,8 @@ function Chart({
   selectedTodoId: number | null;
   onOpen: (id: number) => void;
   drag: BarDrag;
+  /** Dependency arrows (T-11), drawn over the bars. */
+  arrows: Arrow[];
 }) {
   const w = DAY_WIDTH[scale];
   const width = svgWidth(range, scale, minWidth);
@@ -514,6 +560,17 @@ function Chart({
           />
         ),
       )}
+      <g className="gantt-arrows" aria-hidden="true">
+        {arrows.map((a) => {
+          const selected = selectedTodoId !== null && (a.firstId === selectedTodoId || a.laterId === selectedTodoId);
+          return (
+            <g key={a.key} className={selected ? "gantt-arrow is-selected" : "gantt-arrow"}>
+              <path className="gantt-arrow__line" d={a.line} />
+              <polygon className="gantt-arrow__head" points={a.head} />
+            </g>
+          );
+        })}
+      </g>
       {todayX !== null ? <line className="gantt-today" x1={todayX} x2={todayX} y1={0} y2={height} /> : null}
     </svg>
   );

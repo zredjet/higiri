@@ -7,8 +7,8 @@ use tauri::State;
 
 use super::clock;
 use super::error::CmdResult;
+use super::todos::all_links;
 use crate::domain::gantt::{self, Gantt, GanttFilter};
-use crate::domain::repeat;
 use crate::domain::urgency::Rules;
 use crate::repo;
 use crate::repo::todos::TodoFilter;
@@ -49,12 +49,12 @@ pub async fn get(pool: &SqlitePool, query: &GanttQuery, today: NaiveDate) -> Cmd
     )
     .await?;
     let events = repo::events::list_status_events(&mut conn).await?;
-    let repeats = repeat::by_todo(repo::repeats::list(&mut conn).await?);
+    let links = all_links(&mut conn).await?;
     Ok(gantt::build(
         projects,
         &todos,
         &events,
-        &repeats,
+        &links,
         GanttFilter {
             include_done: query.include_done,
             include_cancelled: query.include_cancelled,

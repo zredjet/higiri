@@ -1,6 +1,7 @@
 import { Badge, Icon, Table, type TableColumn } from "../../components/aizome";
 import type { TodoListRow } from "../../lib/bindings";
 import { formatDate } from "../../lib/date";
+import { BLOCKED_LABEL, blockedMarkTitle } from "./dependencyText";
 import { REPEAT_LABEL, repeatMarkTitle } from "./repeatText";
 import {
   childProgressText,
@@ -31,7 +32,8 @@ const treeInfo = (r: TodoListRow): TreeInfo => ({ id: r.item.todo.id, parentId: 
  * The TODO list (docs/ui-mock/Todos.dc.html), plus 優先度 and the warnings.
  * Children come indented under their parent (S-1), which can be folded; a
  * parent that does not match the filters is shown dimmed (a bridge row).
- * A repeating TODO has the repeat mark next to its title (T-12).
+ * A repeating TODO has the repeat mark next to its title (T-12), and one
+ * waiting for unfinished TODOs the link mark (T-11).
  * Long lists draw only the rows near the screen (useVirtualRows).
  */
 export function TodoTable({ rows, showProject, selectedId, onOpen, emptyText }: TodoTableProps) {
@@ -43,7 +45,7 @@ export function TodoTable({ rows, showProject, selectedId, onOpen, emptyText }: 
     {
       key: "title",
       header: "TODO",
-      render: ({ item: { todo, children, repeat }, child, bridge }) => {
+      render: ({ item: { todo, children, repeat, blocked_by }, child, bridge }) => {
         const sub = bridge ? null : subLine(todo);
         const closed = todo.status === "done" || todo.status === "cancelled";
         const progress = childProgressText(children);
@@ -70,6 +72,11 @@ export function TodoTable({ rows, showProject, selectedId, onOpen, emptyText }: 
               {repeat ? (
                 <span className="repeat-mark" title={repeatMarkTitle(repeat)}>
                   <Icon name="repeat" size={14} label={REPEAT_LABEL} />
+                </span>
+              ) : null}
+              {blocked_by.length > 0 && !bridge ? (
+                <span className="blocked-mark" title={blockedMarkTitle(blocked_by)}>
+                  <Icon name="link" size={14} label={BLOCKED_LABEL} />
                 </span>
               ) : null}
               {progress ? <span className="todo-cell__progress">{progress}</span> : null}
@@ -130,13 +137,13 @@ export function TodoTable({ rows, showProject, selectedId, onOpen, emptyText }: 
       key: "period",
       header: "期間",
       width: 140,
-      render: ({ item: { todo, assessment, due_after_parent }, bridge }) => (
+      render: ({ item: { todo, assessment, due_after_parent, starts_before_dependency }, bridge }) => (
         <div className={bridge ? "todo-period text-muted" : "todo-period"}>
           <span>{periodText("予定", todo.planned_start, todo.planned_end)}</span>
           <span className="az-table__muted">{periodText("実績", todo.actual_start, todo.actual_end)}</span>
           {bridge
             ? null
-            : warningTexts(assessment, due_after_parent).map((w) => (
+            : warningTexts(assessment, due_after_parent, starts_before_dependency).map((w) => (
                 <span key={w} className="todo-note" style={{ color: "var(--warning)" }}>
                   <Icon name="alert-triangle" size={14} />
                   {w}

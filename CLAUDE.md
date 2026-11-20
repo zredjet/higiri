@@ -302,7 +302,7 @@ v0.3.0 は `docs/implementation-plan-v0.3.0.md` のフェーズ17〜24で作る�
   - コマンドは `set_todo_parent(id, parent_id)` を足して33個。子を作るのは `create_todo` の入力の `parent_id`。
   - 作ったもの(フェーズ19)
     - `domain/subtodo.rs`: 親子の検査(`check_parent`、作成のときの `check_new_child`。`ParentError` の文をそのまま画面に出す)、`Family`(TODO の集まりから、親のタイトルと日限、子の数を作る。同じ TODO を2回渡しても1回と数える)、`ChildCounts { total, done, open }`(`total` と `done` は中止を除く。`open` は開いている子)、`display_title`(「親 / 子」)。
-    - 検査の順: 自分自身 → 別のプロジェクト → 親にしようとした TODO が子(孫になる) → 子のある TODO を子にする。`create_todo` は別のプロジェクトと孫だけを見る(アーカイブしたプロジェクトへの追加は今までどおり断る)。閉じた TODO も親・子にできる。付け替えは `updated_at` を変え、変更履歴には残さない(`repo::todos::set_parent`)。繰り返しの検査はフェーズ21で足した(下の「繰り返しTODO」)。依存の検査はフェーズ22で足す。
+    - 検査の順: 自分自身 → 別のプロジェクト → 親にしようとした TODO が子(孫になる) → 子のある TODO を子にする。`create_todo` は別のプロジェクトと孫だけを見る(アーカイブしたプロジェクトへの追加は今までどおり断る)。閉じた TODO も親・子にできる。付け替えは `updated_at` を変え、変更履歴には残さない(`repo::todos::set_parent`)。繰り返しの検査はフェーズ21で足した(下の「繰り返しTODO」)。依存の検査(依存で結ばれた2件は親子にしない)はフェーズ22で足した(下の「依存関係」)。
     - `TodoItem` の `parent_title`、`children`、`due_after_parent` は `Family` から付ける(`views::todo_item(todo, project_name, &family, today, rules)`)。一覧・ダッシュボード・ガント・日報は読み込んだ全 TODO で `Family` を作る。1件(`get_todo` と、作成・更新・ステータス変更・付け替えの戻り値)は親と子を引いて作る(`commands/todos.rs` の `item`。子は `repo::todos::list_children`)。検索は当たった TODO の親と子を足して作る。`due_after_parent` は、開いている子の日限が親の日限より後(休日に寄せる前の日付で比べる。同じ日は警告しない)。
     - 一覧: `TodoList.rows`(`TodoListRow { item, child, bridge }`。v0.2.0 までの `items` から変えた)。並べ替えたあと `listing::tree_rows` で木の順にする(親どうし、同じ親の子どうしは選んだ並べ替えの順)。絞り込み(優先度・日限・状態のタブ)は1件ずつ判定し、当たった子の親が当たっていなければ、親をつなぎの行(`bridge`)にする。タブの件数は当たった TODO だけを数える。`Family` は絞り込む前の全 TODO で作るので、つなぎの行の「子 2/3」も全部の子で数える。
     - アプリが作らない形の親子(取り込んだファイルなど。親が一覧にない子、親に親がある子、自分を親にしている TODO)は、親の行として出す(`tree_rows`)。
@@ -324,7 +324,7 @@ v0.3.0 は `docs/implementation-plan-v0.3.0.md` のフェーズ17〜24で作る�
     - perf(`perf.rs`): 5,000件のうち1,000件を子にする(500件の親に2件ずつ。`CHILDREN`)。
 - TODOテンプレート(フェーズ20)
   - コマンドは `list_todo_templates`、`save_todo_template(todo_id, name, replace)`、`rename_todo_template(id, name)`、`delete_todo_template(id)` を足して37個。テンプレートから作るのは `create_todo` の入力の `template_id`。
-  - 子どうしの依存(`depends_on`)は、保存では空のまま、使うときも結ばない(フェーズ22で足す)。
+  - 子どうしの依存(`depends_on`)は、フェーズ22で保存と使うときの結びを足した(下の「依存関係」)。
   - 作ったもの(フェーズ20)
     - `domain/template.rs`: `checked_name`(前後の空白を除いて1〜40字。`NAME_MAX`。字は文字の数で数える。`NameError` の文をそのまま画面に出す)、`TemplateBody::from_todos(parent, children)`(中止した子を除き、子は `id` の順。`due_offset_days` は日限の暦日の差で、どちらかの日限が空なら `None`)、`TemplateBody::new_children(due)`(子の日限 = 入力の日限 + 日数。日限が空か日数が `None` なら空。日付の範囲を超えるときも空)、`TemplateSummary`(`list_todo_templates` などが返す `{ id, name, title, priority, child_titles, updated_at }`。`TodoTemplate::summary`)。
     - `repo/templates.rs`: `id_by_name`(名前がちょうど同じもの)。
@@ -336,7 +336,7 @@ v0.3.0 は `docs/implementation-plan-v0.3.0.md` のフェーズ17〜24で作る�
       - 詳細パネル: 「テンプレートとして保存」は、右上の「その他の操作」のメニュー(「削除する」の上)に置く。親のないTODOだけ。押すと詳細パネルの保存待ちの入力を保存してから(`saveOpenDrafts`。フェーズ20で Promise を返すようにした)、名前のダイアログ(`detail/SaveTemplateDialog.tsx`。初めの値はタイトル)を開く。保存の直前にも `saveOpenDrafts` を待つ。同じ名前が一覧にあれば、同じダイアログを「テンプレートを置き換えますか」に切り替え(ボタンは「名前を変える」「置き換える」)、`replace: true` で送る。保存したら、パネルの上に「テンプレート「…」を保存しました。「TODOを追加」で選ぶと使えます。」(×で閉じる。別のTODOに切り替えると出さない)。
       - 設定画面: 「日報のテンプレート」の下に「TODOのテンプレート」のカード(`src/features/settings/TodoTemplateCard.tsx`)。表(名前、子TODOの件数、「名前を変える」「削除する」)、名前の変更のダイアログ(「テンプレートの名前を変える」、ボタンは「キャンセル」「変更する」)、削除の確認(「テンプレートを削除しますか」)。1つもなければ「テンプレートはありません。TODOの詳細パネルの「テンプレートとして保存」で作れます。」。
       - フックは `queries.ts` の `useTodoTemplates`(キーは `["templates"]`)、`useSaveTodoTemplate`、`useRenameTodoTemplate`、`useDeleteTodoTemplate`(どれもテンプレートの一覧を取り直す)。テンプレートから作るのは `useCreateTodo` のまま(プロジェクトと TODO の一覧を取り直す)。復元と取り込みはすべてを取り直すので、テンプレートも取り直す。
-    - サンプル(`sample.rs`): テンプレート「月次締め」(子3件。日数は −3、−2、0)。TODO は足さないので、日報のフィクスチャとダッシュボードは変わらない。
+    - サンプル(`sample.rs`): テンプレート「月次締め」(子3件。日数は −3、−2、0。フェーズ22で、報告書の作成がほかの2件を待つようにした)。TODO は足さないので、日報のフィクスチャとダッシュボードは変わらない。
     - perf(`perf.rs`): テンプレート30個(子5件ずつ。`TEMPLATES`、`TEMPLATE_CHILDREN`)。`list_todo_templates`、`save_todo_template`(同じ名前の置き換え)、テンプレートから作って消す(`create_todo` + `delete_todo`)時間を測る。
 - 繰り返しTODO(フェーズ21)
   - コマンドは `set_todo_repeat(id, repeat)` を足して38個。`repeat` は `RepeatInput { rule, until_date }` か `null`(外す)。次の回は `change_status` が作る。
@@ -364,6 +364,35 @@ v0.3.0 は `docs/implementation-plan-v0.3.0.md` のフェーズ17〜24で作る�
       - フックは `queries.ts` の `useSetTodoRepeat`(`TODO_WRITES` の列に並べる)。
     - サンプル(`sample.rs`): 社内ツール整備に「社内ツールの更新確認」(優先度 低、未着手、日限はモックの 11/26、予定 11/25〜11/26)。周期は毎週、ずらしたあとの日限の曜日(モックの日なら木曜)。日報のフィクスチャとダッシュボードの日限注意は変わらない。社内ツール整備の進捗は 2/8、ガントの行は8行になる。
     - perf(`perf.rs`): 開いている親のないTODO 300件に、7種類の周期を順に付ける(`REPEATS`)。`set_todo_repeat`(周期を行き来)と、子5件のTODOを閉じて次の回を作る `change_status`(前後で作って消すので件数は変わらない。測るのは `change_status` だけ)を測る。
+- 依存関係(フェーズ22)
+  - コマンドは `add_dependency(todo_id, depends_on_id)`、`remove_dependency(todo_id, depends_on_id)`、`list_dependencies(todo_id)` を足して41個。`add` と `remove` は後のTODO(`todo_id`)の `TodoItem` を返す。
+  - 止めずに知らせるだけ。`change_status` は先のTODOが終わっていなくても作業中にする(確認は画面側)。依存の区分は増やさない。
+  - 作ったもの(フェーズ22)
+    - `domain/dependency.rs`
+      - `Prerequisite`(後のTODOの id と、先のTODOの id・タイトル・親のタイトル・プロジェクト名・ステータス・予定終了。`repo::dependencies::prerequisites` が JOIN で読む)、`Dependencies`(後のTODOごとに、依存を結んだ順。同じ組を2回渡しても1回)。
+      - `blocked_by(todo)`: 開いているTODOだけ。終わっていない(完了でも中止でもない)先のTODOを `BlockingTodo { id, title, parent_title, project_name }` で返す(子の先のTODOは画面が「親 / 子」で出す)。閉じたTODOでは空。
+      - `starts_before_dependency(todo)`: 開いているTODOの予定開始が、終わっていない先のTODOのどれかの予定終了より前(両方の日付があるときだけ。同じ日は警告しない)。終わった先のTODOとは比べない(オーケストレーターに確認中。下の「確認中」)。
+      - `depends_on(id)`: 先のTODOの id(終わったものも)。`GanttRow.depends_on` に入れる。
+      - `check_new(todo, first, &既存の依存)`: 自分自身 → 親と自分の子(どちらの向きも) → 同じ組 → 循環、の順に断る(`DependencyError` の文をそのまま画面に出す)。兄弟、ほかの親の子、別のプロジェクト、閉じたTODO、アーカイブしたプロジェクトのTODOは結べる。
+      - `creates_cycle`: 先のTODOから「待っている先」をたどって後のTODOに戻るか(すべての依存をたどる。再帰しない。1本の依存は1回だけ見る)。
+      - `positions_among(ids, &依存)`: 両端が `ids` の中にある依存を、`ids` の中の位置の組で返す(テンプレートと繰り返しで使う)。
+    - `repo/dependencies.rs`: `among(ids)`(両端が ids の中)、`neighbours(id)`(先のTODOと、これを待っているTODOの id。どちらも結んだ順)、`prerequisites(None か Some(ids))`。
+    - `views.rs`: `Links { repeats, dependencies }`。`todo_item(todo, project_name, &family, &links, today, rules)`(フェーズ21の `repeat` の引数を `links` にした)。`gantt::build` と `dashboard::build` も `&Links` を受け取る。一覧・ダッシュボード・ガントは `commands::todos::all_links`(周期と依存をまとめて読む)、1件と検索と `list_dependencies` は `links_of(ids)`。1件の `TodoItem` は `commands::todos::items`(親・子・周期・依存を引いて作る。`item` もこれを使う)。
+    - `commands/dependencies.rs`: 3つのコマンド。結ぶ・外すは後のTODOの `updated_at` を変え(付け替えと同じ)、変更履歴には残さない。外す依存がなければ「依存が見つかりません。外された可能性があります。画面を開き直してください。」(`error.rs` の `dependency of todo`)。
+    - `set_todo_parent`: 依存で結ばれた2件(どちらの向きも)を親子にすることを `ParentError::Linked`(「依存で結ばれたTODOどうしは、親子にできません。先に「先に終わらせるTODO」から外してください。」)で断る(繰り返しの検査の後)。同じTODOを待っているだけの2件は親子にできる。
+    - テンプレート: `TemplateBody::from_todos(parent, children, &依存)` が、入れる子(中止を除いた子)どうしの依存を `depends_on` に入れる(位置は小さい順)。入れない子と、一式の外とのつながりは落とす。`save_todo_template` は `repo::dependencies::among` で子どうしの依存を読む。`NewChild.depends_on` を足し、`create_todo` は子を作ってから、位置を作った子の id に直して結ぶ。
+    - 繰り返し: `next_round` が、写した子(`copied_children`)どうしの依存を `positions_among` で写す。一式の外とのつながり(外のTODOを待つ子、子や親を待つ外のTODO)は写さない。前の回の依存はそのまま残る。
+    - 画面
+      - `src/features/todos/dependencyText.ts`: 文言(「先のTODOが未完了」、確認のダイアログの題と問い、詳細パネルの見出し、選択のダイアログの説明)と `asksBeforeDoing`、`blockingTitle`、`pickBlockedReason`。Vitest あり。警告の「先のTODOより前に始まる予定」は `todoText.ts` の `STARTS_BEFORE_DEPENDENCY_TEXT` で、`warningTexts(a, due_after_parent, starts_before_dependency)` の最後に並ぶ。
+      - `link` のアイコンを `Icon.tsx` に足した(`repeat` と同じく、24pxの枠、線幅1.75、丸い線端)。
+      - 一覧(`TodoTable.tsx`)とガントの名前の欄: `blocked_by` があれば、繰り返しの印の右に `blocked-mark`(`link` のアイコン、読み上げ名「先のTODOが未完了」、マウスを載せると「先のTODOが未完了:要件の確定、…」)。つなぎの行には出さない。ガントの行の読み上げ名の最後に「、先のTODOが未完了(…)」。
+      - 詳細パネル(`detail/DependencySection.tsx`、子TODOの欄の下): 「先に終わらせるTODO」と「これを待っているTODO」の一覧(「親 / 子」の名前、別のプロジェクトならプロジェクト名、ステータス。押すと開き、×で依存を外す)、`starts_before_dependency` なら警告、「先に終わらせるTODOを足す」のボタン(詳細パネルの保存待ちの入力を保存してから開く)。閉じたTODOにも出す。フックは `queries.ts` の `useDependencies`(キーは `["todos", "dependencies", id]`。TODO の変更で取り直す)、`useAddDependency`、`useRemoveDependency`(どちらも `TODO_WRITES` の列に並べる)。
+      - 選択のダイアログ(`detail/DependencyPickerDialog.tsx`): 語を打って200msで `search_todos` を引く(変換中は引かない。変換中の Esc ではダイアログを閉じない)。結果は「親 / 子」の名前、プロジェクト名、ステータス。自分と、足してある先のTODOは押せない(「このTODO」「足してあります」)。それ以外は押すと結び、循環・親と自分の子は Rust の文をダイアログの上に出す(開いたまま選び直せる)。
+      - 作業中にするときの確認(`StatusDialogs.tsx` の `StartBlockedDialog`): 題は「先に終わらせるTODOが終わっていません」、文は「次の2件が、まだ完了も中止もしていません。このまま作業中にしますか。」、終わっていないTODOを「名前(プロジェクト名)」で並べ、ボタンは「キャンセル」「作業中にする」。詳細パネルのステータスの選択と、ダッシュボードの「作業に戻す」「着手する」(どちらも作業中にする操作。下の「確認中」)から出す。閉じたTODOの再開(完了 → 作業中)では `blocked_by` が空なので出ない。
+      - ガントの矢印(`geometry.ts` の `arrowBetween`、`dependencyArrows`。Vitest でモックの座標と照合): 先のTODOの予定のバーの終わりから、後のTODOの予定のバーの始まりへ。後のバーが `2 * ARROW.gap`(16px)以上右で始まるときは1回曲がり、それより左なら、先のバーの終わりから出て、先の行の後のTODO側の縁(下なら下の縁、上なら上の縁)を通り、後のバーの始まりの左から入る。どちらかが表示されていない(完了・中止を隠している、折りたたんでいる、プロジェクトで絞っている)か予定のバーがないときと、描いている行(見えている行と前後の余分)の範囲に縦でかからないとき、表の左右の外に出るときは描かない。ドラッグ中は動かしている位置で引く。線と矢じりは `--text-muted`、選んでいるTODOにつながる矢印は `--primary-text` で少し太く。矢印は読み上げない(`aria-hidden`。行の読み上げ名で伝える)。クリックは下のバーに通す。凡例に「依存」を足した。
+    - サンプル(`sample.rs`): 依存を3本。結合テスト計画の作成 → 移行手順書のドラフト(予定が後なので警告なし)、性能試験の環境準備 → API設計書のレビュー対応(予定開始 11/17 が先の予定終了 11/19 より前なので警告。ガントの矢印は回り込む)、新メンバーでの試行 → セットアップ手順書の作成(兄弟)。テンプレート「月次締め」の報告書の作成は、ほかの2件を待つ(`depends_on: [0, 1]`)。日限注意の区分は変わらないので、日報のフィクスチャとダッシュボードの日限注意は変わらない。`json_data.rs` のテストの `add_v0_3_0_rows` は、サンプルの依存も消してから自分の行を入れる。
+    - perf(`perf.rs`): 依存を1,000本(`DEPENDENCIES`。後のTODOの id がいつも大きいので循環はない。たいていは id が60以内の近くのTODO(プロジェクトが順に回るので、別のプロジェクトのことが多い)、1割はずっと前のTODO。親と自分の子の組は飛ばす)。テンプレートの子は1つ前の子を待つ。`list_dependencies` と、結んで外す(`add_dependency` + `remove_dependency`。循環の検査がすべての依存を読む)を測る。
+    - 確認中(オーケストレーターに聞いて、推奨の案で仮に進めた): (1) `starts_before_dependency` は終わっていない先のTODOとだけ比べる。(2) 作業中にするときの確認をダッシュボードの「着手する」(着手遅れの行)にも出す。
 
 ## 品質の決めごと
 

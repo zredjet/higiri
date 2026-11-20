@@ -1,7 +1,9 @@
 //! Performance check (非機能要件「性能」): 5,000 TODOs and 20,000 work logs.
 //! 1,000 of the TODOs are children (S-1): 500 parents with 2 children each.
-//! 30 TODO templates (T-10) with 5 children each. 300 repeating TODOs
-//! (T-12), open and parentless, of every kind of rule.
+//! 30 TODO templates (T-10) with 5 children each, each child waiting for the
+//! one before it. 300 repeating TODOs (T-12), open and parentless, of every
+//! kind of rule. 1,000 dependencies (T-11), mostly between nearby TODOs (of
+//! other projects, as projects take turns), never a parent and its child.
 //!
 //! Every command is measured twice: with the default 暦日 setting, then with
 //! 営業日 and a yearly custom holiday (年末年始).
@@ -26,7 +28,7 @@ use chrono::{Days, NaiveDate, TimeZone, Utc};
 use sqlx::SqlitePool;
 
 use crate::commands::{
-    dashboard, gantt, projects, repeats, reports, search, settings, templates, todos,
+    dashboard, dependencies, gantt, projects, repeats, reports, search, settings, templates, todos,
 };
 use crate::domain::date::{format_date, format_timestamp};
 use crate::domain::listing::{DueFilter, TodoSort};
@@ -48,6 +50,9 @@ pub const TEMPLATES: usize = 30;
 pub const TEMPLATE_CHILDREN: usize = 5;
 /// Repeating TODOs (T-12): the first open, parentless TODOs with a 日限.
 pub const REPEATS: usize = 300;
+/// Dependencies (T-11). The later TODO always has the larger id, so there is
+/// no circle.
+pub const DEPENDENCIES: usize = 1_000;
 
 /// Searches measured (label, words). The seed's texts: titles
 /// 「TODO 0001 の作業」, memos 「- 進め方のメモ…」, 待っている相手
@@ -235,7 +240,8 @@ pub async fn seed(pool: &SqlitePool, today: NaiveDate) -> sqlx::Result<()> {
             priority: Priority::Medium,
             memo_md: "- 確認すること".into(),
             due_offset_days: Some(c as i64 - TEMPLATE_CHILDREN as i64),
-            depends_on: Vec::new(),
+            // Each child waits for the one before it (positions from 0).
+            depends_on: if c > 1 { vec![c - 2] } else { Vec::new() },
         };
         let body = TemplateBody {
             title: format!("定例の作業 {n:02}"),
@@ -287,6 +293,32 @@ pub async fn seed(pool: &SqlitePool, today: NaiveDate) -> sqlx::Result<()> {
         .bind(&created)
         .execute(&mut *tx)
         .await?;
+    }
+
+    // 依存関係: a later TODO waits for one up to 60 ids before it (now and
+    // then much further). Pairs already there and a parent with its own
+    // child are skipped.
+    let mut joined = 0;
+    while joined < DEPENDENCIES {
+        let later = rng.below(TODOS as u64 - 1) as i64 + 2;
+        let reach = if rng.below(10) == 0 {
+            later - 1
+        } else {
+            (later - 1).min(60)
+        };
+        let first = later - 1 - rng.below(reach as u64) as i64;
+        let done = sqlx::query(
+            "INSERT OR IGNORE INTO todo_dependencies (todo_id, depends_on_id, created_at)
+             SELECT ?1, ?2, ?3
+             WHERE NOT EXISTS (SELECT 1 FROM todos
+                               WHERE (id = ?1 AND parent_id = ?2) OR (id = ?2 AND parent_id = ?1))",
+        )
+        .bind(later)
+        .bind(first)
+        .bind(&created)
+        .execute(&mut *tx)
+        .await?;
+        joined += done.rows_affected() as usize;
     }
     tx.commit().await
 }
@@ -600,6 +632,44 @@ async fn measure(pool: &SqlitePool, today: NaiveDate) -> Vec<(&'static str, Dura
     closes.sort();
     times.push(("change_status (repeat round)", closes[runs / 2]));
 
+    // 依存関係 (T-11): the detail panel's lists, and joining a pair (the
+    // circle check reads every dependency) then removing it again, so the
+    // count stays.
+    let (busy,): (i64,) = sqlx::query_as(
+        "SELECT todo_id FROM todo_dependencies
+         WHERE todo_id IN (SELECT depends_on_id FROM todo_dependencies)
+         ORDER BY todo_id LIMIT 1",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    times.push((
+        "list_dependencies",
+        median(runs, || dependencies::list(pool, busy, today)).await,
+    ));
+    let (later, first): (i64, i64) = sqlx::query_as(
+        "SELECT a.id, b.id FROM todos a JOIN todos b ON b.id < a.id
+         WHERE a.parent_id IS NULL AND b.parent_id IS NULL
+           AND NOT EXISTS (SELECT 1 FROM todo_dependencies d
+                           WHERE d.todo_id = a.id AND d.depends_on_id = b.id)
+         ORDER BY a.id DESC, b.id DESC LIMIT 1",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    times.push((
+        "add_dependency + remove",
+        median(runs, || async {
+            dependencies::add(pool, later, first, today, Utc::now())
+                .await
+                .unwrap();
+            dependencies::remove(pool, later, first, today, Utc::now())
+                .await
+                .unwrap();
+        })
+        .await,
+    ));
+
     // What the first screen asks for (App.tsx: settings, projects, the
     // dashboard and its badge, the startup reminder). The screen sends them
     // at once; here they run one after the other.
@@ -767,5 +837,10 @@ async fn perf_5000_todos_20000_logs() {
         .await
         .unwrap();
     assert_eq!(repeat_count, REPEATS as i64);
+    let (dependency_count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM todo_dependencies")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(dependency_count, DEPENDENCIES as i64);
     pool.close().await;
 }

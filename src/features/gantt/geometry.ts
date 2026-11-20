@@ -318,6 +318,112 @@ export function headerRows(r: Range, scale: Scale, today: string): { top: Segmen
   };
 }
 
+// ---- dependency arrows (T-11) -----------------------------------------------------
+
+/**
+ * Arrow sizes (px): the line leaves a bar end `gap` px sideways before it
+ * turns, and its head is `head` px long and twice `head * 0.75` wide.
+ */
+export const ARROW = { gap: 8, head: 5 } as const;
+
+/** A row the arrows may join: a laid-out TODO row with its planned span (null: no bar). */
+export interface ArrowRow {
+  id: number;
+  top: number;
+  planned: DaySpan | null;
+  /** The TODOs this one waits for (GanttRow.depends_on). */
+  dependsOn: number[];
+}
+
+export interface Arrow {
+  key: string;
+  firstId: number;
+  laterId: number;
+  /** SVG path of the line. */
+  line: string;
+  /** SVG points of the head, at the later bar's start. */
+  head: string;
+}
+
+/** Vertical middle of a row's planned bar. */
+function plannedMiddle(top: number): number {
+  return top + LAYOUT.plannedTop + LAYOUT.plannedHeight / 2;
+}
+
+/**
+ * The arrow from the end of `first`'s planned bar to the start of
+ * `later`'s. x is not clipped to the range (the chart clips it). When the
+ * later bar starts far enough right, the line turns once down (or up) to
+ * it; otherwise it goes round: out of the first bar's end, along the edge
+ * of the first row toward the later one, back left past the later bar's
+ * start, and into it.
+ */
+export function arrowBetween(
+  r: Range,
+  dayWidth: number,
+  first: { top: number; planned: DaySpan },
+  later: { top: number; planned: DaySpan },
+): { line: string; head: string; minX: number; maxX: number } {
+  const fx = (dayIndex(r.start, first.planned.end) + 1) * dayWidth;
+  const fy = plannedMiddle(first.top);
+  const tx = dayIndex(r.start, later.planned.start) * dayWidth;
+  const ty = plannedMiddle(later.top);
+  const { gap, head } = ARROW;
+  const end = tx - head;
+  let line: string;
+  let minX: number;
+  let maxX: number;
+  if (tx - fx >= 2 * gap) {
+    const turn = fx + gap;
+    line = `M${fx} ${fy}H${turn}V${ty}H${end}`;
+    minX = fx;
+    maxX = tx;
+  } else {
+    // Along the first row's bottom edge (later below) or top edge (above).
+    const edge = later.top > first.top ? first.top + LAYOUT.todoRow : first.top;
+    const out = fx + gap;
+    const back = tx - gap;
+    line = `M${fx} ${fy}H${out}V${edge}H${back}V${ty}H${end}`;
+    minX = Math.min(fx, back);
+    maxX = Math.max(out, tx);
+  }
+  const w = head * 0.75;
+  return { line, head: `${tx},${ty} ${end},${ty - w} ${end},${ty + w}`, minX, maxX };
+}
+
+/**
+ * The dependency arrows to draw. Both TODOs must be laid out (not hidden,
+ * folded away or in another project) with a planned bar. An arrow is left
+ * out when it lies wholly above or below the drawn rows (`view`: the top of
+ * the first drawn row to the bottom of the last), or wholly left or right
+ * of the chart (`width`).
+ */
+export function dependencyArrows(
+  rows: ArrowRow[],
+  r: Range,
+  dayWidth: number,
+  width: number,
+  view: { top: number; bottom: number },
+): Arrow[] {
+  const byId = new Map<number, ArrowRow>();
+  for (const row of rows) byId.set(row.id, row);
+  const out: Arrow[] = [];
+  for (const later of rows) {
+    if (!later.planned) continue;
+    for (const firstId of later.dependsOn) {
+      const first = byId.get(firstId);
+      if (!first?.planned) continue;
+      const top = Math.min(first.top, later.top);
+      const bottom = Math.max(first.top, later.top) + LAYOUT.todoRow;
+      if (bottom <= view.top || top >= view.bottom) continue;
+      const a = arrowBetween(r, dayWidth, { top: first.top, planned: first.planned }, { top: later.top, planned: later.planned });
+      if (a.maxX < 0 || a.minX > width) continue;
+      out.push({ key: `${firstId}-${later.id}`, firstId, laterId: later.id, line: a.line, head: a.head });
+    }
+  }
+  return out;
+}
+
 // ---- rows ------------------------------------------------------------------------
 
 export interface LaidOutRow<P, T> {

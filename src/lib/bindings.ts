@@ -57,6 +57,16 @@ export const commands = {
 	renameTodoTemplate: (id: number, name: string, options?: InvokeOptions) => __TAURI_INVOKE<TemplateSummary>("rename_todo_template", { id, name }, options),
 	/**  Deletes a template. The TODOs made from it stay. The screen confirms first. */
 	deleteTodoTemplate: (id: number, options?: InvokeOptions) => __TAURI_INVOKE<null>("delete_todo_template", { id }, options),
+	/**
+	 *  Makes `todo_id` wait for `depends_on_id` (先に終わらせるTODOを足す).
+	 *  Refused: itself, a pair twice, a circle, a parent and its own child.
+	 *  Projects may differ and either TODO may be closed. Returns the later TODO.
+	 */
+	addDependency: (todoId: number, dependsOnId: number, options?: InvokeOptions) => __TAURI_INVOKE<TodoItem>("add_dependency", { todoId, dependsOnId }, options),
+	/**  Stops `todo_id` waiting for `depends_on_id`. Returns the later TODO. */
+	removeDependency: (todoId: number, dependsOnId: number, options?: InvokeOptions) => __TAURI_INVOKE<TodoItem>("remove_dependency", { todoId, dependsOnId }, options),
+	/**  The TODOs `todo_id` waits for and those waiting for it. */
+	listDependencies: (todoId: number, options?: InvokeOptions) => __TAURI_INVOKE<DependencyList>("list_dependencies", { todoId }, options),
 	/**  Work logs and recorded changes of one TODO, newest first. */
 	listTimeline: (todoId: number, options?: InvokeOptions) => __TAURI_INVOKE<TimelineEntry[]>("list_timeline", { todoId }, options),
 	/**  Adds (`id = null`) or updates a work log. */
@@ -212,6 +222,18 @@ export type BackupKind =
 "before_restore";
 
 /**
+ *  An unfinished TODO to finish first (`TodoItem.blocked_by`): the mark in
+ *  the list and the confirmation before 作業中.
+ */
+export type BlockingTodo = {
+	id: number,
+	title: string,
+	/**  For a child: shown 「親 / 子」. */
+	parent_title: string | null,
+	project_name: string,
+};
+
+/**
  *  Children of a parent: `total` and `done` leave 中止 out (the progress
  *  「2/3 完了」), `open` counts the open ones (the confirmation when the
  *  parent is closed).
@@ -273,6 +295,17 @@ export type DayOfWeek = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 export type DaySpan = {
 	start: string,
 	end: string,
+};
+
+/**
+ *  The TODOs around one in the detail panel, each in the order the
+ *  dependencies were added.
+ */
+export type DependencyList = {
+	/**  先に終わらせるTODO: the TODOs it waits for. */
+	depends_on: TodoItem[],
+	/**  これを待っているTODO: the TODOs waiting for it. */
+	dependents: TodoItem[],
 };
 
 /**  The 日限 filter of the list. */
@@ -367,6 +400,12 @@ export type GanttRow = {
 	 *  no bars and no due mark (all spans are empty).
 	 */
 	bridge: boolean,
+	/**
+	 *  The TODOs this one waits for (T-11), finished or not: an arrow from
+	 *  the end of each one's planned bar to the start of this one's, when
+	 *  both rows are shown with a planned bar.
+	 */
+	depends_on: number[],
 };
 
 /**  A holiday with its name, as `list_holidays` returns it. */
@@ -799,6 +838,16 @@ export type TodoItem = {
 	 *  today. `null` = it does not repeat.
 	 */
 	repeat: RepeatInfo | null,
+	/**
+	 *  The unfinished TODOs it waits for (T-11): the list's mark and the
+	 *  confirmation before 作業中. Empty when closed.
+	 */
+	blocked_by: BlockingTodo[],
+	/**
+	 *  Open, and planned to start before an unfinished TODO it waits for is
+	 *  planned to end (「先のTODOより前に始まる予定」, T-11).
+	 */
+	starts_before_dependency: boolean,
 };
 
 /**

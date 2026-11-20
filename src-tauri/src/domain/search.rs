@@ -479,7 +479,7 @@ mod tests {
             t,
             "基幹システム更改".into(),
             &crate::domain::subtodo::Family::default(),
-            None,
+            &crate::domain::views::Links::default(),
             d("2026-11-19"),
             &rules(3),
         )

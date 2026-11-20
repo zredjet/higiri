@@ -16,6 +16,7 @@ use super::clock;
 use super::error::{AppError, CmdResult};
 use super::todos::item;
 use crate::domain::date::days_between;
+use crate::domain::dependency::positions_among;
 use crate::domain::events;
 use crate::domain::model::Todo;
 use crate::domain::repeat::{RepeatRule, RoundDates, check_target, copied_children};
@@ -116,9 +117,11 @@ pub(super) async fn next_round(
         now,
     )
     .await?;
-    for child in copied_children(children) {
+    let copied: Vec<&Todo> = copied_children(children).collect();
+    let mut made_ids = Vec::with_capacity(copied.len());
+    for child in &copied {
         let dates = RoundDates::of(child).shifted(days);
-        copy(
+        let made = copy(
             conn,
             child,
             Some(round.id),
@@ -128,6 +131,14 @@ pub(super) async fn next_round(
             now,
         )
         .await?;
+        made_ids.push(made.id);
+    }
+    // The dependencies between the copied children (T-11); none with TODOs
+    // outside the round.
+    let old_ids: Vec<i64> = copied.iter().map(|c| c.id).collect();
+    let inside = repo::dependencies::among(conn, &old_ids).await?;
+    for (later, first) in positions_among(&old_ids, &inside) {
+        repo::dependencies::insert(conn, made_ids[later], made_ids[first], now).await?;
     }
     repo::repeats::move_to(conn, prev.id, round.id, now).await?;
     Ok(())
@@ -741,6 +752,94 @@ mod tests {
         }
         let item = todos::get(&pool, round.id, today()).await.unwrap();
         assert_eq!(item.children.map(|c| (c.total, c.open)), Some((3, 3)));
+    }
+
+    #[tokio::test]
+    async fn the_dependencies_inside_the_round_are_copied_and_those_outside_are_not() {
+        use crate::commands::dependencies;
+        let (pool, pid) = setup().await;
+        let parent = add(&pool, input(pid, "月次締め", Some("2026-11-30")))
+            .await
+            .todo
+            .id;
+        let child = |title: &str| NewTodoInput {
+            parent_id: Some(parent),
+            ..input(pid, title, None)
+        };
+        let sales = add(&pool, child("売上の集計")).await.todo.id;
+        let check = add(&pool, child("請求書の確認")).await.todo.id;
+        let report = add(&pool, child("報告書の作成")).await.todo.id;
+        let dropped = add(&pool, child("やめた作業")).await.todo.id;
+        let outside = add(&pool, input(pid, "前月の確定", None)).await.todo.id;
+        let after = add(&pool, input(pid, "経営会議の資料", None)).await.todo.id;
+        let join = |later: i64, first: i64| {
+            let pool = pool.clone();
+            async move {
+                dependencies::add(&pool, later, first, today(), now())
+                    .await
+                    .unwrap();
+            }
+        };
+        // Inside: 報告書 → 売上, 報告書 → 確認, 確認 → 売上, 報告書 → やめた作業.
+        // Outside: 売上 → 前月の確定, 経営会議の資料 → 報告書, 経営会議の資料 → 親.
+        join(report, sales).await;
+        join(report, check).await;
+        join(check, sales).await;
+        join(report, dropped).await;
+        join(sales, outside).await;
+        join(after, report).await;
+        join(after, parent).await;
+        close(&pool, dropped, StatusChange::cancel("不要")).await;
+        set(
+            &pool,
+            parent,
+            every(RepeatRule::MonthlyLast),
+            today(),
+            now(),
+        )
+        .await
+        .unwrap();
+        close(&pool, parent, done()).await;
+
+        let made = made_after(&pool, after).await;
+        let ids: Vec<i64> = made.iter().map(|t| t.id).collect();
+        let titles: Vec<&str> = made.iter().map(|t| t.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            ["月次締め", "売上の集計", "請求書の確認", "報告書の作成"]
+        );
+        let (round, new_sales, new_check, new_report) = (ids[0], ids[1], ids[2], ids[3]);
+        let mut c = pool.acquire().await.unwrap();
+        let mut copied: Vec<(i64, i64)> = repo::dependencies::list(&mut c)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|d| (d.todo_id, d.depends_on_id))
+            .filter(|(later, first)| ids.contains(later) || ids.contains(first))
+            .collect();
+        copied.sort_unstable();
+        let mut expected = vec![
+            (new_check, new_sales),
+            (new_report, new_sales),
+            (new_report, new_check),
+        ];
+        expected.sort_unstable();
+        assert_eq!(copied, expected);
+        // The old round keeps its own.
+        assert!(
+            repo::dependencies::get(&mut c, after, parent)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            repo::dependencies::get(&mut c, report, sales)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        drop(c);
+        assert!(made[1..].iter().all(|t| t.parent_id == Some(round)));
     }
 
     #[tokio::test]

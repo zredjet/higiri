@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { Alert, Button, Dialog, TextField } from "../../../components/aizome";
 import { DateField } from "../../../components/DateField";
+import type { BlockingTodo } from "../../../lib/bindings";
 import { errorMessage } from "../../../lib/errors";
+import { BLOCKED_DIALOG_TITLE, blockedQuestion, blockingLine } from "../dependencyText";
 import { closeChildrenQuestion } from "../todoText";
 
 interface BaseProps {
@@ -146,6 +148,46 @@ export function DoneWithChildrenDialog({
       }
     >
       {error ? <Alert tone="danger">{errorMessage(error)}</Alert> : null}
+    </Dialog>
+  );
+}
+
+/**
+ * 作業中にする while TODOs to finish first are unfinished (T-11): lists
+ * them and goes ahead on 「作業中にする」 (nothing is stopped). The detail
+ * panel and the dashboard ask with this.
+ */
+export function StartBlockedDialog({
+  blockedBy,
+  onConfirm,
+  onClose,
+  pending,
+  error,
+}: BaseProps & { blockedBy: BlockingTodo[]; onConfirm: () => void }) {
+  return (
+    <Dialog
+      open
+      size="md"
+      onClose={pending ? undefined : onClose}
+      title={BLOCKED_DIALOG_TITLE}
+      description={blockedQuestion(blockedBy.length)}
+      footer={
+        <>
+          <Button onClick={onClose} disabled={pending}>
+            キャンセル
+          </Button>
+          <Button variant="primary" loading={pending} onClick={onConfirm}>
+            作業中にする
+          </Button>
+        </>
+      }
+    >
+      {error ? <Alert tone="danger">{errorMessage(error)}</Alert> : null}
+      <ul className="blocked-list">
+        {blockedBy.map((b) => (
+          <li key={b.id}>{blockingLine(b)}</li>
+        ))}
+      </ul>
     </Dialog>
   );
 }

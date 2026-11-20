@@ -6,6 +6,7 @@
 pub mod calendar;
 pub mod dashboard;
 pub mod date;
+pub mod dependency;
 pub mod events;
 pub mod gantt;
 pub mod holidays;

@@ -87,6 +87,11 @@ const ICONS = {
     ["path", { d: "M19.5 12.5a7.5 7.5 0 0 1-13 4.6L4.5 15" }],
     ["path", { d: "M4.5 19.5V15H9" }],
   ],
+  // Not in Aizome: added for TODO間の依存関係 (v0.3.0), drawn like the others.
+  link: [
+    ["path", { d: "M10 13.5a4 4 0 0 0 5.7.3l3-3a4 4 0 0 0-5.7-5.7L11.5 6.6" }],
+    ["path", { d: "M14 10.5a4 4 0 0 0-5.7-.3l-3 3a4 4 0 0 0 5.7 5.7l1.5-1.5" }],
+  ],
 } satisfies Record<string, Shape[]>;
 
 export type IconName = keyof typeof ICONS;
