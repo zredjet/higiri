@@ -44,9 +44,14 @@ const PART_SUFFIX: &str = ".part";
 /// Where a backup is checked and migrated before its rows are copied.
 const RESTORE_WORK_FILE: &str = "restore-work.db";
 
-/// Tables in parent-first order (rows are inserted in this order and deleted
-/// in the reverse order). `_sqlx_migrations` is not copied.
-const DELETE_CHILD_FIRST: [&str; 6] = [
+/// Every table: rows referring to others are deleted before the rows they
+/// refer to, and inserted after them. `_sqlx_migrations` is not copied.
+/// v0.3.0's tables: `todo_dependencies` and `todo_repeats` refer to `todos`;
+/// `todo_templates` refers to nothing.
+const DELETE_CHILD_FIRST: [&str; 9] = [
+    "DELETE FROM main.todo_dependencies",
+    "DELETE FROM main.todo_repeats",
+    "DELETE FROM main.todo_templates",
     "DELETE FROM main.todo_events",
     "DELETE FROM main.work_logs",
     "DELETE FROM main.todos",
@@ -54,13 +59,16 @@ const DELETE_CHILD_FIRST: [&str; 6] = [
     "DELETE FROM main.settings",
     "DELETE FROM main.projects",
 ];
-const INSERT_PARENT_FIRST: [&str; 6] = [
+const INSERT_PARENT_FIRST: [&str; 9] = [
     "INSERT INTO main.projects SELECT * FROM src.projects",
     "INSERT INTO main.todos SELECT * FROM src.todos",
     "INSERT INTO main.work_logs SELECT * FROM src.work_logs",
     "INSERT INTO main.todo_events SELECT * FROM src.todo_events",
     "INSERT INTO main.reports SELECT * FROM src.reports",
     "INSERT INTO main.settings SELECT * FROM src.settings",
+    "INSERT INTO main.todo_templates SELECT * FROM src.todo_templates",
+    "INSERT INTO main.todo_repeats SELECT * FROM src.todo_repeats",
+    "INSERT INTO main.todo_dependencies SELECT * FROM src.todo_dependencies",
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -719,6 +727,185 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(keys, vec![]);
+    }
+
+    /// The v0.3.0 tables as (template names, repeating TODO ids, dependency pairs).
+    async fn v0_3_0_rows(pool: &SqlitePool) -> (Vec<String>, Vec<i64>, Vec<(i64, i64)>) {
+        use crate::repo::{dependencies, repeats, templates};
+        let mut c = pool.acquire().await.unwrap();
+        (
+            templates::list(&mut c)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|t| t.name)
+                .collect(),
+            repeats::list(&mut c)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|r| r.todo_id)
+                .collect(),
+            dependencies::list(&mut c)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|d| (d.todo_id, d.depends_on_id))
+                .collect(),
+        )
+    }
+
+    fn template(name: &str) -> crate::repo::templates::TemplateFields {
+        use crate::domain::model::Priority;
+        use crate::domain::template::TemplateBody;
+        crate::repo::templates::TemplateFields {
+            name: name.into(),
+            body: TemplateBody {
+                title: name.into(),
+                priority: Priority::Medium,
+                memo_md: String::new(),
+                children: vec![],
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn restore_replaces_templates_repeats_and_dependencies() {
+        use crate::domain::repeat::RepeatRule;
+        use crate::repo::testing::todo;
+        use crate::repo::{dependencies, repeats, templates};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = file_db(tmp.path()).await;
+        add_project(&pool, "A").await;
+        let at = ts(2026, 11, 18, 0, 0);
+        let (t1, t2, t3) = {
+            let mut c = pool.acquire().await.unwrap();
+            let t1 = todo(&mut c, 1, "t1").await.id;
+            let t2 = todo(&mut c, 1, "t2").await.id;
+            let t3 = todo(&mut c, 1, "t3").await.id;
+            templates::insert(&mut c, &template("月次締め"), at)
+                .await
+                .unwrap();
+            repeats::insert(&mut c, t1, &RepeatRule::Daily, None, at)
+                .await
+                .unwrap();
+            dependencies::insert(&mut c, t2, t1, at).await.unwrap();
+            (t1, t2, t3)
+        };
+        run_daily(&pool, tmp.path(), d("2026-11-18")).await.unwrap();
+        let backed_up = v0_3_0_rows(&pool).await;
+        assert_eq!(
+            backed_up,
+            (vec!["月次締め".to_owned()], vec![t1], vec![(t2, t1)])
+        );
+
+        // Since then: every table changed.
+        {
+            let mut c = pool.acquire().await.unwrap();
+            let old = templates::list(&mut c).await.unwrap();
+            templates::delete(&mut c, old[0].id).await.unwrap();
+            templates::insert(&mut c, &template("週次"), at)
+                .await
+                .unwrap();
+            repeats::delete(&mut c, t1).await.unwrap();
+            repeats::insert(&mut c, t3, &RepeatRule::MonthlyLast, None, at)
+                .await
+                .unwrap();
+            dependencies::insert(&mut c, t3, t2, at).await.unwrap();
+        }
+        let changed = v0_3_0_rows(&pool).await;
+        assert_ne!(changed, backed_up);
+
+        restore(
+            &pool,
+            tmp.path(),
+            "todo-2026-11-18.db",
+            ts(2026, 11, 19, 0, 0),
+        )
+        .await
+        .unwrap();
+        assert_eq!(v0_3_0_rows(&pool).await, backed_up);
+        // And back again from the copy kept before the restore.
+        let kept = list(tmp.path())
+            .unwrap()
+            .into_iter()
+            .find(|b| b.kind == BackupKind::BeforeRestore)
+            .unwrap();
+        restore(&pool, tmp.path(), &kept.file_name, ts(2026, 11, 19, 0, 5))
+            .await
+            .unwrap();
+        assert_eq!(v0_3_0_rows(&pool).await, changed);
+    }
+
+    #[tokio::test]
+    async fn a_v0_2_0_backup_is_restored_with_the_new_tables_empty() {
+        use crate::domain::repeat::RepeatRule;
+        use crate::repo::testing::todo;
+        use crate::repo::{dependencies, repeats, templates};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = file_db(tmp.path()).await;
+        add_project(&pool, "今のプロジェクト").await;
+        {
+            let at = ts(2026, 11, 19, 0, 0);
+            let mut c = pool.acquire().await.unwrap();
+            let a = todo(&mut c, 1, "a").await.id;
+            let b = todo(&mut c, 1, "b").await.id;
+            templates::insert(&mut c, &template("月次締め"), at)
+                .await
+                .unwrap();
+            repeats::insert(&mut c, a, &RepeatRule::Daily, None, at)
+                .await
+                .unwrap();
+            dependencies::insert(&mut c, b, a, at).await.unwrap();
+        }
+
+        // A backup taken by v0.2.0: only 0001 applied.
+        let bdir = dir(tmp.path());
+        std::fs::create_dir_all(&bdir).unwrap();
+        let old = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(bdir.join("todo-2026-11-17.db"))
+                    .create_if_missing(true)
+                    .journal_mode(SqliteJournalMode::Delete),
+            )
+            .await
+            .unwrap();
+        db::MIGRATOR.run_to(1, &old).await.unwrap();
+        sqlx::query(
+            "INSERT INTO projects (id, name, created_at, updated_at)
+             VALUES (1, 'v0.2.0のプロジェクト', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z')",
+        )
+        .execute(&old)
+        .await
+        .unwrap();
+        old.close().await;
+
+        restore(
+            &pool,
+            tmp.path(),
+            "todo-2026-11-17.db",
+            ts(2026, 11, 19, 1, 0),
+        )
+        .await
+        .unwrap();
+        assert_eq!(project_names(&pool).await, ["v0.2.0のプロジェクト"]);
+        assert_eq!(v0_3_0_rows(&pool).await, (vec![], vec![], vec![]));
+        // The backup itself was not migrated (only its work copy was).
+        let old = SqlitePool::connect_with(
+            SqliteConnectOptions::new().filename(bdir.join("todo-2026-11-17.db")),
+        )
+        .await
+        .unwrap();
+        let applied: (i64,) = sqlx::query_as("SELECT MAX(version) FROM _sqlx_migrations")
+            .fetch_one(&old)
+            .await
+            .unwrap();
+        assert_eq!(applied.0, 1);
+        old.close().await;
     }
 
     #[tokio::test]

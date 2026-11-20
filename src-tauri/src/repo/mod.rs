@@ -6,11 +6,14 @@
 //! Timestamps are passed in; nothing here reads the clock.
 
 pub mod db;
+pub mod dependencies;
 pub mod events;
 pub mod projects;
+pub mod repeats;
 pub mod reports;
 pub mod search;
 pub mod settings;
+pub mod templates;
 pub mod todos;
 pub mod work_logs;
 
@@ -113,5 +116,28 @@ pub(crate) mod testing {
         )
         .await
         .expect("insert project")
+    }
+
+    /// An open TODO with no dates in project `project_id`.
+    pub async fn todo(
+        conn: &mut sqlx::SqliteConnection,
+        project_id: i64,
+        title: &str,
+    ) -> crate::domain::model::Todo {
+        super::todos::insert(
+            conn,
+            &super::todos::NewTodo {
+                project_id,
+                title: title.into(),
+                priority: crate::domain::model::Priority::Medium,
+                due_date: None,
+                planned_start: None,
+                planned_end: None,
+                memo_md: String::new(),
+            },
+            ts(2026, 11, 1, 0, 0),
+        )
+        .await
+        .expect("insert todo")
     }
 }

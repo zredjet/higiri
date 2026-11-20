@@ -62,7 +62,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
 
 ## データの決めごと
 
-- テーブル定義は設計書のDDLをそのまま `src-tauri/migrations/0001_init.sql` にする。列や制約を変えたいときは先に相談する。v0.3.0 で足す3つの表(`todo_templates`、`todo_repeats`、`todo_dependencies`)は、設計書の DDL のとおり `0002_v0_3_0.sql` にする(フェーズ18)。
+- テーブル定義は設計書のDDLをそのまま `src-tauri/migrations/0001_init.sql` にする。列や制約を変えたいときは先に相談する。v0.3.0 で足した3つの表(`todo_templates`、`todo_repeats`、`todo_dependencies`)は、設計書の DDL のとおり `0002_v0_3_0.sql` にした(フェーズ18)。表は全部で9つ。
 - 日付は `YYYY-MM-DD` の文字列(PCのローカル日付)、日時は UTC の ISO 8601 文字列。日時は `2026-11-19T01:30:00.000Z` の形(ミリ秒つき、末尾 `Z`)で保存し、文字列の大小が時刻の前後と一致するようにする。
 - `todo_events` の値の形:
   - `status` の行の `old_value` / `new_value` は、ステータス名の文字列(`todo`、`doing`、`waiting`、`hold`、`done`、`cancelled`)。JSON にしない。
@@ -83,12 +83,13 @@ SQLite(アプリのデータフォルダ内の todo.db)
   - 入力をそのまま入れる列(`waiting_on`、`follow_up_date`、`close_reason`)は、空に戻したときだけ `auto` に入る。入力した値は `waiting_on` / `follow_up_date` / `reason` のキーに入る。
   - 例: 作業中から待ちにした行は `{"waiting_on":"認証担当の回答","follow_up_date":"2026-11-20","auto":{"waiting_since":"2026-11-19"}}`。完了から再開した行は `{"auto":{"actual_end":null,"closed_at":null}}`。
 - `settings` は1キー1行で、値は JSON。キーは `reminder_frequency`(`"every_launch"` / `"once_per_day"`)、`soon_days`(数値)、`follow_up_days`(数値)、`last_reminded_on`(`"YYYY-MM-DD"` か `null`)、`theme`(`"light"` / `"dark"` / `"system"`)。読めない値は既定値として扱う。v1.1 で足したキーは「v1.1 の決めごと」に、v0.3.0 で足したキー(`weekly_report_template`)は「v0.3.0 の決めごと」にある。
+- JSON の書き出し(フェーズ15)の表は、`projects`、`todos`、`work_logs`、`todo_events`、`reports`、`todo_templates`、`todo_repeats`、`todo_dependencies` の順(`json_data.rs` の `TABLES`)。`todo_events.note`、`todo_templates.body`、`todo_repeats.rule` と settings の値は、保存してある JSON の文をそのまま JSON の値として埋め込む。`schema_version` は v0.3.0 で2になった。取り込みでは、`schema_version` が1のファイル(v0.2.0 までの書き出し)は v0.3.0 の3つの表のキーがなくてよく(空として扱う)、2以上でどれかがなければ `Malformed`。
 - 接続のたびに外部キー制約を有効にし、WALモードにする。
 - 適用済みのマイグレーションファイルは書き換えない。変更は新しいファイルを足す。
 - DBへの接続なしで `cargo build` が通る構成にする(`query!` 系マクロを使うなら `cargo sqlx prepare` の成果物をコミットする)。
 - バックアップは `VACUUM INTO` で作る。WALモードのDBファイルを単純コピーしない。
 - バックアップは `src-tauri/src/backup.rs`。データフォルダの `backups/` に、その日最初の起動時に `todo-YYYY-MM-DD.db` を作り、新しい順に7個残す(起動しなかった日は数えない)。常駐中に日付が変わったときも、常駐のタイマーが `backup::run_daily` でその日のバックアップを作る(`notifier::backup_if_new_day`。1日1個、7個残すのは同じ)。復元と JSON の取り込み(フェーズ15)の前には今のデータを `before-restore-<UTC日時>.db` に退避し、新しい順に3個残す。退避も復元の一覧に「復元・取り込みの前の状態」として出し、復元と取り込みを取り消せるようにする。
-- 復元は、選んだバックアップの作業用コピーを検査してマイグレーションを当ててから、`ATTACH` して全テーブルの行を1トランザクションで入れ替える(接続プールを開いたまま、再起動なしで済む)。新しい版のアプリで作ったバックアップと、壊れたファイルは復元しない。`autostart`、`last_notified_at`、`tray_hint_shown`、`last_reminded_on`(`repo::settings::KEPT_ON_REPLACE`)は、入れ替えの同じトランザクションの中で今の値に戻す(今ない値は、入れ替えたあともない)。退避・行の入れ替え・古い退避の削除は `backup::keep_and_replace`(行の入れ替えは中の `backup::copy_rows`)で、フェーズ15の JSON の取り込みも同じ関数を使う。復元のあとは `restore_backup` の `#[tauri::command]` の層で `resident::apply` を呼び、×ボタンの動きとタイマーの待ち時間を復元した設定に合わせる。
+- 復元は、選んだバックアップの作業用コピーを検査してマイグレーションを当ててから、`ATTACH` して全テーブルの行を1トランザクションで入れ替える(接続プールを開いたまま、再起動なしで済む)。新しい版のアプリで作ったバックアップと、壊れたファイルは復元しない。`autostart`、`last_notified_at`、`tray_hint_shown`、`last_reminded_on`(`repo::settings::KEPT_ON_REPLACE`)は、入れ替えの同じトランザクションの中で今の値に戻す(今ない値は、入れ替えたあともない)。退避・行の入れ替え・古い退避の削除は `backup::keep_and_replace`(行の入れ替えは中の `backup::copy_rows`)で、フェーズ15の JSON の取り込みも同じ関数を使う。入れ替える表は `backup.rs` の `DELETE_CHILD_FIRST` と `INSERT_PARENT_FIRST` に並べる(9つすべて)。v0.3.0 の表は、消すのは `todo_dependencies`、`todo_repeats` を `todos` より先、入れるのは `todos` より後(`todo_templates` はほかの表を指さない)。v0.2.0 までのバックアップは、作業用のコピーにマイグレーションを当てるので、3つの表が空になって復元される。復元のあとは `restore_backup` の `#[tauri::command]` の層で `resident::apply` を呼び、×ボタンの動きとタイマーの待ち時間を復元した設定に合わせる。
 
 ## 画面の決めごと
 
@@ -246,9 +247,9 @@ v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作った�
   - 取り込みは全データの置き換え。復元と同じく、作業用の DB で検査してから今のデータを `before-restore-<UTC日時>.db` に退避し、`ATTACH` して1トランザクションで入れ替える。`autostart`、`last_notified_at`、`tray_hint_shown`、`last_reminded_on` は、復元と同じく今の値のまま残す。
   - 作ったもの(フェーズ15)
     - `src-tauri/src/json_data.rs`: 書き出し(`export_json`、ファイルに書く `export_to`)と取り込み(`import`、中身は `import_bytes`)。`commands/json_data.rs` が `export_data` と `import_data`。
-    - ファイルの形: 設計書の形(`format` は `"higiri-export"`、`format_version` は1、`schema_version` は `_sqlx_migrations` の適用済みの最新の番号、`app_version`、`exported_at`、5つの表、`settings`)。表は `projects`、`todos`、`work_logs`、`todo_events`、`reports` の順で、行は ID(`reports` は種類と開始日)の順。行は列名をキーにし、値は保存されているまま(整数・文字列・null)。`todo_events.note` と settings の値は、保存してある JSON の文をそのまま(キーの順も変えずに)JSON の値として埋め込む(serde_json の `raw_value`)。1行に1つの行を置き、ほかは2字の字下げ。settings はキーの順。
+    - ファイルの形: 設計書の形(`format` は `"higiri-export"`、`format_version` は1、`schema_version` は `_sqlx_migrations` の適用済みの最新の番号、`app_version`、`exported_at`、5つの表、`settings`)。表は `projects`、`todos`、`work_logs`、`todo_events`、`reports` の順で(v0.3.0 で3つの表を後ろに足した。「データの決めごと」と「v0.3.0 の決めごと」のフェーズ18)、行は ID(`reports` は種類と開始日)の順。行は列名をキーにし、値は保存されているまま(整数・文字列・null)。`todo_events.note` と settings の値は、保存してある JSON の文をそのまま(キーの順も変えずに)JSON の値として埋め込む(serde_json の `raw_value`)。1行に1つの行を置き、ほかは2字の字下げ。settings はキーの順。
     - 書き出し: 5つの表と settings を1つのトランザクションで読む。保存先と同じフォルダの `<名前>.part` に書いてから名前を変え、失敗したら `.part` を消す(途中までのファイルを残さない)。JSON として読めない settings の値は書き出さない(アプリは既定値として読むので、取り込んでも同じになる)。JSON として読めない `note` は文字列として書き出す(アプリが書くことはない。その行は取り込みで「読めない値」として断られる)。
-    - 取り込みの順: (1) 先頭の BOM を除く。(2) 先頭の項目だけを読む(ほかのキーも構文は確かめる)。JSON として読めなければ `NotJson`、`format` が違えば `NotOurs`、`format_version` が1より大きいか `schema_version` がこの版の最新より大きければ `TooNew`、版の値がおかしければ `Malformed`。(3) 5つの表と settings を読む(どれかがなければ `Malformed`。ほかのキーは無視)。(4) `backups/import-work.db` を作り、ファイルの `schema_version` までマイグレーションを当てて(`MIGRATOR.run_to`)、外部キーを遅らせた1つのトランザクションで行を入れる。列は作業用の DB の `pragma_table_info` と照らし、知らない列と型の違う値(INTEGER の列に整数以外、TEXT の列に文字列以外)は `Malformed`。ない列は表の既定値になる。外部キー・CHECK・NOT NULL・主キーの重複は `Constraint`。(5) 残りのマイグレーションを当て、アプリの読み取り(`repo::projects::list`、`repo::todos::list`、`repo::work_logs::list_all`、`repo::events::list_all`、`repo::reports::list_all`)で全行を読み直す。読めない値(日付の書き方、ステータス名、優先度、変更履歴の種類と `note` の形)は `Unreadable`。(6) `backup::keep_and_replace` で退避して入れ替える。断ったときは退避も入れ替えもせず、作業用の DB は成否にかかわらず消す。
+    - 取り込みの順: (1) 先頭の BOM を除く。(2) 先頭の項目だけを読む(ほかのキーも構文は確かめる)。JSON として読めなければ `NotJson`、`format` が違えば `NotOurs`、`format_version` が1より大きいか `schema_version` がこの版の最新より大きければ `TooNew`、版の値がおかしければ `Malformed`。(3) 5つの表と settings を読む(どれかがなければ `Malformed`。ほかのキーは無視。v0.3.0 の3つの表は `schema_version` が2以上のときだけ要る)。(4) `backups/import-work.db` を作り、ファイルの `schema_version` までマイグレーションを当てて(`MIGRATOR.run_to`)、外部キーを遅らせた1つのトランザクションで行を入れる。列は作業用の DB の `pragma_table_info` と照らし、知らない列と型の違う値(INTEGER の列に整数以外、TEXT の列に文字列以外)は `Malformed`。ない列は表の既定値になる。外部キー・CHECK・NOT NULL・主キーの重複は `Constraint`。(5) 残りのマイグレーションを当て、アプリの読み取り(`repo::projects::list`、`repo::todos::list`、`repo::work_logs::list_all`、`repo::events::list_all`、`repo::reports::list_all`。v0.3.0 で `repo::templates::list`、`repo::repeats::list`、`repo::dependencies::list` を足した)で全行を読み直す。読めない値(日付の書き方、ステータス名、優先度、変更履歴の種類と `note` の形、テンプレートの `body` と周期の `rule`)は `Unreadable`。(6) `backup::keep_and_replace` で退避して入れ替える。断ったときは退避も入れ替えもせず、作業用の DB は成否にかかわらず消す。
     - 行は同じ列の並びが続く間、1つの INSERT にまとめる(1文の値は4,000個まで)。ID はファイルの値のまま入れる。`AUTOINCREMENT` の表はない(`sqlite_sequence` もない)ので、取り込んだあとの新しい行は今ある最大の ID の次になる。
     - settings: ファイルの値をそのまま入れる。知らないキーも残し(アプリは無視する)、読めない値も残す(アプリは既定値として読む。DB のときと同じ)。`KEPT_ON_REPLACE` の4つは `copy_rows` が今の値に戻す。
     - エラーの文は `commands/json_data.rs` の `import_error`。断ったときは「〜ため、取り込めませんでした。今のデータは変わっていません。」に、どうすればよいか(「Higiriの「JSONで書き出す」で作ったファイルを選んでください。」「アプリを新しい版にしてから取り込んでください。」「書き出したあとに手で直した所があれば元に戻すか、書き出し直したファイルを選んでください。」)を続ける。
@@ -288,6 +289,15 @@ v0.3.0 は `docs/implementation-plan-v0.3.0.md` のフェーズ17〜24で作る�
 - `change_status` は、子が残っている親を閉じると子も閉じ(子ごとに1行記録)、周期のあるTODOを閉じると次の回を作る。どちらも同じトランザクション。
 - 判定(`classify`)は子にもそのまま使う。依存関係では日限注意の区分を増やさない。依存は止めずに知らせるだけ(作業中にするときの確認は画面側)。
 - 子・テンプレート・繰り返し・依存の検査は Rust 側。画面は返ってきた `AppError.message` を出す。
+- データの土台(フェーズ18)
+  - 画面とコマンドは変えていない(コマンドは32個のまま)。
+  - 作ったもの(フェーズ18)
+    - `src-tauri/migrations/0002_v0_3_0.sql`: 設計書の DDL のとおり。新しい DB にも v0.2.0 の DB(`0001` だけの DB)にも当たり、今の行は変わらない(`repo/db.rs` のテスト)。
+    - `domain/template.rs`: `TemplateBody { title, priority, memo_md, children }` と `TemplateChild { title, priority, memo_md, due_offset_days, depends_on }`。JSON は設計書の形で、読むときに `depends_on` がなければ `[]`、`due_offset_days` は `null` を `None` にする。`checked` はタイトル(親と子)の前後の空白を除いて空なら断り、`depends_on` が範囲の外・自分・同じ位置の2回・循環(子どうしの依存をたどって戻る)なら断る(`TemplateBodyError`)。`from_json` は読んでから `checked` を通し、通らなければ `None`。保存したテンプレートは `TodoTemplate`。
+    - `domain/repeat.rs`: `RepeatRule`(`kind` で分ける serde の enum。`daily`、`weekly { weekdays }`、`monthly_day { day }`、`monthly_weekday { week, weekday }`、`monthly_last`、`yearly { month, day }`、`every_days { days }`)と曜日の `DayOfWeek`(`mon`〜`sun`)。どちらも specta の型を付けてある(フェーズ21でコマンドに出すため。今はバインディングに出ない)。`check` は範囲の検査(`RepeatRuleError`。`weekdays` は1〜7個で重複なし、`day` は1〜31、`week` は1〜4か-1、`yearly` は暦にある月日で2/29は可、`days` は2〜365)。`from_json` は読んでから `check` を通す。周期の行は `TodoRepeat`。
+    - `domain/model.rs`: 依存の行 `Dependency { todo_id, depends_on_id, created_at }`。
+    - `repo/templates.rs`(一覧は名前の順、1件、追加、名前と本文の更新、削除。書く値は `TemplateFields`)、`repo/repeats.rs`(一覧は `todo_id` の順、1件は `Option`、追加、周期と終わりの日の更新、削除)、`repo/dependencies.rs`(一覧は `todo_id, depends_on_id` の順、1件は `Option`、追加、削除)。読めない `body` と `rule`(検査に通らないものも)は `RepoError::Corrupt`(列は `todo_templates.body`、`todo_repeats.rule`)。名前の重複、依存の組の重複、自分自身への依存は表の制約が断る(呼ぶ側が `is_constraint_violation` で見る)。テストの `repo::testing::todo` で TODO を1件作れる。
+    - `json_data.rs`: `Table.since`(その表を足したマイグレーションの番号。5つの表は1、v0.3.0 の3つは2)。ファイルの `schema_version` より新しい表のキーはなくてよく、ある場合は空の配列だけを受け付ける(行があれば、その版の作業用の DB にない表なので `Malformed`)。`body` と `rule` は `note` と同じく JSON の値として埋め込み、取り込みでは JSON の文のまま入れる。
 
 ## 品質の決めごと
 

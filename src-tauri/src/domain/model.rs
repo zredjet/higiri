@@ -173,6 +173,17 @@ pub struct WorkLog {
     pub updated_at: DateTime<Utc>,
 }
 
+/// A dependency (`todo_dependencies`, v0.3.0): the TODO `todo_id` cannot be
+/// started until the TODO `depends_on_id` is finished.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Dependency {
+    /// The later TODO (the one that waits).
+    pub todo_id: i64,
+    /// The TODO to finish first.
+    pub depends_on_id: i64,
+    pub created_at: DateTime<Utc>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

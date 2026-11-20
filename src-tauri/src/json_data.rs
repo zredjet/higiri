@@ -5,14 +5,15 @@
 //! {
 //!   "format": "higiri-export",
 //!   "format_version": 1,
-//!   "schema_version": 1,
-//!   "app_version": "0.1.0",
+//!   "schema_version": 2,
+//!   "app_version": "0.3.0",
 //!   "exported_at": "2026-11-19T01:30:00.000Z",
 //!   "projects": [
 //!     {"id":1,"name":"…",…},
 //!     …
 //!   ],
 //!   "todos": […], "work_logs": […], "todo_events": […], "reports": […],
+//!   "todo_templates": […], "todo_repeats": […], "todo_dependencies": […],
 //!   "settings": {
 //!     "theme": "dark",
 //!     …
@@ -21,11 +22,16 @@
 //! ```
 //!
 //! - A row is an object keyed by column name, with the value as stored
-//!   (integer, string or null). `todo_events.note` and the settings values are
-//!   stored JSON and are embedded as JSON values, with their stored text kept
-//!   as is (key order included). One row per line.
+//!   (integer, string or null). `todo_events.note`, `todo_templates.body`,
+//!   `todo_repeats.rule` and the settings values are stored JSON and are
+//!   embedded as JSON values, with their stored text kept as is (key order
+//!   included). One row per line.
 //! - `schema_version` is the newest applied migration. Only `format_version`
 //!   1 can be read.
+//! - The tables of v0.3.0 (`todo_templates`, `todo_repeats`,
+//!   `todo_dependencies`) came with schema 2. A file of schema 1 (v0.2.0) has
+//!   none of them and is read as if they were empty; a file of schema 2 or
+//!   later must have them all.
 //!
 //! Import: the file's format and versions are checked, its rows go into a work
 //! database (`backups/import-work.db`) migrated to the file's
@@ -71,33 +77,59 @@ struct Table {
     select: &'static str,
     /// The column holding stored JSON (embedded as a JSON value).
     json_column: Option<&'static str>,
+    /// The schema version (migration) that added the table. A file of an
+    /// older schema does not have it.
+    since: i64,
 }
 
-const TABLES: [Table; 5] = [
+const TABLES: [Table; 8] = [
     Table {
         name: "projects",
         select: "SELECT * FROM projects ORDER BY id",
         json_column: None,
+        since: 1,
     },
     Table {
         name: "todos",
         select: "SELECT * FROM todos ORDER BY id",
         json_column: None,
+        since: 1,
     },
     Table {
         name: "work_logs",
         select: "SELECT * FROM work_logs ORDER BY id",
         json_column: None,
+        since: 1,
     },
     Table {
         name: "todo_events",
         select: "SELECT * FROM todo_events ORDER BY id",
         json_column: Some("note"),
+        since: 1,
     },
     Table {
         name: "reports",
         select: "SELECT * FROM reports ORDER BY kind, period_start",
         json_column: None,
+        since: 1,
+    },
+    Table {
+        name: "todo_templates",
+        select: "SELECT * FROM todo_templates ORDER BY id",
+        json_column: Some("body"),
+        since: 2,
+    },
+    Table {
+        name: "todo_repeats",
+        select: "SELECT * FROM todo_repeats ORDER BY todo_id",
+        json_column: Some("rule"),
+        since: 2,
+    },
+    Table {
+        name: "todo_dependencies",
+        select: "SELECT * FROM todo_dependencies ORDER BY todo_id, depends_on_id",
+        json_column: None,
+        since: 2,
     },
 ];
 
@@ -390,8 +422,9 @@ struct Header {
 
 type FileRow = BTreeMap<String, Box<RawValue>>;
 
-/// The data part of the file. Every table must be there (an export always
-/// writes them all); other top-level keys are ignored.
+/// The data part of the file. Every table of the file's schema must be there
+/// (an export always writes them all; see [`parse`]); other top-level keys
+/// are ignored.
 #[derive(Deserialize)]
 struct Document {
     projects: Vec<FileRow>,
@@ -399,18 +432,26 @@ struct Document {
     work_logs: Vec<FileRow>,
     todo_events: Vec<FileRow>,
     reports: Vec<FileRow>,
+    /// Since schema 2 (v0.3.0): a file of v0.2.0 has none of these.
+    todo_templates: Option<Vec<FileRow>>,
+    todo_repeats: Option<Vec<FileRow>>,
+    todo_dependencies: Option<Vec<FileRow>>,
     settings: BTreeMap<String, Box<RawValue>>,
 }
 
 impl Document {
-    fn rows(&self, table: &str) -> &[FileRow] {
+    /// The rows of a table, or `None` when the file does not have it.
+    fn rows(&self, table: &str) -> Option<&[FileRow]> {
         match table {
-            "projects" => &self.projects,
-            "todos" => &self.todos,
-            "work_logs" => &self.work_logs,
-            "todo_events" => &self.todo_events,
-            "reports" => &self.reports,
-            _ => &[],
+            "projects" => Some(&self.projects),
+            "todos" => Some(&self.todos),
+            "work_logs" => Some(&self.work_logs),
+            "todo_events" => Some(&self.todo_events),
+            "reports" => Some(&self.reports),
+            "todo_templates" => self.todo_templates.as_deref(),
+            "todo_repeats" => self.todo_repeats.as_deref(),
+            "todo_dependencies" => self.todo_dependencies.as_deref(),
+            _ => None,
         }
     }
 }
@@ -458,7 +499,15 @@ fn parse(bytes: &[u8]) -> Result<(i64, Document), ImportError> {
     if !MIGRATOR.version_exists(schema) {
         return Err(ImportError::Malformed);
     }
-    let doc = serde_json::from_slice(bytes).map_err(|_| ImportError::Malformed)?;
+    let doc: Document = serde_json::from_slice(bytes).map_err(|_| ImportError::Malformed)?;
+    // Every table of the file's schema is there. The ones added later (the
+    // v0.3.0 tables in a file of v0.2.0) may be missing: they are empty.
+    if TABLES
+        .iter()
+        .any(|t| t.since <= schema && doc.rows(t.name).is_none())
+    {
+        return Err(ImportError::Malformed);
+    }
     Ok((schema, doc))
 }
 
@@ -607,7 +656,8 @@ async fn insert_settings(
 }
 
 /// Reads every row back with the app's readers, so that nothing imported
-/// stops a screen from loading (a date in another form, an unknown status).
+/// stops a screen from loading (a date in another form, an unknown status,
+/// a template or a repeat rule the app cannot read).
 async fn check_readable(conn: &mut SqliteConnection) -> Result<(), ImportError> {
     let unreadable = |e: RepoError| match e {
         RepoError::Corrupt { column, .. } => ImportError::Unreadable { column },
@@ -627,6 +677,9 @@ async fn check_readable(conn: &mut SqliteConnection) -> Result<(), ImportError> 
     repo::work_logs::list_all(conn).await.map_err(unreadable)?;
     repo::events::list_all(conn).await.map_err(unreadable)?;
     repo::reports::list_all(conn).await.map_err(unreadable)?;
+    repo::templates::list(conn).await.map_err(unreadable)?;
+    repo::repeats::list(conn).await.map_err(unreadable)?;
+    repo::dependencies::list(conn).await.map_err(unreadable)?;
     Ok(())
 }
 
@@ -653,7 +706,9 @@ async fn fill_work(work: &Path, schema: i64, doc: &Document) -> Result<(), Impor
             .await
             .map_err(db_error)?;
         for table in &TABLES {
-            insert_rows(&mut tx, table, doc.rows(table.name)).await?;
+            // A table newer than the file's schema is not in the work
+            // database yet: its rows, if any, are refused as unknown columns.
+            insert_rows(&mut tx, table, doc.rows(table.name).unwrap_or_default()).await?;
         }
         insert_settings(&mut tx, &doc.settings).await?;
         tx.commit().await.map_err(db_error)?;
@@ -726,8 +781,9 @@ mod tests {
         db::open(&dir.join(db::DB_FILE_NAME)).await.unwrap()
     }
 
-    /// The sample data, a saved report, settings changed by the user (one of
-    /// them unreadable, one unknown) and values the app wrote.
+    /// The sample data, a saved report, templates, repeats and dependencies,
+    /// settings changed by the user (one of them unreadable, one unknown) and
+    /// values the app wrote.
     async fn source() -> SqlitePool {
         let pool = db::open_in_memory().await.unwrap();
         crate::sample::seed_if_empty(&pool, d("2026-11-19"))
@@ -756,6 +812,7 @@ mod tests {
         .await
         .unwrap();
         let mut c = pool.acquire().await.unwrap();
+        add_v0_3_0_rows(&mut c).await;
         repo_settings::set_last_reminded_on(&mut c, Some(d("2026-11-18")))
             .await
             .unwrap();
@@ -774,6 +831,66 @@ mod tests {
         .await
         .unwrap();
         pool
+    }
+
+    /// Rows in the v0.3.0 tables, on the sample TODOs 1 to 4.
+    async fn add_v0_3_0_rows(c: &mut SqliteConnection) {
+        use crate::domain::model::Priority;
+        use crate::domain::repeat::{DayOfWeek, RepeatRule};
+        use crate::domain::template::{TemplateBody, TemplateChild};
+        use crate::repo::templates::TemplateFields;
+
+        let at = ts(2026, 11, 19, 3, 0);
+        let child = |title: &str, depends_on: Vec<usize>| TemplateChild {
+            title: title.into(),
+            priority: Priority::High,
+            memo_md: "引用符 \" と\n改行".into(),
+            due_offset_days: Some(-3),
+            depends_on,
+        };
+        repo::templates::insert(
+            c,
+            &TemplateFields {
+                name: "月次締め".into(),
+                body: TemplateBody {
+                    title: "月次締め".into(),
+                    priority: Priority::Medium,
+                    memo_md: "## 手順\n- 集計する".into(),
+                    children: vec![child("売上の集計", vec![]), child("報告書の作成", vec![0])],
+                },
+            },
+            at,
+        )
+        .await
+        .unwrap();
+        // Stored with its keys in another order than the app writes them.
+        sqlx::query(
+            r#"INSERT INTO todo_templates (name, body, created_at, updated_at)
+               VALUES ('週次', '{"children":[],"memo_md":"","priority":"low","title":"週次の確認"}',
+                       '2026-11-19T04:00:00.000Z', '2026-11-19T04:00:00.000Z')"#,
+        )
+        .execute(&mut *c)
+        .await
+        .unwrap();
+        repo::repeats::insert(
+            c,
+            3,
+            &RepeatRule::Weekly {
+                weekdays: vec![DayOfWeek::Mon, DayOfWeek::Thu],
+            },
+            Some(d("2027-03-31")),
+            at,
+        )
+        .await
+        .unwrap();
+        repo::repeats::insert(c, 1, &RepeatRule::MonthlyLast, None, at)
+            .await
+            .unwrap();
+        for (later, first) in [(2, 1), (4, 1), (2, 3)] {
+            repo::dependencies::insert(c, later, first, at)
+                .await
+                .unwrap();
+        }
     }
 
     async fn export(pool: &SqlitePool) -> Vec<u8> {
@@ -828,8 +945,8 @@ mod tests {
         let v: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(v["format"], "higiri-export");
         assert_eq!(v["format_version"], 1);
-        assert_eq!(v["schema_version"], 1);
-        assert_eq!(latest_schema_version(), 1);
+        assert_eq!(v["schema_version"], 2);
+        assert_eq!(latest_schema_version(), 2);
         assert_eq!(v["app_version"], "0.1.0");
         assert_eq!(v["exported_at"], "2026-11-19T01:30:00.000Z");
         // Rows keyed by column, values as stored.
@@ -851,10 +968,52 @@ mod tests {
                 .await
                 .unwrap();
         assert!(text.contains(&format!(r#""note":{}"#, stored_note.0)));
+        // The v0.3.0 tables follow reports, in their order; body and rule are
+        // embedded as JSON too, with their stored text kept.
+        let at = |key: &str| text.find(&format!("\n  \"{key}\": ")).unwrap();
+        assert!(at("reports") < at("todo_templates"));
+        assert!(at("todo_templates") < at("todo_repeats"));
+        assert!(at("todo_repeats") < at("todo_dependencies"));
+        assert!(at("todo_dependencies") < at("settings"));
+        let templates = &v["todo_templates"];
+        assert_eq!(templates[0]["name"], "月次締め");
+        assert_eq!(
+            templates[0]["body"]["children"][1]["depends_on"],
+            json!([0])
+        );
+        assert_eq!(templates[0]["body"]["children"][0]["due_offset_days"], -3);
+        assert!(text.contains(
+            r#""body":{"children":[],"memo_md":"","priority":"low","title":"週次の確認"}"#
+        ));
+        let repeats = &v["todo_repeats"];
+        assert_eq!(repeats[0]["todo_id"], 1);
+        assert_eq!(repeats[0]["rule"], json!({"kind": "monthly_last"}));
+        assert!(repeats[0]["until_date"].is_null());
+        assert_eq!(
+            repeats[1]["rule"],
+            json!({"kind": "weekly", "weekdays": ["mon", "thu"]})
+        );
+        assert_eq!(repeats[1]["until_date"], "2027-03-31");
+        let pairs: Vec<(i64, i64)> = v["todo_dependencies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| {
+                (
+                    r["todo_id"].as_i64().unwrap(),
+                    r["depends_on_id"].as_i64().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(pairs, [(2, 1), (2, 3), (4, 1)]);
+        assert!(text.contains(
+            r#"{"todo_id":2,"depends_on_id":1,"created_at":"2026-11-19T03:00:00.000Z"}"#
+        ));
         // One row per line, readable Japanese (not \u escapes).
-        let counts: (i64, i64, i64, i64) = sqlx::query_as(
+        let counts: (i64, i64, i64, i64, i64) = sqlx::query_as(
             "SELECT (SELECT COUNT(*) FROM projects), (SELECT COUNT(*) FROM todos),
-                    (SELECT COUNT(*) FROM work_logs), (SELECT COUNT(*) FROM todo_events)",
+                    (SELECT COUNT(*) FROM work_logs), (SELECT COUNT(*) FROM todo_events),
+                    (SELECT COUNT(*) FROM todo_templates)",
         )
         .fetch_one(&src)
         .await
@@ -863,7 +1022,15 @@ mod tests {
             .lines()
             .filter(|l| l.starts_with("    {\"id\":"))
             .count() as i64;
-        assert_eq!(row_lines, counts.0 + counts.1 + counts.2 + counts.3);
+        assert_eq!(
+            row_lines,
+            counts.0 + counts.1 + counts.2 + counts.3 + counts.4
+        );
+        let todo_id_lines = text
+            .lines()
+            .filter(|l| l.starts_with("    {\"todo_id\":"))
+            .count();
+        assert_eq!(todo_id_lines, 2 + 3);
         assert!(text.contains("所感・連絡事項"));
         assert!(text.starts_with("{\n  \"format\": \"higiri-export\",\n"));
         assert!(text.ends_with("\n  }\n}\n"));
@@ -874,6 +1041,12 @@ mod tests {
         let pool = db::open_in_memory().await.unwrap();
         let text = String::from_utf8(export(&pool).await).unwrap();
         assert!(text.contains("  \"projects\": [],\n"), "{text}");
+        assert!(
+            text.contains(
+                "  \"todo_templates\": [],\n  \"todo_repeats\": [],\n  \"todo_dependencies\": [],\n"
+            ),
+            "{text}"
+        );
         assert!(text.ends_with("  \"settings\": {}\n}\n"), "{text}");
         let v: Value = serde_json::from_str(&text).unwrap();
         assert_eq!(v["todos"], json!([]));
@@ -1097,6 +1270,60 @@ mod tests {
         assert_eq!(rows[1_199], (1_200, "P1200".into(), "#000000".into()));
     }
 
+    /// The rows of the tables v0.2.0 had (projects … reports).
+    fn v0_2_0_rows(rows: &[String]) -> Vec<String> {
+        rows.iter()
+            .filter(|r| !r.starts_with("todo_templates ") && !r.starts_with("todo_repeats "))
+            .filter(|r| !r.starts_with("todo_dependencies "))
+            .cloned()
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_file_of_v0_2_0_is_imported_with_the_new_tables_empty() {
+        let src = source().await;
+        // As v0.2.0 wrote it: schema 1, without the v0.3.0 tables. Edited as
+        // text, so that the stored JSON keeps its key order.
+        let text = String::from_utf8(export(&src).await).unwrap();
+        let text = text.replace("\"schema_version\": 2,", "\"schema_version\": 1,");
+        let new_tables = text.find("\n  \"todo_templates\": [").unwrap();
+        let settings = text.find("\n  \"settings\": {").unwrap();
+        let v0_2_0 = format!("{}{}", &text[..new_tables], &text[settings..]);
+        let bytes = v0_2_0.as_bytes();
+        assert!(!v0_2_0.contains("todo_repeats"));
+
+        let tmp = tempfile::tempdir().unwrap();
+        let dst = file_db(tmp.path()).await;
+        // What the empty tables replace.
+        crate::sample::seed_if_empty(&dst, d("2026-11-19"))
+            .await
+            .unwrap();
+        add_v0_3_0_rows(&mut dst.acquire().await.unwrap()).await;
+        import_bytes(&dst, tmp.path(), bytes, now()).await.unwrap();
+
+        let src_rows = dump(&src).await.0;
+        let dst_rows = dump(&dst).await.0;
+        assert_eq!(dst_rows, v0_2_0_rows(&src_rows));
+        assert!(src_rows.len() > dst_rows.len());
+        for table in ["todo_templates", "todo_repeats", "todo_dependencies"] {
+            let n: (i64,) = sqlx::query_as(AssertSqlSafe(format!("SELECT COUNT(*) FROM {table}")))
+                .fetch_one(&dst)
+                .await
+                .unwrap();
+            assert_eq!(n.0, 0, "{table}");
+        }
+
+        // Empty lists of the new tables are fine in a file of schema 1 too.
+        let with_empty = v0_2_0.replace(
+            "\n  \"settings\": {",
+            "\n  \"todo_templates\": [],\n  \"todo_repeats\": [],\n  \"todo_dependencies\": [],\n  \"settings\": {",
+        );
+        import_bytes(&dst, tmp.path(), with_empty.as_bytes(), now())
+            .await
+            .unwrap();
+        assert_eq!(dump(&dst).await.0, v0_2_0_rows(&src_rows));
+    }
+
     /// What `import_bytes` says about `file`, and that nothing changed.
     async fn refused(file: &[u8]) -> ImportError {
         let tmp = tempfile::tempdir().unwrap();
@@ -1146,7 +1373,8 @@ mod tests {
     async fn files_of_a_newer_version_are_refused() {
         let newer_format = edited(|v| v["format_version"] = json!(2)).await;
         assert!(matches!(refused(&newer_format).await, ImportError::TooNew));
-        let newer_schema = edited(|v| v["schema_version"] = json!(2)).await;
+        let newer_schema =
+            edited(|v| v["schema_version"] = json!(latest_schema_version() + 1)).await;
         assert!(matches!(refused(&newer_schema).await, ImportError::TooNew));
     }
 
@@ -1180,6 +1408,34 @@ mod tests {
             Box::new(|v| v["todos"][0]["extra"] = json!(1)),
             Box::new(|v| v["projects"][0] = json!({})),
             Box::new(|v| v["projects"][0] = json!([1])),
+            // A file of schema 2 has every v0.3.0 table.
+            Box::new(|v| {
+                v.as_object_mut()
+                    .unwrap()
+                    .remove("todo_templates")
+                    .map(drop)
+                    .unwrap()
+            }),
+            Box::new(|v| {
+                v.as_object_mut()
+                    .unwrap()
+                    .remove("todo_repeats")
+                    .map(drop)
+                    .unwrap()
+            }),
+            Box::new(|v| {
+                v.as_object_mut()
+                    .unwrap()
+                    .remove("todo_dependencies")
+                    .map(drop)
+                    .unwrap()
+            }),
+            Box::new(|v| v["todo_dependencies"] = json!(null)),
+            Box::new(|v| v["todo_templates"] = json!({})),
+            Box::new(|v| v["todo_repeats"][0]["todo_id"] = json!("3")),
+            Box::new(|v| v["todo_dependencies"][0]["extra"] = json!(1)),
+            // A file of schema 1 with rows of a table that came later.
+            Box::new(|v| v["schema_version"] = json!(1)),
         ];
         for (i, change) in cases.into_iter().enumerate() {
             let file = edited(change).await;
@@ -1210,6 +1466,46 @@ mod tests {
                 let first = v["projects"][0].clone();
                 v["projects"].as_array_mut().unwrap().push(first);
             }),
+            // The v0.3.0 tables: FOREIGN KEY, CHECK, NOT NULL, UNIQUE.
+            Box::new(|v| v["todo_repeats"][0]["todo_id"] = json!(999)),
+            Box::new(|v| v["todo_dependencies"][0]["depends_on_id"] = json!(999)),
+            Box::new(|v| {
+                let later = v["todo_dependencies"][0]["todo_id"].clone();
+                v["todo_dependencies"][0]["depends_on_id"] = later;
+            }),
+            Box::new(|v| v["todo_templates"][0]["body"] = json!(null)),
+            Box::new(|v| {
+                let name = v["todo_templates"][0]["name"].clone();
+                v["todo_templates"][1]["name"] = name;
+            }),
+            Box::new(|v| {
+                let first = v["todo_dependencies"][0].clone();
+                v["todo_dependencies"].as_array_mut().unwrap().push(first);
+            }),
+            Box::new(|v| {
+                let mut second = v["todo_repeats"][0].clone();
+                second["rule"] = json!({"kind": "daily"});
+                v["todo_repeats"].as_array_mut().unwrap().push(second);
+            }),
+            // A TODO a dependency refers to is not in the file.
+            Box::new(|v| {
+                v["todos"]
+                    .as_array_mut()
+                    .unwrap()
+                    .retain(|t| t["id"] != json!(3));
+                v["work_logs"]
+                    .as_array_mut()
+                    .unwrap()
+                    .retain(|l| l["todo_id"] != json!(3));
+                v["todo_events"]
+                    .as_array_mut()
+                    .unwrap()
+                    .retain(|e| e["todo_id"] != json!(3));
+                v["todo_repeats"]
+                    .as_array_mut()
+                    .unwrap()
+                    .retain(|r| r["todo_id"] != json!(3));
+            }),
         ];
         for (i, change) in cases.into_iter().enumerate() {
             let file = edited(change).await;
@@ -1229,6 +1525,18 @@ mod tests {
             Box::new(|v| v["todo_events"][0]["kind"] = json!("moved")),
             Box::new(|v| v["todo_events"][0]["note"] = json!("相手:人事部")),
             Box::new(|v| v["reports"][0]["period_start"] = json!("11/19")),
+            // A template body or a repeat rule the app cannot read.
+            Box::new(|v| v["todo_templates"][0]["body"] = json!({"title": "月次締め"})),
+            Box::new(|v| v["todo_templates"][0]["body"] = json!("月次締め")),
+            Box::new(|v| v["todo_templates"][0]["body"]["children"][1]["depends_on"] = json!([1])),
+            Box::new(|v| v["todo_templates"][0]["body"]["title"] = json!(" ")),
+            Box::new(|v| v["todo_repeats"][0]["rule"] = json!({"kind": "hourly"})),
+            Box::new(|v| v["todo_repeats"][0]["rule"] = json!({"kind": "every_days", "days": 1})),
+            Box::new(|v| {
+                v["todo_repeats"][0]["rule"] = json!({"kind": "weekly", "weekdays": ["mon", "mon"]})
+            }),
+            Box::new(|v| v["todo_repeats"][0]["until_date"] = json!("2027/03/31")),
+            Box::new(|v| v["todo_dependencies"][0]["created_at"] = json!("昨日")),
         ];
         for (i, change) in cases.into_iter().enumerate() {
             let file = edited(change).await;
