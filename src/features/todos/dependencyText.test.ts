@@ -21,7 +21,7 @@ describe("dependencyText", () => {
   });
 
   it("lists every unfinished TODO in the mark's tooltip", () => {
-    expect(blockedMarkTitle([first, child])).toBe("先のTODOが未完了:要件の確定、開発環境の標準化 / 手順書");
+    expect(blockedMarkTitle([first, child])).toBe("先行TODOが未完了:要件の確定、開発環境の標準化 / 手順書");
   });
 
   it("asks before 作業中 only while something is unfinished", () => {

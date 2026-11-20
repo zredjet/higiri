@@ -116,11 +116,11 @@ export function dueNote(a: Assessment): Note | null {
 export const DUE_AFTER_PARENT_TEXT = "親の日限より後";
 
 /** A plan that starts before a TODO it waits for is planned to end (T-11). */
-export const STARTS_BEFORE_DEPENDENCY_TEXT = "先のTODOより前に始まる予定";
+export const STARTS_BEFORE_DEPENDENCY_TEXT = "先行TODOより前に始まる予定";
 
 /**
  * The small warnings of the list (計画が間に合わない, 予定超過, for a child
- * 親の日限より後, and 先のTODOより前に始まる予定).
+ * 親の日限より後, and 先行TODOより前に始まる予定).
  */
 export function warningTexts(a: Assessment, dueAfterParent = false, startsBeforeDependency = false): string[] {
   const out: string[] = [];

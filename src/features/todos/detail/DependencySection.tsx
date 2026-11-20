@@ -18,7 +18,7 @@ import { DependencyPickerDialog } from "./DependencyPickerDialog";
 const isClosed = (i: TodoItem) => i.todo.status === "done" || i.todo.status === "cancelled";
 
 /**
- * 「先に終わらせるTODO」 and 「これを待っているTODO」 (T-11): each with its
+ * 「先行TODO」 and 「後続TODO」 (T-11): each with its
  * status (opens it on a click, × takes the dependency off), and the button
  * that opens the search to add one. `save` stores the panel's edits first,
  * so the plan compared is the one shown.

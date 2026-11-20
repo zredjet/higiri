@@ -58,7 +58,7 @@ export const commands = {
 	/**  Deletes a template. The TODOs made from it stay. The screen confirms first. */
 	deleteTodoTemplate: (id: number, options?: InvokeOptions) => __TAURI_INVOKE<null>("delete_todo_template", { id }, options),
 	/**
-	 *  Makes `todo_id` wait for `depends_on_id` (先に終わらせるTODOを足す).
+	 *  Makes `todo_id` wait for `depends_on_id` (先行TODOを足す).
 	 *  Refused: itself, a pair twice, a circle, a parent and its own child.
 	 *  Projects may differ and either TODO may be closed. Returns the later TODO.
 	 */
@@ -302,9 +302,9 @@ export type DaySpan = {
  *  dependencies were added.
  */
 export type DependencyList = {
-	/**  先に終わらせるTODO: the TODOs it waits for. */
+	/**  先行TODO: the TODOs it waits for. */
 	depends_on: TodoItem[],
-	/**  これを待っているTODO: the TODOs waiting for it. */
+	/**  後続TODO: the TODOs waiting for it. */
 	dependents: TodoItem[],
 };
 
@@ -845,7 +845,7 @@ export type TodoItem = {
 	blocked_by: BlockingTodo[],
 	/**
 	 *  Open, and planned to start before an unfinished TODO it waits for is
-	 *  planned to end (「先のTODOより前に始まる予定」, T-11).
+	 *  planned to end (「先行TODOより前に始まる予定」, T-11).
 	 */
 	starts_before_dependency: boolean,
 };

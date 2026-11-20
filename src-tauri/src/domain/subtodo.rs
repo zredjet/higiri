@@ -36,7 +36,7 @@ pub enum ParentError {
     /// The two TODOs are joined by a dependency (T-11). Checked by
     /// `set_todo_parent`, not by [`check_parent`].
     #[error(
-        "依存で結ばれたTODOどうしは、親子にできません。先に「先に終わらせるTODO」から外してください。"
+        "依存で結ばれたTODOどうしは、親子にできません。先に詳細パネルの「先行TODO」か「後続TODO」から外してください。"
     )]
     Linked,
 }

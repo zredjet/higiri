@@ -9,7 +9,7 @@ import { ADD_DEPENDENCY, PICKER_DESCRIPTION, pickBlockedReason } from "../depend
 import { displayTitle, STATUS_LABEL, STATUS_TONE } from "../todoText";
 
 /**
- * 「先に終わらせるTODOを足す」 (T-11): finds TODOs with search_todos (200ms
+ * 「先行TODOを足す」 (T-11): finds TODOs with search_todos (200ms
  * after the last key, not while a Japanese conversion is open) and joins the
  * one chosen. The TODO itself and those already joined cannot be chosen;
  * Rust refuses the rest it does not allow (a circle, a parent and its own
@@ -21,7 +21,7 @@ export function DependencyPickerDialog({
   onClose,
 }: {
   item: TodoItem;
-  /** Ids already among 先に終わらせるTODO. */
+  /** Ids already among 先行TODO. */
   joined: ReadonlySet<number>;
   onClose: () => void;
 }) {

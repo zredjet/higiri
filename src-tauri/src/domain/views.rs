@@ -113,7 +113,7 @@ pub struct TodoItem {
     /// confirmation before 作業中. Empty when closed.
     pub blocked_by: Vec<BlockingTodo>,
     /// Open, and planned to start before an unfinished TODO it waits for is
-    /// planned to end (「先のTODOより前に始まる予定」, T-11).
+    /// planned to end (「先行TODOより前に始まる予定」, T-11).
     pub starts_before_dependency: bool,
 }
 

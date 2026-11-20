@@ -11,7 +11,7 @@ import { displayTitle, DUE_AFTER_PARENT_TEXT, overdueText, SHIFTED_TEXT, STATUS_
  * holiday adds 「休日のため前倒し」. A child is named 「親 / 子」 and may add
  * 「親の日限より後」 (S-1); a bridge row (a hidden parent) has no bars to read.
  * A repeating TODO ends with 「繰り返し 毎週 月」 (T-12), and one waiting for
- * unfinished TODOs with 「先のTODOが未完了(要件の確定)」 (T-11: the arrows
+ * unfinished TODOs with 「先行TODOが未完了(要件の確定)」 (T-11: the arrows
  * themselves are not read).
  */
 export function rowLabel(row: GanttRow): string {

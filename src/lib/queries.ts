@@ -285,7 +285,7 @@ export function useSetTodoRepeat() {
 
 // ---- 依存関係 (T-11) ---------------------------------------------------------------
 
-/** 先に終わらせるTODO and これを待っているTODO of one TODO (the detail panel). */
+/** 先行TODO and 後続TODO of one TODO (the detail panel). */
 export function useDependencies(id: number) {
   return useQuery({ queryKey: queryKeys.dependencies(id), queryFn: () => commands.listDependencies(id) });
 }

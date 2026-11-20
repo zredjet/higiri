@@ -23,13 +23,13 @@ use crate::repo;
 /// dependencies were added.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
 pub struct DependencyList {
-    /// 先に終わらせるTODO: the TODOs it waits for.
+    /// 先行TODO: the TODOs it waits for.
     pub depends_on: Vec<TodoItem>,
-    /// これを待っているTODO: the TODOs waiting for it.
+    /// 後続TODO: the TODOs waiting for it.
     pub dependents: Vec<TodoItem>,
 }
 
-/// Makes `todo_id` wait for `depends_on_id` (先に終わらせるTODOを足す).
+/// Makes `todo_id` wait for `depends_on_id` (先行TODOを足す).
 /// Refused: itself, a pair twice, a circle, a parent and its own child.
 /// Projects may differ and either TODO may be closed. Returns the later TODO.
 #[tauri::command]
@@ -248,23 +248,22 @@ mod tests {
         let c = add_todo(&pool, p, None, "C").await;
         assert_eq!(
             message(join(&pool, &a, &a).await),
-            "自分自身は、先に終わらせるTODOにできません。ほかのTODOを選んでください。"
+            "自分自身は、先行TODOにできません。ほかのTODOを選んでください。"
         );
         join(&pool, &b, &a).await.unwrap();
         assert_eq!(
             message(join(&pool, &b, &a).await),
-            "「A」は、すでに先に終わらせるTODOに入っています。"
+            "「A」は、すでに先行TODOに入っています。"
         );
         // A→B→A.
         assert_eq!(
             message(join(&pool, &a, &b).await),
-            "「B」は、このTODOが終わるのを待っているため、先に終わらせるTODOにすると循環になります。ほかのTODOを選んでください。"
+            "「B」は、このTODOの後続にあたるため、先行TODOにすると循環になります。ほかのTODOを選んでください。"
         );
         // A→B→C→A.
         join(&pool, &c, &b).await.unwrap();
         assert!(
-            message(join(&pool, &a, &c).await)
-                .starts_with("「C」は、このTODOが終わるのを待っている")
+            message(join(&pool, &a, &c).await).starts_with("「C」は、このTODOの後続にあたるため")
         );
         // Refused ones wrote nothing.
         assert_eq!(pairs(&pool).await, [(b.id, a.id), (c.id, b.id)]);
@@ -401,6 +400,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_warning_goes_once_the_first_todo_is_finished() {
+        let pool = db::open_in_memory().await.unwrap();
+        let p = project(&pool, "P").await;
+        let a = add_todo(&pool, p, None, "A").await;
+        let c = add_todo(&pool, p, None, "C").await;
+        let b = add_todo(&pool, p, None, "B").await;
+        let plan = |t: &Todo, start: &str, end: &str| TodoFields {
+            title: t.title.clone(),
+            priority: t.priority,
+            due_date: None,
+            planned_start: Some(d(start)),
+            planned_end: Some(d(end)),
+            actual_start: None,
+            actual_end: None,
+            waiting_on: None,
+            follow_up_date: None,
+            close_reason: None,
+            memo_md: String::new(),
+        };
+        for (t, start, end) in [
+            (&a, "2026-11-16", "2026-11-20"),
+            (&c, "2026-11-16", "2026-11-22"),
+            (&b, "2026-11-19", "2026-11-25"),
+        ] {
+            todos::update(&pool, t.id, plan(t, start, end), today(), now())
+                .await
+                .unwrap();
+        }
+        // b starts 11/19, before a (11/20) and c (11/22) are planned to end.
+        join(&pool, &b, &a).await.unwrap();
+        join(&pool, &b, &c).await.unwrap();
+        let warned =
+            |pool: SqlitePool| async move { todos::get(&pool, b.id, today()).await.unwrap() };
+        assert!(warned(pool.clone()).await.starts_before_dependency);
+        // a done: c still holds b up.
+        status(&pool, &a, Status::Done, None).await;
+        assert!(warned(pool.clone()).await.starts_before_dependency);
+        // c done too: the warning goes, the plans stay as they were.
+        status(&pool, &c, Status::Done, None).await;
+        let item = warned(pool.clone()).await;
+        assert!(!item.starts_before_dependency);
+        assert!(item.blocked_by.is_empty());
+        assert_eq!(item.todo.planned_start, Some(d("2026-11-19")));
+        // c reopened (完了 → 作業中): unfinished again, so is the warning.
+        status(&pool, &c, Status::Doing, None).await;
+        assert!(warned(pool.clone()).await.starts_before_dependency);
+    }
+
+    #[tokio::test]
     async fn remove_and_list() {
         let pool = db::open_in_memory().await.unwrap();
         let p = project(&pool, "P").await;
@@ -454,7 +502,7 @@ mod tests {
         let b = add_todo(&pool, p, None, "B").await;
         let c = add_todo(&pool, p, None, "C").await;
         join(&pool, &b, &a).await.unwrap();
-        let refused = "依存で結ばれたTODOどうしは、親子にできません。先に「先に終わらせるTODO」から外してください。";
+        let refused = "依存で結ばれたTODOどうしは、親子にできません。先に詳細パネルの「先行TODO」か「後続TODO」から外してください。";
         for (child, parent) in [(&b, &a), (&a, &b)] {
             let e = todos::set_parent(&pool, child.id, Some(parent.id), today(), now())
                 .await

@@ -6,7 +6,7 @@
 //! for (`blocked_by`), and warns when its plan starts before one of them is
 //! planned to end (`starts_before_dependency`).
 //!
-//! - 先のTODOが終わっていない = neither 完了 nor 中止 (a cancelled TODO counts
+//! - 先行TODOが終わっていない = neither 完了 nor 中止 (a cancelled TODO counts
 //!   as finished).
 //! - Pairs may cross projects and may join closed TODOs.
 //! - Refused: a TODO and itself, a pair twice, a circle, a parent and its own
@@ -94,7 +94,7 @@ impl Dependencies {
     }
 
     /// An open TODO planned to start before an unfinished TODO it waits for
-    /// is planned to end (「先のTODOより前に始まる予定」). Both dates must be
+    /// is planned to end (「先行TODOより前に始まる予定」). Both dates must be
     /// set; the same day is fine. A finished TODO no longer holds it up.
     pub fn starts_before_dependency(&self, t: &Todo) -> bool {
         let Some(start) = t.planned_start.filter(|_| t.status.is_open()) else {
@@ -111,17 +111,17 @@ impl Dependencies {
 /// Why `todo` cannot wait for `first`.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DependencyError {
-    #[error("自分自身は、先に終わらせるTODOにできません。ほかのTODOを選んでください。")]
+    #[error("自分自身は、先行TODOにできません。ほかのTODOを選んでください。")]
     Itself,
 
     #[error("親のTODOと、その子TODOの間には依存を結べません。ほかのTODOを選んでください。")]
     ParentAndChild,
 
-    #[error("「{0}」は、すでに先に終わらせるTODOに入っています。")]
+    #[error("「{0}」は、すでに先行TODOに入っています。")]
     Twice(String),
 
     #[error(
-        "「{0}」は、このTODOが終わるのを待っているため、先に終わらせるTODOにすると循環になります。ほかのTODOを選んでください。"
+        "「{0}」は、このTODOの後続にあたるため、先行TODOにすると循環になります。ほかのTODOを選んでください。"
     )]
     Cycle(String),
 }

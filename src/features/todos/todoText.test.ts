@@ -96,7 +96,7 @@ describe("list texts", () => {
     expect(warningTexts(assessment({ warnings: { plan_misses_due: true, plan_overrun: false } }), true, true)).toEqual([
       "計画が間に合わない",
       "親の日限より後",
-      "先のTODOより前に始まる予定",
+      "先行TODOより前に始まる予定",
     ]);
   });
 
