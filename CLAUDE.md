@@ -275,9 +275,9 @@ v0.3.0 は `docs/implementation-plan-v0.3.0.md` のフェーズ17〜24で作る�
   | `rename_todo_template` | 20 | テンプレートの名前を変える |
   | `delete_todo_template` | 20 | テンプレートを消す。テンプレートから作るのは `create_todo` の `template_id` |
   | `set_todo_repeat` | 21 | 繰り返しの周期を付ける・変える・外す。次の回は `change_status` が作る |
-  | `add_dependency` | 22 | 「先に終わらせるTODO」を結ぶ |
+  | `add_dependency` | 22 | 先行TODOを結ぶ |
   | `remove_dependency` | 22 | 依存を外す |
-  | `list_dependencies` | 22 | 先に終わらせるTODOと、これを待っているTODOの一覧 |
+  | `list_dependencies` | 22 | 先行TODOと後続TODOの一覧 |
 
 - `settings` に足すキー
 
