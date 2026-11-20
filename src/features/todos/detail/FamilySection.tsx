@@ -150,6 +150,7 @@ export function ChildrenSection({
             {
               project_id: item.todo.project_id,
               parent_id: item.todo.id,
+              template_id: null,
               title,
               priority: null,
               due_date: null,

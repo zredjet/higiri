@@ -188,6 +188,7 @@ mod tests {
             NewTodoInput {
                 project_id: p.id,
                 parent_id: None,
+                template_id: None,
                 title: "API設計書のレビュー対応".into(),
                 priority: None,
                 due_date: None,

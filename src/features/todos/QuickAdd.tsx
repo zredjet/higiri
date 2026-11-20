@@ -29,6 +29,7 @@ export function QuickAdd({ projectId, onAdded }: { projectId: number; onAdded?: 
           {
             project_id: projectId,
             parent_id: null,
+            template_id: null,
             title,
             priority: null,
             due_date: null,

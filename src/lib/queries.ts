@@ -34,6 +34,7 @@ export const queryKeys = {
   allHolidays: ["holidays"] as const,
   report: (key: ReportKey) => ["reports", key] as const,
   backups: ["backups"] as const,
+  templates: ["templates"] as const,
 };
 
 export function useProjects(includeArchived = false) {
@@ -260,6 +261,48 @@ export function useSetTodoParent() {
     scope: TODO_WRITES,
     mutationFn: ({ id, parentId }: { id: number; parentId: number | null }) => commands.setTodoParent(id, parentId),
     onSuccess: (item) => changed(item),
+  });
+}
+
+// ---- TODOテンプレート (T-10) ------------------------------------------------------
+
+/** Every template, by name. A TODO is made from one with create_todo (`template_id`). */
+export function useTodoTemplates() {
+  return useQuery({ queryKey: queryKeys.templates, queryFn: () => commands.listTodoTemplates() });
+}
+
+/** Refreshes the templates after a change (they belong to no project or TODO list). */
+function useTemplatesChanged() {
+  const qc = useQueryClient();
+  return () => qc.invalidateQueries({ queryKey: queryKeys.templates });
+}
+
+/**
+ * 「テンプレートとして保存」: a TODO without a parent and its children. A template with
+ * the same name is replaced only with `replace` (the dialog asks first).
+ */
+export function useSaveTodoTemplate() {
+  const changed = useTemplatesChanged();
+  return useMutation({
+    mutationFn: ({ todoId, name, replace }: { todoId: number; name: string; replace: boolean }) =>
+      commands.saveTodoTemplate(todoId, name, replace),
+    onSuccess: () => changed(),
+  });
+}
+
+export function useRenameTodoTemplate() {
+  const changed = useTemplatesChanged();
+  return useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) => commands.renameTodoTemplate(id, name),
+    onSuccess: () => changed(),
+  });
+}
+
+export function useDeleteTodoTemplate() {
+  const changed = useTemplatesChanged();
+  return useMutation({
+    mutationFn: (id: number) => commands.deleteTodoTemplate(id),
+    onSuccess: () => changed(),
   });
 }
 

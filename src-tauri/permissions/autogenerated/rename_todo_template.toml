@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rename-todo-template"
+description = "Enables the rename_todo_template command without any pre-configured scope."
+commands.allow = ["rename_todo_template"]
+
+[[permission]]
+identifier = "deny-rename-todo-template"
+description = "Denies the rename_todo_template command without any pre-configured scope."
+commands.deny = ["rename_todo_template"]

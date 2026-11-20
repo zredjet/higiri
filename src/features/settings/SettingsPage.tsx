@@ -30,6 +30,7 @@ import { backupLabel } from "./backupText";
 import { ImportDialog } from "./ImportDialog";
 import { ReportTemplateCard } from "./ReportTemplateCard";
 import { RestoreDialog } from "./RestoreDialog";
+import { TodoTemplateCard } from "./TodoTemplateCard";
 
 const THEME_OPTIONS: Array<{ value: Theme; label: string }> = [
   { value: "light", label: "ライト" },
@@ -69,6 +70,7 @@ export function SettingsPage() {
       {settings.data ? <DayCountCard settings={settings.data} /> : null}
       {settings.data ? <ResidentCard settings={settings.data} /> : null}
       {settings.data ? <ReportTemplateCard template={settings.data.report_template} /> : null}
+      <TodoTemplateCard />
       <DisplayCard />
       <DataCard />
       <ArchivedProjectsCard />

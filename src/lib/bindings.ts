@@ -18,7 +18,10 @@ export const commands = {
 	/**  TODOs with their 日限注意 category, warnings and day counts. */
 	listTodos: (query: TodoQuery, options?: InvokeOptions) => __TAURI_INVOKE<TodoList>("list_todos", { query }, options),
 	getTodo: (id: number, options?: InvokeOptions) => __TAURI_INVOKE<TodoItem>("get_todo", { id }, options),
-	/**  Adds a TODO as 未着手 (also used by the quick add, T-5). */
+	/**
+	 *  Adds a TODO as 未着手 (also used by the quick add, T-5), with its
+	 *  children when it is made from a template (T-10), in one transaction.
+	 */
 	createTodo: (input: NewTodoInput, options?: InvokeOptions) => __TAURI_INVOKE<TodoItem>("create_todo", { input }, options),
 	/**  Saves the editable fields and records changes of 日限・予定・実績・確認日. */
 	updateTodo: (id: number, fields: TodoFields, options?: InvokeOptions) => __TAURI_INVOKE<TodoItem>("update_todo", { id, fields }, options),
@@ -37,6 +40,17 @@ export const commands = {
 	 *  out (S-1). Same project, one level. Not recorded in the history.
 	 */
 	setTodoParent: (id: number, parentId: number | null, options?: InvokeOptions) => __TAURI_INVOKE<TodoItem>("set_todo_parent", { id, parentId }, options),
+	/**  Every template, by name. */
+	listTodoTemplates: (options?: InvokeOptions) => __TAURI_INVOKE<TemplateSummary[]>("list_todo_templates", undefined, options),
+	/**
+	 *  Saves a TODO without a parent and its children (中止 ones left out) as a
+	 *  template named `name`. When a template has that name already, it is
+	 *  replaced only with `replace` (the screen asks first).
+	 */
+	saveTodoTemplate: (todoId: number, name: string, replace: boolean, options?: InvokeOptions) => __TAURI_INVOKE<TemplateSummary>("save_todo_template", { todoId, name, replace }, options),
+	renameTodoTemplate: (id: number, name: string, options?: InvokeOptions) => __TAURI_INVOKE<TemplateSummary>("rename_todo_template", { id, name }, options),
+	/**  Deletes a template. The TODOs made from it stay. The screen confirms first. */
+	deleteTodoTemplate: (id: number, options?: InvokeOptions) => __TAURI_INVOKE<null>("delete_todo_template", { id }, options),
 	/**  Work logs and recorded changes of one TODO, newest first. */
 	listTimeline: (todoId: number, options?: InvokeOptions) => __TAURI_INVOKE<TimelineEntry[]>("list_timeline", { todoId }, options),
 	/**  Adds (`id = null`) or updates a work log. */
@@ -368,13 +382,20 @@ export type NewTodoInput = {
 	 *  project and have no parent. `null` = a TODO of its own.
 	 */
 	parent_id: number | null,
+	/**
+	 *  Makes it from this template (T-10): it gets the template's memo and
+	 *  children, each child due `due_date` + its days (no due date when
+	 *  `due_date` is empty) and 未着手. Not with `parent_id`. The title and
+	 *  priority are the input's (the screen fills them in from the template).
+	 */
+	template_id: number | null,
 	title: string,
 	/**  `null` = 中. */
 	priority: Priority | null,
 	due_date: string | null,
 	planned_start: string | null,
 	planned_end: string | null,
-	/**  `null` = empty memo. */
+	/**  `null` = empty memo (the template's memo, with `template_id`). */
 	memo_md: string | null,
 };
 
@@ -605,6 +626,21 @@ export type StatusCounts = {
 	hold: number,
 	done: number,
 	cancelled: number,
+};
+
+/**
+ *  A template as the screens list it (list_todo_templates): what the
+ *  「TODOを追加」 dialog fills in and shows, and the settings card's list.
+ */
+export type TemplateSummary = {
+	id: number,
+	name: string,
+	/**  The parent's title (the dialog puts it in the title field). */
+	title: string,
+	priority: Priority,
+	/**  The children's titles, in the template's order. */
+	child_titles: string[],
+	updated_at: string,
 };
 
 /**  Colour scheme. */

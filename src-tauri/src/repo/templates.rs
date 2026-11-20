@@ -60,6 +60,17 @@ pub async fn list(conn: &mut SqliteConnection) -> Result<Vec<TodoTemplate>> {
         .collect()
 }
 
+/// The id of the template with exactly this name, if there is one.
+pub async fn id_by_name(conn: &mut SqliteConnection, name: &str) -> Result<Option<i64>> {
+    Ok(
+        sqlx::query_as::<_, (i64,)>("SELECT id FROM todo_templates WHERE name = ?1")
+            .bind(name)
+            .fetch_optional(&mut *conn)
+            .await?
+            .map(|(id,)| id),
+    )
+}
+
 pub async fn get(conn: &mut SqliteConnection, id: i64) -> Result<TodoTemplate> {
     sqlx::query_as::<_, TemplateRow>("SELECT * FROM todo_templates WHERE id = ?1")
         .bind(id)
@@ -255,6 +266,17 @@ mod tests {
         .await
         .unwrap_err();
         assert!(err.is_constraint_violation(), "{err}");
+    }
+
+    #[tokio::test]
+    async fn id_by_name_finds_the_exact_name() {
+        let (_pool, mut c) = conn().await;
+        let t = insert(&mut c, &fields("月次締め", "A"), ts(2026, 11, 19, 1, 0))
+            .await
+            .unwrap();
+        assert_eq!(id_by_name(&mut c, "月次締め").await.unwrap(), Some(t.id));
+        assert_eq!(id_by_name(&mut c, "月次").await.unwrap(), None);
+        assert_eq!(id_by_name(&mut c, "月次締め ").await.unwrap(), None);
     }
 
     #[tokio::test]

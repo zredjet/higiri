@@ -3,7 +3,8 @@ import { Alert, Button, Dialog, Select, TextField } from "../../components/aizom
 import { DateField } from "../../components/DateField";
 import type { Priority, TodoItem } from "../../lib/bindings";
 import { errorMessage } from "../../lib/errors";
-import { useCreateTodo, useProjects } from "../../lib/queries";
+import { useCreateTodo, useProjects, useTodoTemplates } from "../../lib/queries";
+import { TEMPLATE_DUE_HINT, TEMPLATE_NO_CHILDREN, templateOptions } from "./templateText";
 import { PRIORITIES, PRIORITY_LABEL } from "./todoText";
 
 interface NewTodoDialogProps {
@@ -14,7 +15,11 @@ interface NewTodoDialogProps {
   onCreated: (item: TodoItem) => void;
 }
 
-/** 「TODOを追加」: title, project, priority, due date and planned period. */
+/**
+ * 「TODOを追加」: title, project, priority, due date and planned period. A
+ * template (T-10), when there is one, fills in the title and priority and
+ * brings its memo and children.
+ */
 export function NewTodoDialog(props: NewTodoDialogProps) {
   if (!props.open) return null;
   return <NewTodoForm {...props} />;
@@ -31,6 +36,11 @@ function NewTodoForm({ projectId, onClose, onCreated }: NewTodoDialogProps) {
   const [due, setDue] = useState<string | null>(null);
   const [plannedStart, setPlannedStart] = useState<string | null>(null);
   const [plannedEnd, setPlannedEnd] = useState<string | null>(null);
+  const templates = useTodoTemplates();
+  const templateList = templates.data ?? [];
+  /** "" = 使わない. */
+  const [templateId, setTemplateId] = useState("");
+  const template = templateList.find((t) => String(t.id) === templateId) ?? null;
   const create = useCreateTodo();
   const noProject = projects.isSuccess && list.length === 0;
   const projectValue = project || (list[0] ? String(list[0].project.id) : "");
@@ -40,6 +50,8 @@ function NewTodoForm({ projectId, onClose, onCreated }: NewTodoDialogProps) {
       {
         project_id: Number(projectValue),
         parent_id: null,
+        // A template deleted in the meantime is refused (not made without its children).
+        template_id: templateId === "" ? null : Number(templateId),
         title,
         priority,
         due_date: due,
@@ -82,6 +94,40 @@ function NewTodoForm({ projectId, onClose, onCreated }: NewTodoDialogProps) {
           </Alert>
         ) : null}
         {create.error ? <Alert tone="danger">{errorMessage(create.error)}</Alert> : null}
+        {templateList.length > 0 ? (
+          <div className="template-choice">
+            <Select
+              label="テンプレート"
+              options={templateOptions(templateList)}
+              value={templateId}
+              onChange={(e) => {
+                const next = templateList.find((t) => String(t.id) === e.target.value);
+                setTemplateId(e.target.value);
+                if (next) {
+                  setTitle(next.title);
+                  setPriority(next.priority);
+                }
+              }}
+            />
+            {template ? (
+              <div className="template-preview" aria-live="polite">
+                <span className="template-preview__label">子TODO</span>
+                {template.child_titles.length > 0 ? (
+                  <>
+                    <ul className="template-preview__list">
+                      {template.child_titles.map((title, i) => (
+                        <li key={i}>{title}</li>
+                      ))}
+                    </ul>
+                    <span className="text-caption">{TEMPLATE_DUE_HINT}</span>
+                  </>
+                ) : (
+                  <span className="text-caption">{TEMPLATE_NO_CHILDREN}</span>
+                )}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <TextField label="タイトル" required autoFocus value={title} onChange={(e) => setTitle(e.target.value)} />
         <div className="field-grid">
           <Select

@@ -95,6 +95,7 @@ mod tests {
             NewTodoInput {
                 project_id,
                 parent_id: None,
+                template_id: None,
                 title: title.into(),
                 priority: Some(Priority::Medium),
                 due_date: None,

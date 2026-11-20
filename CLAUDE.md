@@ -322,6 +322,22 @@ v0.3.0 は `docs/implementation-plan-v0.3.0.md` のフェーズ17〜24で作る�
       - 表示の名前は `todoText.ts` の `displayTitle`(ダッシュボードの日限注意・今日の作業・待ち、リマインド、日付の変更のダイアログ)。検索の結果はタイトルの前に「親 / 」を付ける。
     - サンプル(`sample.rs`): 社内ツール整備に親「開発環境の標準化」と子3件(1件は完了)。作業中・待ちにせず、予定開始を明後日以降、日限を「間近」より先にし、モックの日に閉じないので、日報のフィクスチャとダッシュボードの日限注意は変わらない。社内ツール整備の進捗は 2/7、ガントの行は7行になる。
     - perf(`perf.rs`): 5,000件のうち1,000件を子にする(500件の親に2件ずつ。`CHILDREN`)。
+- TODOテンプレート(フェーズ20)
+  - コマンドは `list_todo_templates`、`save_todo_template(todo_id, name, replace)`、`rename_todo_template(id, name)`、`delete_todo_template(id)` を足して37個。テンプレートから作るのは `create_todo` の入力の `template_id`。
+  - 子どうしの依存(`depends_on`)は、保存では空のまま、使うときも結ばない(フェーズ22で足す)。
+  - 作ったもの(フェーズ20)
+    - `domain/template.rs`: `checked_name`(前後の空白を除いて1〜40字。`NAME_MAX`。字は文字の数で数える。`NameError` の文をそのまま画面に出す)、`TemplateBody::from_todos(parent, children)`(中止した子を除き、子は `id` の順。`due_offset_days` は日限の暦日の差で、どちらかの日限が空なら `None`)、`TemplateBody::new_children(due)`(子の日限 = 入力の日限 + 日数。日限が空か日数が `None` なら空。日付の範囲を超えるときも空)、`TemplateSummary`(`list_todo_templates` などが返す `{ id, name, title, priority, child_titles, updated_at }`。`TodoTemplate::summary`)。
+    - `repo/templates.rs`: `id_by_name`(名前がちょうど同じもの)。
+    - `commands/templates.rs`: 4つのコマンド。保存は、子のTODOなら「子TODOからはテンプレートを作れません。親のTODOから保存してください。」、同じ名前があって `replace` が `false` なら「同じ名前のテンプレートがあります。別の名前を入力してください。」(名前の変更も、表の UNIQUE で断られたときも同じ文)。`replace` なら同じ行を書き換える(`id` と `created_at` は残る)。保存の前に `TemplateBody::checked` を通す(検査に通らない本文を保存すると一覧が読めなくなるため。タイトルが空のTODOは取り込んだデータにしかなく、「タイトルが空のTODOがあるため、テンプレートにできません。…」で断る)。名前の変更で今と同じ名前なら何も書かない。見つからないテンプレートは「テンプレートが見つかりません。削除された可能性があります。画面を開き直してください。」(`error.rs` の `todo template`)。
+    - `create_todo`(`commands/todos.rs` の `create`): `template_id` があれば、親を作ってから子をテンプレートの順に作る(1トランザクション)。親のタイトル・優先度・プロジェクト・日限・予定期間は入力のもの。メモは、入力の `memo_md` が `null` ならテンプレートのもの(画面はいつも `null` を送る)。子は未着手で、予定期間は空、プロジェクトは親と同じ。変更履歴の「作成」を親と子に1件ずつ。`parent_id` と一緒なら「テンプレートから作るTODOは、子TODOにできません(親子は1段だけです)。親のTODOを選ばずに追加してください。」で断る。
+    - 画面
+      - `src/features/todos/templateText.ts`: 文言と `templateNamed`(前後の空白を除いて同じ名前)、`templateOptions`(「使わない」が先頭)。Vitest あり。
+      - 「TODOを追加」(`NewTodoDialog.tsx`): テンプレートが1つ以上あるときだけ、一番上に「テンプレート」の選択(初めは「使わない」)。選ぶとタイトルと優先度を入れ、子TODOのタイトルの一覧(`template-preview`)と「日限を入れると、子の日限も決まります。」を出す(子がなければ「子TODOはありません。」)。「使わない」に戻しても、入っているタイトルと優先度は消さない。選んだテンプレートが消されていたら、Rust 側が断る(子なしで作らない)。
+      - 詳細パネル: 「テンプレートとして保存」は、右上の「その他の操作」のメニュー(「削除する」の上)に置く。親のないTODOだけ。押すと詳細パネルの保存待ちの入力を保存してから(`saveOpenDrafts`。フェーズ20で Promise を返すようにした)、名前のダイアログ(`detail/SaveTemplateDialog.tsx`。初めの値はタイトル)を開く。保存の直前にも `saveOpenDrafts` を待つ。同じ名前が一覧にあれば、同じダイアログを「テンプレートを置き換えますか」に切り替え(ボタンは「名前を変える」「置き換える」)、`replace: true` で送る。保存したら、パネルの上に「テンプレート「…」を保存しました。「TODOを追加」で選ぶと使えます。」(×で閉じる。別のTODOに切り替えると出さない)。
+      - 設定画面: 「日報のテンプレート」の下に「TODOのテンプレート」のカード(`src/features/settings/TodoTemplateCard.tsx`)。表(名前、子TODOの件数、「名前を変える」「削除する」)、名前の変更のダイアログ(「テンプレートの名前を変える」、ボタンは「キャンセル」「変更する」)、削除の確認(「テンプレートを削除しますか」)。1つもなければ「テンプレートはありません。TODOの詳細パネルの「テンプレートとして保存」で作れます。」。
+      - フックは `queries.ts` の `useTodoTemplates`(キーは `["templates"]`)、`useSaveTodoTemplate`、`useRenameTodoTemplate`、`useDeleteTodoTemplate`(どれもテンプレートの一覧を取り直す)。テンプレートから作るのは `useCreateTodo` のまま(プロジェクトと TODO の一覧を取り直す)。復元と取り込みはすべてを取り直すので、テンプレートも取り直す。
+    - サンプル(`sample.rs`): テンプレート「月次締め」(子3件。日数は −3、−2、0)。TODO は足さないので、日報のフィクスチャとダッシュボードは変わらない。
+    - perf(`perf.rs`): テンプレート30個(子5件ずつ。`TEMPLATES`、`TEMPLATE_CHILDREN`)。`list_todo_templates`、`save_todo_template`(同じ名前の置き換え)、テンプレートから作って消す(`create_todo` + `delete_todo`)時間を測る。
 
 ## 品質の決めごと
 

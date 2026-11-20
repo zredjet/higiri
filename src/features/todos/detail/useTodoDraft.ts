@@ -12,10 +12,12 @@ const openDrafts = new Set<() => Promise<void>>();
 /**
  * Saves the detail panel's waiting edits now. A Gantt drag calls this when
  * it starts, so a planned date typed in the panel just before is saved first
- * and the drag wins.
+ * and the drag wins; 「テンプレートとして保存」 waits for it, so the template
+ * has what was just typed. Never rejects (a failed save shows its error in
+ * the panel).
  */
-export function saveOpenDrafts(): void {
-  for (const save of openDrafts) void save();
+export async function saveOpenDrafts(): Promise<void> {
+  await Promise.all(Array.from(openDrafts, (save) => save()));
 }
 
 /**

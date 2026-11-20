@@ -1,5 +1,6 @@
 //! Performance check (非機能要件「性能」): 5,000 TODOs and 20,000 work logs.
 //! 1,000 of the TODOs are children (S-1): 500 parents with 2 children each.
+//! 30 TODO templates (T-10) with 5 children each.
 //!
 //! Every command is measured twice: with the default 暦日 setting, then with
 //! 営業日 and a yearly custom holiday (年末年始).
@@ -23,12 +24,13 @@ use std::time::{Duration, Instant};
 use chrono::{Days, NaiveDate, TimeZone, Utc};
 use sqlx::SqlitePool;
 
-use crate::commands::{dashboard, gantt, projects, reports, search, settings, todos};
+use crate::commands::{dashboard, gantt, projects, reports, search, settings, templates, todos};
 use crate::domain::date::{format_date, format_timestamp};
 use crate::domain::listing::{DueFilter, TodoSort};
 use crate::domain::model::{Priority, Status, Todo};
 use crate::domain::report::ReportKind;
 use crate::domain::settings::{CustomHoliday, DayCount, Settings};
+use crate::domain::template::{TemplateBody, TemplateChild};
 use crate::repo::db;
 
 pub const PROJECTS: usize = 20;
@@ -36,6 +38,9 @@ pub const TODOS: usize = 5_000;
 pub const WORK_LOGS: usize = 20_000;
 /// Children among the TODOs (S-1).
 pub const CHILDREN: usize = 1_000;
+/// TODO templates (T-10), each with [`TEMPLATE_CHILDREN`] children.
+pub const TEMPLATES: usize = 30;
+pub const TEMPLATE_CHILDREN: usize = 5;
 
 /// Searches measured (label, words). The seed's texts: titles
 /// 「TODO 0001 の作業」, memos 「- 進め方のメモ…」, 待っている相手
@@ -215,6 +220,31 @@ pub async fn seed(pool: &SqlitePool, today: NaiveDate) -> sqlx::Result<()> {
         .execute(&mut *tx)
         .await?;
     }
+
+    // TODOテンプレート: 「テンプレート 01」…, by name.
+    for n in 1..=TEMPLATES {
+        let child = |c: usize| TemplateChild {
+            title: format!("手順 {c}"),
+            priority: Priority::Medium,
+            memo_md: "- 確認すること".into(),
+            due_offset_days: Some(c as i64 - TEMPLATE_CHILDREN as i64),
+            depends_on: Vec::new(),
+        };
+        let body = TemplateBody {
+            title: format!("定例の作業 {n:02}"),
+            priority: Priority::Medium,
+            memo_md: "## 手順\n- 前回の記録を見る".into(),
+            children: (1..=TEMPLATE_CHILDREN).map(child).collect(),
+        };
+        sqlx::query(
+            "INSERT INTO todo_templates (name, body, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",
+        )
+        .bind(format!("テンプレート {n:02}"))
+        .bind(body.to_json())
+        .bind(&created)
+        .execute(&mut *tx)
+        .await?;
+    }
     tx.commit().await
 }
 
@@ -391,6 +421,60 @@ async fn measure(pool: &SqlitePool, today: NaiveDate) -> Vec<(&'static str, Dura
         .await,
     ));
 
+    // TODOテンプレート (T-10): the list of the 「TODOを追加」 dialog, saving a
+    // parent and its 2 children again under a name that is taken (replace),
+    // and making a TODO with its 5 children from a template (deleted again,
+    // so the counts stay).
+    times.push((
+        "list_todo_templates",
+        median(runs, || templates::list(pool)).await,
+    ));
+    let (parent,): (i64,) = sqlx::query_as(
+        "SELECT parent_id FROM todos WHERE parent_id IS NOT NULL ORDER BY id LIMIT 1",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    times.push((
+        "save_todo_template (replace)",
+        median(runs, || async {
+            templates::save(pool, parent, "テンプレート 01", true, Utc::now())
+                .await
+                .unwrap();
+        })
+        .await,
+    ));
+    let (template_id,): (i64,) =
+        sqlx::query_as("SELECT id FROM todo_templates WHERE name = 'テンプレート 02'")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    times.push((
+        "create_todo (template) + delete",
+        median(runs, || async {
+            let made = todos::create(
+                pool,
+                todos::NewTodoInput {
+                    project_id: 3,
+                    parent_id: None,
+                    template_id: Some(template_id),
+                    title: "定例の作業".into(),
+                    priority: None,
+                    due_date: Some(shift(today, 14)),
+                    planned_start: None,
+                    planned_end: None,
+                    memo_md: None,
+                },
+                today,
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+            todos::delete(pool, made.todo.id).await.unwrap();
+        })
+        .await,
+    ));
+
     // What the first screen asks for (App.tsx: settings, projects, the
     // dashboard and its badge, the startup reminder). The screen sends them
     // at once; here they run one after the other.
@@ -548,5 +632,10 @@ async fn perf_5000_todos_20000_logs() {
             .await
             .unwrap();
     assert_eq!(children, CHILDREN as i64);
+    let (template_count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM todo_templates")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(template_count, TEMPLATES as i64);
     pool.close().await;
 }

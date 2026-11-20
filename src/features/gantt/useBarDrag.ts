@@ -136,7 +136,7 @@ export function useBarDrag() {
           a.dragging = true;
           setError(null);
           // A planned date typed in the panel just before is saved first.
-          saveOpenDrafts();
+          void saveOpenDrafts();
           root.classList.add("gantt-dragging", rootClass);
           setPreview({ todoId, span: a.span });
         }

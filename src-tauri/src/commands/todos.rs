@@ -42,13 +42,18 @@ pub struct NewTodoInput {
     /// Adds it as a child of this TODO (S-1), which must be in the same
     /// project and have no parent. `null` = a TODO of its own.
     pub parent_id: Option<i64>,
+    /// Makes it from this template (T-10): it gets the template's memo and
+    /// children, each child due `due_date` + its days (no due date when
+    /// `due_date` is empty) and 未着手. Not with `parent_id`. The title and
+    /// priority are the input's (the screen fills them in from the template).
+    pub template_id: Option<i64>,
     pub title: String,
     /// `null` = 中.
     pub priority: Option<Priority>,
     pub due_date: Option<NaiveDate>,
     pub planned_start: Option<NaiveDate>,
     pub planned_end: Option<NaiveDate>,
-    /// `null` = empty memo.
+    /// `null` = empty memo (the template's memo, with `template_id`).
     pub memo_md: Option<String>,
 }
 
@@ -87,7 +92,8 @@ pub async fn get_todo(pool: State<'_, SqlitePool>, id: i64) -> CmdResult<TodoIte
     get(&pool, id, clock::today()).await
 }
 
-/// Adds a TODO as 未着手 (also used by the quick add, T-5).
+/// Adds a TODO as 未着手 (also used by the quick add, T-5), with its
+/// children when it is made from a template (T-10), in one transaction.
 #[tauri::command]
 #[specta::specta]
 pub async fn create_todo(pool: State<'_, SqlitePool>, input: NewTodoInput) -> CmdResult<TodoItem> {
@@ -231,6 +237,12 @@ pub async fn create(
 ) -> CmdResult<TodoItem> {
     let title = validate::required_text(&input.title, "タイトル")?;
     validate::period(input.planned_start, input.planned_end, "予定")?;
+    if input.parent_id.is_some() && input.template_id.is_some() {
+        // A template has children of its own: one level only.
+        return Err(AppError::validation(
+            "テンプレートから作るTODOは、子TODOにできません(親子は1段だけです)。親のTODOを選ばずに追加してください。",
+        ));
+    }
 
     let mut tx = pool.begin().await?;
     let project = repo::projects::get(&mut tx, input.project_id).await?;
@@ -243,6 +255,14 @@ pub async fn create(
         let parent = repo::todos::get(&mut tx, parent_id).await?;
         check_new_child(project.id, &parent).map_err(|e| AppError::validation(e.to_string()))?;
     }
+    let template = match input.template_id {
+        Some(id) => Some(repo::templates::get(&mut tx, id).await?.body),
+        None => None,
+    };
+    let memo_md = input
+        .memo_md
+        .or_else(|| template.as_ref().map(|b| b.memo_md.clone()))
+        .unwrap_or_default();
     let todo = repo::todos::insert(
         &mut tx,
         &NewTodo {
@@ -253,12 +273,31 @@ pub async fn create(
             due_date: input.due_date,
             planned_start: input.planned_start,
             planned_end: input.planned_end,
-            memo_md: input.memo_md.unwrap_or_default(),
+            memo_md,
         },
         now,
     )
     .await?;
     repo::events::insert(&mut tx, todo.id, &events::created(todo.status, today, now)).await?;
+    // The template's children, in its order, each 未着手 with its own 「作成」.
+    for child in template.iter().flat_map(|b| b.new_children(input.due_date)) {
+        let made = repo::todos::insert(
+            &mut tx,
+            &NewTodo {
+                project_id: project.id,
+                parent_id: Some(todo.id),
+                title: child.title,
+                priority: child.priority,
+                due_date: child.due_date,
+                planned_start: None,
+                planned_end: None,
+                memo_md: child.memo_md,
+            },
+            now,
+        )
+        .await?;
+        repo::events::insert(&mut tx, made.id, &events::created(made.status, today, now)).await?;
+    }
     let out = item(&mut tx, todo, today).await?;
     tx.commit().await?;
     Ok(out)
@@ -433,6 +472,7 @@ mod tests {
         NewTodoInput {
             project_id,
             parent_id: None,
+            template_id: None,
             title: title.into(),
             priority: None,
             due_date: None,

@@ -17,6 +17,7 @@ pub mod projects;
 pub mod reports;
 pub mod search;
 pub mod settings;
+pub mod templates;
 pub mod todos;
 mod validate;
 pub mod work_logs;
@@ -47,6 +48,10 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             todos::change_status,
             todos::delete_todo,
             todos::set_todo_parent,
+            templates::list_todo_templates,
+            templates::save_todo_template,
+            templates::rename_todo_template,
+            templates::delete_todo_template,
             work_logs::list_timeline,
             work_logs::save_work_log,
             work_logs::delete_work_log,
@@ -122,7 +127,7 @@ mod tests {
             .collect();
         allowed.sort();
         assert_eq!(allowed, commands_in_bindings());
-        assert_eq!(allowed.len(), 33);
+        assert_eq!(allowed.len(), 37);
     }
 
     /// Regenerates `src/lib/bindings.ts` and fails when the committed file was

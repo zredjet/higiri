@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-delete-todo-template"
+description = "Enables the delete_todo_template command without any pre-configured scope."
+commands.allow = ["delete_todo_template"]
+
+[[permission]]
+identifier = "deny-delete-todo-template"
+description = "Denies the delete_todo_template command without any pre-configured scope."
+commands.deny = ["delete_todo_template"]

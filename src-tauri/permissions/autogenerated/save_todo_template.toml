@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-save-todo-template"
+description = "Enables the save_todo_template command without any pre-configured scope."
+commands.allow = ["save_todo_template"]
+
+[[permission]]
+identifier = "deny-save-todo-template"
+description = "Denies the save_todo_template command without any pre-configured scope."
+commands.deny = ["save_todo_template"]

@@ -7,7 +7,9 @@
 //! screens (the dashboard's 日限注意, the daily report of the mock's day) stay
 //! as they are: a parent with three children (S-1) in 社内ツール整備, none
 //! 作業中 or 待ち, none starting before the day after tomorrow, none due
-//! within the 「間近」 days, none closed on the mock's day.
+//! within the 「間近」 days, none closed on the mock's day. A TODO template
+//! (T-10) 「月次締め」 with three children: templates show on no screen until
+//! one is chosen in 「TODOを追加」.
 //! Status changes are replayed through `domain::status::transition`, so the
 //! actual dates, waiting fields and change history come out exactly as the app
 //! itself would record them.
@@ -19,7 +21,9 @@ use crate::domain::date::{days_between, parse_date};
 use crate::domain::events;
 use crate::domain::model::{Priority, Status};
 use crate::domain::status::{StatusChange, StatusFields, transition};
+use crate::domain::template::{TemplateBody, TemplateChild};
 use crate::repo::projects::NewProject;
+use crate::repo::templates::TemplateFields;
 use crate::repo::todos::NewTodo;
 use crate::repo::work_logs::NewWorkLog;
 use crate::repo::{self, RepoError};
@@ -234,6 +238,31 @@ const WORK_LOGS: [(&str, &str, i64, &str); 4] = [
     ),
 ];
 
+/// The TODO template (T-10): 「月次締め」, its children due 3 and 2 days
+/// before it and on the same day. No dependencies yet (T-11).
+fn template() -> TemplateFields {
+    let child = |title: &str, priority, days| TemplateChild {
+        title: title.into(),
+        priority,
+        memo_md: String::new(),
+        due_offset_days: Some(days),
+        depends_on: Vec::new(),
+    };
+    TemplateFields {
+        name: "月次締め".into(),
+        body: TemplateBody {
+            title: "月次締め".into(),
+            priority: Priority::Medium,
+            memo_md: "## 手順\n- 前月分の売上と経費を集計する\n- 報告書にまとめて共有する".into(),
+            children: vec![
+                child("売上の集計", Priority::High, -3),
+                child("経費の確認", Priority::Medium, -2),
+                child("報告書の作成", Priority::Medium, 0),
+            ],
+        },
+    }
+}
+
 /// Shifts mock dates so that the mock's today lands on `today`.
 struct Shift {
     days: i64,
@@ -351,6 +380,8 @@ pub async fn seed_if_empty(pool: &SqlitePool, today: NaiveDate) -> Result<bool, 
         .await?;
     }
 
+    repo::templates::insert(&mut tx, &template(), shift.at(CREATED_ON, 50)).await?;
+
     tx.commit().await?;
     Ok(true)
 }
@@ -448,6 +479,18 @@ mod tests {
                 .len(),
             2
         );
+
+        // One template with three children, due before and on its day.
+        let templates = repo::templates::list(&mut c).await.unwrap();
+        assert_eq!(templates.len(), 1);
+        assert_eq!(templates[0].name, "月次締め");
+        let days: Vec<Option<i64>> = templates[0]
+            .body
+            .children
+            .iter()
+            .map(|c| c.due_offset_days)
+            .collect();
+        assert_eq!(days, [Some(-3), Some(-2), Some(0)]);
     }
 
     #[tokio::test]
