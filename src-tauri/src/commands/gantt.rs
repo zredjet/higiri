@@ -8,6 +8,7 @@ use tauri::State;
 use super::clock;
 use super::error::CmdResult;
 use crate::domain::gantt::{self, Gantt, GanttFilter};
+use crate::domain::repeat;
 use crate::domain::urgency::Rules;
 use crate::repo;
 use crate::repo::todos::TodoFilter;
@@ -48,10 +49,12 @@ pub async fn get(pool: &SqlitePool, query: &GanttQuery, today: NaiveDate) -> Cmd
     )
     .await?;
     let events = repo::events::list_status_events(&mut conn).await?;
+    let repeats = repeat::by_todo(repo::repeats::list(&mut conn).await?);
     Ok(gantt::build(
         projects,
         &todos,
         &events,
+        &repeats,
         GanttFilter {
             include_done: query.include_done,
             include_cancelled: query.include_cancelled,
@@ -95,12 +98,13 @@ mod tests {
             .map(|p| (p.project.name.clone(), p.rows.len()))
             .collect();
         // Done shown, cancelled hidden: 5 / 3 / 2 rows as in the mock, and
-        // the sample's parent with its 3 children in 社内ツール整備.
+        // the sample's parent with its 3 children and its repeating TODO in
+        // 社内ツール整備.
         assert_eq!(
             shape,
             vec![
                 ("基幹システム更改".to_owned(), 5),
-                ("社内ツール整備".to_owned(), 7),
+                ("社内ツール整備".to_owned(), 8),
                 ("採用サイト改修".to_owned(), 2)
             ]
         );
@@ -119,8 +123,12 @@ mod tests {
                 ("必要なツールの洗い出し", true),
                 ("セットアップ手順書の作成", true),
                 ("新メンバーでの試行", true),
+                ("社内ツールの更新確認", false),
             ]
         );
+        // The repeating TODO carries its repetition.
+        assert!(g.projects[1].rows[7].item.repeat.is_some());
+        assert!(g.projects[1].rows[6].item.repeat.is_none());
 
         let find = |title: &str| {
             g.projects
@@ -161,9 +169,9 @@ mod tests {
         assert_eq!(all.projects[0].rows.len(), 6);
         let open_only = get(&pool, &q(false, false), today).await.unwrap();
         let rows: usize = open_only.projects.iter().map(|p| p.rows.len()).sum();
-        // The mock's 8 open TODOs, and the sample's open parent with its 2
-        // open children.
-        assert_eq!(rows, 11);
+        // The mock's 8 open TODOs, the sample's open parent with its 2 open
+        // children, and its repeating TODO.
+        assert_eq!(rows, 12);
 
         let pid = all.projects[2].project.id;
         let one = get(

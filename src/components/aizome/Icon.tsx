@@ -80,6 +80,13 @@ const ICONS = {
     ["circle", { cx: 18, cy: 12, r: 1.4, fill: "currentColor", stroke: "none" }],
   ],
   "log-out": [["path", { d: "M10 4.5H5.5v15H10M14 8l4 4-4 4M18 12H9" }]],
+  // Not in Aizome: added for 繰り返しのTODO (v0.3.0), drawn like the others.
+  repeat: [
+    ["path", { d: "M4.5 11.5a7.5 7.5 0 0 1 13-4.6L19.5 9" }],
+    ["path", { d: "M19.5 4.5V9H15" }],
+    ["path", { d: "M19.5 12.5a7.5 7.5 0 0 1-13 4.6L4.5 15" }],
+    ["path", { d: "M4.5 19.5V15H9" }],
+  ],
 } satisfies Record<string, Shape[]>;
 
 export type IconName = keyof typeof ICONS;

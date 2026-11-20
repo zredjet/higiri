@@ -229,6 +229,18 @@ pub async fn set_parent(
     .into_todo()
 }
 
+/// Sets `updated_at` only (a change kept outside `todos`, such as its
+/// repetition).
+pub async fn touch(conn: &mut SqliteConnection, id: i64, now: DateTime<Utc>) -> Result<Todo> {
+    sqlx::query_as::<_, TodoRow>("UPDATE todos SET updated_at = ?2 WHERE id = ?1 RETURNING *")
+        .bind(id)
+        .bind(ts_param(now))
+        .fetch_optional(&mut *conn)
+        .await?
+        .ok_or_else(|| not_found(id))?
+        .into_todo()
+}
+
 /// Writes the editable (non-status) fields of `todo`: title, priority, due
 /// date, planned and actual periods, waiting-on, follow-up date, cancel reason
 /// and memo.

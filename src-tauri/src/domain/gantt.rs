@@ -13,6 +13,7 @@ use serde::Serialize;
 use super::events::{EventKind, TodoEvent};
 use super::listing::tree_rows;
 use super::model::{Project, Status, Todo};
+use super::repeat::RepeatsByTodo;
 use super::subtodo::Family;
 use super::urgency::Rules;
 use super::views::{TodoItem, todo_item};
@@ -161,6 +162,7 @@ pub fn build(
     projects: Vec<Project>,
     todos: &[Todo],
     events: &[TodoEvent],
+    repeats: &RepeatsByTodo,
     filter: GanttFilter,
     today: NaiveDate,
     rules: &Rules,
@@ -181,7 +183,14 @@ pub fn build(
                 .into_iter()
                 .map(|r| {
                     let t = own[r.index];
-                    let item = todo_item(t.clone(), project.name.clone(), &family, today, rules);
+                    let item = todo_item(
+                        t.clone(),
+                        project.name.clone(),
+                        &family,
+                        repeats.get(&t.id),
+                        today,
+                        rules,
+                    );
                     if r.bridge {
                         return bridge_row(item);
                     }
@@ -412,6 +421,7 @@ mod tests {
             vec![project(1)],
             &todos,
             &[],
+            &RepeatsByTodo::new(),
             all,
             d("2026-11-19"),
             &rules(3),
@@ -454,6 +464,7 @@ mod tests {
             vec![project(1)],
             &todos,
             &[],
+            &RepeatsByTodo::new(),
             open_only,
             d("2026-11-19"),
             &rules(3),

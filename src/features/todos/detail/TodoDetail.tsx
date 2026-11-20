@@ -4,23 +4,26 @@ import { DateField } from "../../../components/DateField";
 import type { Priority, Status, TodoItem } from "../../../lib/bindings";
 import { errorMessage } from "../../../lib/errors";
 import { shortcutText } from "../../../lib/keys";
-import { useChangeStatus, useTimeline } from "../../../lib/queries";
+import { useChangeStatus, useLatestTodo, useTimeline } from "../../../lib/queries";
+import { nextRoundMadeText } from "../repeatText";
 import { cancelChildrenNote, PRIORITIES, PRIORITY_LABEL, STATUSES, STATUS_LABEL, waitingMessage } from "../todoText";
 import { ChildrenSection, ParentField, useFamily } from "./FamilySection";
 import { MarkdownField } from "./MarkdownField";
+import { RepeatField } from "./RepeatField";
 import { CancelDialog, DoneWithChildrenDialog, WaitDialog } from "./StatusDialogs";
 import { useTodoDraft } from "./useTodoDraft";
 import { WorkLogSection } from "./WorkLogSection";
 
 /**
  * The fields, memo and work log of one TODO (docs/ui-mock/Todos.dc.html,
- * right side), with its parent and children (S-1). `onOpenTodo` opens
- * another TODO in the panel (the parent, a child).
+ * right side), with its repetition (T-12), parent and children (S-1).
+ * `onOpenTodo` opens another TODO in the panel (the parent, a child).
  */
 export function TodoDetail({ item, onOpenTodo }: { item: TodoItem; onOpenTodo: (id: number) => void }) {
   const { todo, assessment } = item;
   const { draft, set, save, error, saving } = useTodoDraft(item);
   const status = useChangeStatus();
+  const latest = useLatestTodo();
   const timeline = useTimeline(todo.id);
   const family = useFamily(item);
   const [asking, setAsking] = useState<null | "waiting" | "cancelled" | "done">(null);
@@ -28,6 +31,17 @@ export function TodoDetail({ item, onOpenTodo }: { item: TodoItem; onOpenTodo: (
   const openChildren = item.children?.open ?? 0;
   const [tab, setTab] = useState<"log" | "memo">("log");
   const [memoPreview, setMemoPreview] = useState(false);
+  /** The next round's 日限, once closing this repeating TODO made it (T-12). */
+  const [madeNext, setMadeNext] = useState<string | null>(null);
+
+  /**
+   * The next round's 日限 when going `to` closes this TODO and it repeats.
+   * Read after the panel's save, so a 日限 just typed counts.
+   */
+  function nextRoundOf(to: Status): string | null {
+    if (to !== "done" && to !== "cancelled") return null;
+    return (latest(todo.id) ?? item).repeat?.next_due ?? null;
+  }
 
   async function changeStatus(to: Status) {
     if (to === "waiting" || to === "cancelled" || (to === "done" && openChildren > 0)) {
@@ -36,7 +50,11 @@ export function TodoDetail({ item, onOpenTodo }: { item: TodoItem; onOpenTodo: (
       return;
     }
     await save();
-    status.mutate({ id: todo.id, change: { to, waiting_on: null, follow_up_date: null, reason: null } });
+    const next = nextRoundOf(to);
+    status.mutate(
+      { id: todo.id, change: { to, waiting_on: null, follow_up_date: null, reason: null } },
+      { onSuccess: () => setMadeNext(next) },
+    );
   }
 
   const waiting = waitingMessage(todo, assessment);
@@ -53,6 +71,11 @@ export function TodoDetail({ item, onOpenTodo }: { item: TodoItem; onOpenTodo: (
       {waiting ? <Alert tone="info">{waiting}</Alert> : null}
       {error ? <Alert tone="danger">{errorMessage(error)}</Alert> : null}
       {status.error && asking === null ? <Alert tone="danger">{errorMessage(status.error)}</Alert> : null}
+      {madeNext ? (
+        <Alert tone="success" onClose={() => setMadeNext(null)}>
+          {nextRoundMadeText(madeNext)}
+        </Alert>
+      ) : null}
 
       <div className="detail-fields">
         <div className="detail-fields__row detail-fields__row--main">
@@ -145,6 +168,7 @@ export function TodoDetail({ item, onOpenTodo }: { item: TodoItem; onOpenTodo: (
         </span>
       </div>
 
+      {todo.parent_id === null ? <RepeatField item={item} dueDraft={draft.due_date} save={save} /> : null}
       {item.children === null ? (
         <ParentField item={item} candidates={family.candidates} loaded={family.loaded} onOpenTodo={onOpenTodo} />
       ) : null}
@@ -207,9 +231,15 @@ export function TodoDetail({ item, onOpenTodo }: { item: TodoItem; onOpenTodo: (
           onClose={() => setAsking(null)}
           onConfirm={async () => {
             await save();
+            const next = nextRoundOf("done");
             status.mutate(
               { id: todo.id, change: { to: "done", waiting_on: null, follow_up_date: null, reason: null } },
-              { onSuccess: () => setAsking(null) },
+              {
+                onSuccess: () => {
+                  setAsking(null);
+                  setMadeNext(next);
+                },
+              },
             );
           }}
         />
@@ -222,9 +252,15 @@ export function TodoDetail({ item, onOpenTodo }: { item: TodoItem; onOpenTodo: (
           onClose={() => setAsking(null)}
           onSubmit={async (reason) => {
             await save();
+            const next = nextRoundOf("cancelled");
             status.mutate(
               { id: todo.id, change: { to: "cancelled", waiting_on: null, follow_up_date: null, reason } },
-              { onSuccess: () => setAsking(null) },
+              {
+                onSuccess: () => {
+                  setAsking(null);
+                  setMadeNext(next);
+                },
+              },
             );
           }}
         />

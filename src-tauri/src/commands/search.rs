@@ -8,6 +8,7 @@ use tauri::State;
 
 use super::clock;
 use super::error::CmdResult;
+use crate::domain::repeat;
 use crate::domain::search::{MAX_HITS, SearchResult, logs_by_todo, rank, search_hit, split_terms};
 use crate::domain::subtodo::Family;
 use crate::domain::urgency::Rules;
@@ -45,13 +46,19 @@ pub async fn search(pool: &SqlitePool, text: &str, today: NaiveDate) -> CmdResul
         .map(|p| (p.id, p.name))
         .collect();
     let rules = Rules::from_settings(&repo::settings::load(&mut conn).await?);
+    let repeats = repeat::by_todo(repo::repeats::list(&mut conn).await?);
 
     let hits = todos
         .into_iter()
         .map(|t| {
             let own = logs.remove(&t.id).unwrap_or_default();
             let name = names.get(&t.project_id).cloned().unwrap_or_default();
-            search_hit(todo_item(t, name, &family, today, &rules), &own, &terms)
+            let repeat = repeats.get(&t.id);
+            search_hit(
+                todo_item(t, name, &family, repeat, today, &rules),
+                &own,
+                &terms,
+            )
         })
         .collect();
     Ok(SearchResult { hits, total })

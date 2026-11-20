@@ -27,7 +27,8 @@ export const commands = {
 	updateTodo: (id: number, fields: TodoFields, options?: InvokeOptions) => __TAURI_INVOKE<TodoItem>("update_todo", { id, fields }, options),
 	/**
 	 *  Changes the status, fills the automatic dates and records the change, in
-	 *  one transaction.
+	 *  one transaction. Closing a parent closes its open children (S-1); closing
+	 *  a repeating TODO makes its next round and hands it the repetition (T-12).
 	 */
 	changeStatus: (id: number, change: StatusChange, options?: InvokeOptions) => __TAURI_INVOKE<TodoItem>("change_status", { id, change }, options),
 	/**
@@ -40,6 +41,11 @@ export const commands = {
 	 *  out (S-1). Same project, one level. Not recorded in the history.
 	 */
 	setTodoParent: (id: number, parentId: number | null, options?: InvokeOptions) => __TAURI_INVOKE<TodoItem>("set_todo_parent", { id, parentId }, options),
+	/**
+	 *  Gives a TODO a repetition, changes it, or (`null`) takes it off. Only a
+	 *  parentless, open TODO with a 日限 gets one. Not recorded in the history.
+	 */
+	setTodoRepeat: (id: number, repeat: RepeatInput | null, options?: InvokeOptions) => __TAURI_INVOKE<TodoItem>("set_todo_repeat", { id, repeat }, options),
 	/**  Every template, by name. */
 	listTodoTemplates: (options?: InvokeOptions) => __TAURI_INVOKE<TemplateSummary[]>("list_todo_templates", undefined, options),
 	/**
@@ -260,6 +266,9 @@ export type DayCount =
 /**  営業日: weekends, national holidays and custom holidays do not count. */
 "business";
 
+/**  A day of the week in a rule (`mon` … `sun`). */
+export type DayOfWeek = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+
 /**  Days `start..=end`. */
 export type DaySpan = {
 	start: string,
@@ -303,6 +312,9 @@ export type EventKind = "created" | "status" | "due_date" | "planned" | "actual"
  * 
  *  - `waiting_on`, `follow_up_date`: what the user entered when moving to 待ち.
  *  - `reason`: what the user entered when moving to 中止.
+ *  - `repeated_from`: on the `created` row of a round made by a repetition
+ *    (and of its children, v0.3.0): the previous round's id (for a child, the
+ *    previous round's child).
  *  - `auto`: on `status` rows only (always present there, `{}` when nothing
  *    changed). Columns of `todos` the transition changed by itself; key = column
  *    name, value = new value (dates `YYYY-MM-DD`, `closed_at` UTC ISO 8601), or
@@ -314,6 +326,7 @@ export type EventNote = {
 	waiting_on?: string | null,
 	follow_up_date?: string | null,
 	reason?: string | null,
+	repeated_from?: number | null,
 	auto?: { [key in string]: string | null } | null,
 };
 
@@ -447,6 +460,45 @@ export type ReminderFrequency =
 "every_launch" | 
 /**  1日1回 */
 "once_per_day";
+
+/**  The repetition of a TODO as the screens get it (`TodoItem.repeat`). */
+export type RepeatInfo = {
+	rule: RepeatRule,
+	/**  The last day a round may fall on. `null` = no end. */
+	until_date: string | null,
+	/**
+	 *  The next round's 日限 if this one is closed today. `null` when the
+	 *  repetition would end (after `until_date`).
+	 */
+	next_due: string | null,
+};
+
+/**  The repetition set on a TODO. */
+export type RepeatInput = {
+	rule: RepeatRule,
+	/**
+	 *  The last day a round may fall on (not before the current 日限).
+	 *  `null` = no end.
+	 */
+	until_date: string | null,
+};
+
+/**  The 周期 of a repeating TODO. */
+export type RepeatRule = 
+/**  毎日 */
+{ kind: "daily" } | 
+/**  毎週: on these days. */
+{ kind: "weekly"; weekdays: DayOfWeek[] } | 
+/**  毎月: on this day (the month's last day when it has no such day). */
+{ kind: "monthly_day"; day: number } | 
+/**  毎月: the `week`-th `weekday` (−1 = the last one). */
+{ kind: "monthly_weekday"; week: number; weekday: DayOfWeek } | 
+/**  毎月: the last day. */
+{ kind: "monthly_last" } | 
+/**  毎年: on this month and day (2/29 is 2/28 in other years). */
+{ kind: "yearly"; month: number; day: number } | 
+/**  N日ごと */
+{ kind: "every_days"; days: number };
 
 /**
  *  A saved report (`reports` row). `body_md` is the full text as saved;
@@ -742,6 +794,11 @@ export type TodoItem = {
 	children: ChildCounts | null,
 	/**  An open child due after its parent (「親の日限より後」). */
 	due_after_parent: boolean,
+	/**
+	 *  Its repetition (T-12), with the next round's 日限 if it were closed
+	 *  today. `null` = it does not repeat.
+	 */
+	repeat: RepeatInfo | null,
 };
 
 /**

@@ -8,6 +8,7 @@ use super::clock;
 use super::error::CmdResult;
 use crate::domain::dashboard::{self, Dashboard, StartupReminder};
 use crate::domain::model::{Project, Todo};
+use crate::domain::repeat::{self, RepeatsByTodo};
 use crate::domain::urgency::Rules;
 use crate::repo;
 use crate::repo::todos::TodoFilter;
@@ -35,19 +36,23 @@ pub async fn ack_reminder(pool: State<'_, SqlitePool>) -> CmdResult<()> {
     ack(&pool, clock::today()).await
 }
 
-async fn active(conn: &mut SqliteConnection) -> CmdResult<(Vec<Project>, Vec<Todo>)> {
+async fn active(
+    conn: &mut SqliteConnection,
+) -> CmdResult<(Vec<Project>, Vec<Todo>, RepeatsByTodo)> {
     let projects = repo::projects::list(conn, false).await?;
     let todos = repo::todos::list(conn, &TodoFilter::default()).await?;
-    Ok((projects, todos))
+    let repeats = repeat::by_todo(repo::repeats::list(conn).await?);
+    Ok((projects, todos, repeats))
 }
 
 pub async fn get(pool: &SqlitePool, today: NaiveDate) -> CmdResult<Dashboard> {
     let mut conn = pool.acquire().await?;
     let settings = repo::settings::load(&mut conn).await?;
-    let (projects, todos) = active(&mut conn).await?;
+    let (projects, todos, repeats) = active(&mut conn).await?;
     Ok(dashboard::build(
         projects,
         &todos,
+        &repeats,
         today,
         &Rules::from_settings(&settings),
     ))
@@ -59,8 +64,14 @@ pub async fn reminder(pool: &SqlitePool, today: NaiveDate) -> CmdResult<Option<S
     if !dashboard::reminder_allowed(&settings, today) {
         return Ok(None);
     }
-    let (projects, todos) = active(&mut conn).await?;
-    let dash = dashboard::build(projects, &todos, today, &Rules::from_settings(&settings));
+    let (projects, todos, repeats) = active(&mut conn).await?;
+    let dash = dashboard::build(
+        projects,
+        &todos,
+        &repeats,
+        today,
+        &Rules::from_settings(&settings),
+    );
     Ok(dashboard::startup_reminder(
         &settings,
         dash.attention,

@@ -157,10 +157,11 @@ export function cancelChildrenNote(open: number): string {
   return `開いている子TODO ${open}件も中止になります。`;
 }
 
-/** The delete confirmation: children go with their parent. */
-export function deleteTodoText(title: string, children: number): string {
+/** The delete confirmation: children go with their parent, and a repetition stops (T-12). */
+export function deleteTodoText(title: string, children: number, repeats = false): string {
   const kids = children > 0 ? `子TODO ${children}件も削除されます。` : "";
-  return `「${title}」と、その作業ログ・変更履歴をすべて削除します。${kids}削除したものは元に戻せません。不要になっただけなら、ステータスを「中止」にすると記録が残ります。`;
+  const repeat = repeats ? "繰り返しも止まります。" : "";
+  return `「${title}」と、その作業ログ・変更履歴をすべて削除します。${kids}${repeat}削除したものは元に戻せません。不要になっただけなら、ステータスを「中止」にすると記録が残ります。`;
 }
 
 /** 「予定 11/11〜11/18」「実績 11/12〜」「実績 なし」. */

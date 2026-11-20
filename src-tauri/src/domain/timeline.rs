@@ -51,6 +51,7 @@ pub fn describe(event: &TodoEvent) -> String {
     let old = event.old_value.as_deref();
     let new = event.new_value.as_deref();
     match event.kind {
+        EventKind::Created if event.note.repeated_from.is_some() => "繰り返しで作成".to_owned(),
         EventKind::Created => "TODOを作成".to_owned(),
         EventKind::DueDate => date_change("日限", short(old), short(new)),
         EventKind::FollowUp => date_change("確認日", short(old), short(new)),
@@ -232,6 +233,13 @@ mod tests {
             ts(2026, 11, 19, 0, 0),
         ));
         assert_eq!(describe(&created), "TODOを作成");
+        let repeated = stored(events::repeated(
+            7,
+            Status::Todo,
+            d("2026-11-19"),
+            ts(2026, 11, 19, 0, 0),
+        ));
+        assert_eq!(describe(&repeated), "繰り返しで作成");
 
         let odd = TodoEvent {
             kind: EventKind::Planned,

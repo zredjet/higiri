@@ -842,7 +842,12 @@ mod tests {
         use crate::domain::template::{TemplateBody, TemplateChild};
         use crate::repo::templates::TemplateFields;
 
+        // The sample's template and repetition make way for these rows.
         sqlx::query("DELETE FROM todo_templates")
+            .execute(&mut *c)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM todo_repeats")
             .execute(&mut *c)
             .await
             .unwrap();
@@ -1521,6 +1526,17 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_note_of_a_round_made_by_a_repetition_is_read() {
+        let file = edited(|v| v["todo_events"][0]["note"] = json!({"repeated_from": 1})).await;
+        let tmp = tempfile::tempdir().unwrap();
+        let dst = file_db(tmp.path()).await;
+        import_bytes(&dst, tmp.path(), &file, now()).await.unwrap();
+        let mut c = dst.acquire().await.unwrap();
+        let events = crate::repo::events::list_all(&mut c).await.unwrap();
+        assert_eq!(events[0].note.repeated_from, Some(1));
+    }
+
+    #[tokio::test]
     async fn values_the_app_cannot_read_are_refused() {
         let cases: Vec<Edit> = vec![
             Box::new(|v| v["todos"][0]["due_date"] = json!("2026/11/19")),
@@ -1530,6 +1546,7 @@ mod tests {
             Box::new(|v| v["work_logs"][0]["log_date"] = json!("2026-13-01")),
             Box::new(|v| v["todo_events"][0]["kind"] = json!("moved")),
             Box::new(|v| v["todo_events"][0]["note"] = json!("相手:人事部")),
+            Box::new(|v| v["todo_events"][0]["note"] = json!({"repeated_from": "1"})),
             Box::new(|v| v["reports"][0]["period_start"] = json!("11/19")),
             // A template body or a repeat rule the app cannot read.
             Box::new(|v| v["todo_templates"][0]["body"] = json!({"title": "月次締め"})),

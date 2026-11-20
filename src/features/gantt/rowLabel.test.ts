@@ -45,6 +45,7 @@ function row(todo: Partial<Todo>, assessment: Partial<Assessment> = {}, more: Pa
       parent_title: null,
       children: null,
       due_after_parent: false,
+      repeat: null,
     },
     planned: null,
     actual: null,
@@ -61,6 +62,12 @@ describe("rowLabel", () => {
     child.item.parent_title = "親";
     child.item.due_after_parent = true;
     expect(rowLabel(child)).toBe("親 / 子:予定なし、実績なし、日限 11/25(親の日限より後)");
+  });
+
+  it("ends with the repetition of a repeating TODO", () => {
+    const weekly = row({ title: "定例の資料", due_date: "2026-11-23" });
+    weekly.item.repeat = { rule: { kind: "weekly", weekdays: ["mon"] }, until_date: null, next_due: "2026-11-30" };
+    expect(rowLabel(weekly)).toBe("定例の資料:予定なし、実績なし、日限 11/23、繰り返し 毎週 月");
   });
 
   it("reads a bridge row as a hidden parent", () => {

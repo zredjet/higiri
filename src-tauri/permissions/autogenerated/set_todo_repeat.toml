@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-todo-repeat"
+description = "Enables the set_todo_repeat command without any pre-configured scope."
+commands.allow = ["set_todo_repeat"]
+
+[[permission]]
+identifier = "deny-set-todo-repeat"
+description = "Denies the set_todo_repeat command without any pre-configured scope."
+commands.deny = ["set_todo_repeat"]

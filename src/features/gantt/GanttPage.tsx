@@ -5,6 +5,7 @@ import type { DaySpan, GanttProject, GanttRow } from "../../lib/bindings";
 import { formatDate } from "../../lib/date";
 import { errorMessage } from "../../lib/errors";
 import { useGantt, useHolidays, useProjects } from "../../lib/queries";
+import { REPEAT_LABEL, repeatMarkTitle } from "../todos/repeatText";
 import { childProgressText, DUE_AFTER_PARENT_TEXT, STATUS_LABEL, STATUS_TONE } from "../todos/todoText";
 import { foldRows, parentsWithChildRows, type TreeInfo } from "../todos/tree";
 import { useFolded } from "../todos/useFolded";
@@ -391,6 +392,11 @@ function NameCell({
       >
         <span className="gantt-name__title">{todo.title}</span>
         <span className="gantt-name__side">
+          {item.repeat ? (
+            <span className="repeat-mark" title={repeatMarkTitle(item.repeat)}>
+              <Icon name="repeat" size={14} label={REPEAT_LABEL} />
+            </span>
+          ) : null}
           {progress ? <span className="todo-cell__progress">{progress}</span> : null}
           {item.due_after_parent ? (
             <span className="gantt-name__warning" title={DUE_AFTER_PARENT_TEXT}>

@@ -1,6 +1,7 @@
 import { Badge, Icon, Table, type TableColumn } from "../../components/aizome";
 import type { TodoListRow } from "../../lib/bindings";
 import { formatDate } from "../../lib/date";
+import { REPEAT_LABEL, repeatMarkTitle } from "./repeatText";
 import {
   childProgressText,
   dueNote,
@@ -30,6 +31,7 @@ const treeInfo = (r: TodoListRow): TreeInfo => ({ id: r.item.todo.id, parentId: 
  * The TODO list (docs/ui-mock/Todos.dc.html), plus 優先度 and the warnings.
  * Children come indented under their parent (S-1), which can be folded; a
  * parent that does not match the filters is shown dimmed (a bridge row).
+ * A repeating TODO has the repeat mark next to its title (T-12).
  * Long lists draw only the rows near the screen (useVirtualRows).
  */
 export function TodoTable({ rows, showProject, selectedId, onOpen, emptyText }: TodoTableProps) {
@@ -41,7 +43,7 @@ export function TodoTable({ rows, showProject, selectedId, onOpen, emptyText }: 
     {
       key: "title",
       header: "TODO",
-      render: ({ item: { todo, children }, child, bridge }) => {
+      render: ({ item: { todo, children, repeat }, child, bridge }) => {
         const sub = bridge ? null : subLine(todo);
         const closed = todo.status === "done" || todo.status === "cancelled";
         const progress = childProgressText(children);
@@ -65,6 +67,11 @@ export function TodoTable({ rows, showProject, selectedId, onOpen, emptyText }: 
                 </button>
               ) : null}
               <span className={closed || bridge ? "todo-cell__title is-closed" : "todo-cell__title"}>{todo.title}</span>
+              {repeat ? (
+                <span className="repeat-mark" title={repeatMarkTitle(repeat)}>
+                  <Icon name="repeat" size={14} label={REPEAT_LABEL} />
+                </span>
+              ) : null}
               {progress ? <span className="todo-cell__progress">{progress}</span> : null}
             </span>
             {sub ? <span className="todo-cell__sub">{sub}</span> : null}

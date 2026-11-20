@@ -447,6 +447,49 @@ body,
   gap: var(--space-1);
 }
 
+/* 繰り返し (T-12): the detail panel's field, the mark of the list and the
+   Gantt chart, and the days of 毎週 in the 周期 dialog. */
+.repeat-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.repeat-field__rule {
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text);
+}
+
+.repeat-field__rule.is-empty {
+  color: var(--text-muted);
+}
+
+.repeat-mark {
+  flex: 0 0 auto;
+  display: inline-flex;
+  color: var(--text-muted);
+}
+
+.repeat-weekdays {
+  min-width: 0;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.repeat-weekdays__checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+}
+
 /* TODOテンプレート (T-10): the template choice of 「TODOを追加」 and the
    children of the chosen one. */
 .template-choice {

@@ -57,6 +57,9 @@ impl EventKind {
 ///
 /// - `waiting_on`, `follow_up_date`: what the user entered when moving to 待ち.
 /// - `reason`: what the user entered when moving to 中止.
+/// - `repeated_from`: on the `created` row of a round made by a repetition
+///   (and of its children, v0.3.0): the previous round's id (for a child, the
+///   previous round's child).
 /// - `auto`: on `status` rows only (always present there, `{}` when nothing
 ///   changed). Columns of `todos` the transition changed by itself; key = column
 ///   name, value = new value (dates `YYYY-MM-DD`, `closed_at` UTC ISO 8601), or
@@ -71,6 +74,8 @@ pub struct EventNote {
     pub follow_up_date: Option<NaiveDate>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeated_from: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto: Option<BTreeMap<String, Option<String>>>,
 }
@@ -135,6 +140,18 @@ pub fn created(status: Status, today: NaiveDate, now: DateTime<Utc>) -> NewEvent
         new_value: Some(status.as_str().to_owned()),
         note: EventNote::default(),
         occurred_at: now,
+    }
+}
+
+/// The `created` event of a round made by a repetition (or of one of its
+/// children): `from` is the TODO it was copied from (T-12).
+pub fn repeated(from: i64, status: Status, today: NaiveDate, now: DateTime<Utc>) -> NewEvent {
+    NewEvent {
+        note: EventNote {
+            repeated_from: Some(from),
+            ..EventNote::default()
+        },
+        ..created(status, today, now)
     }
 }
 
@@ -259,6 +276,22 @@ mod tests {
         assert_eq!(e.old_value, None);
         assert_eq!(e.new_value.as_deref(), Some("todo"));
         assert_eq!(e.note.to_json(), "{}");
+    }
+
+    #[test]
+    fn a_repeated_round_records_where_it_came_from() {
+        let e = repeated(12, Status::Todo, d("2026-11-19"), ts(2026, 11, 19, 1, 0));
+        assert_eq!(e.kind, EventKind::Created);
+        assert_eq!(e.old_value, None);
+        assert_eq!(e.new_value.as_deref(), Some("todo"));
+        assert_eq!(e.note.to_json(), r#"{"repeated_from":12}"#);
+        assert_eq!(
+            EventNote::from_json(r#"{"repeated_from":12}"#),
+            Some(e.note)
+        );
+        // Not a number: not a note the app wrote.
+        assert_eq!(EventNote::from_json(r#"{"repeated_from":"12"}"#), None);
+        assert_eq!(EventNote::from_json(r#"{"repeated_from":1.5}"#), None);
     }
 
     #[test]

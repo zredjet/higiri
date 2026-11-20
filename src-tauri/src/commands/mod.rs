@@ -14,6 +14,7 @@ pub mod holidays;
 pub mod json_data;
 pub mod notify;
 pub mod projects;
+pub mod repeats;
 pub mod reports;
 pub mod search;
 pub mod settings;
@@ -48,6 +49,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             todos::change_status,
             todos::delete_todo,
             todos::set_todo_parent,
+            repeats::set_todo_repeat,
             templates::list_todo_templates,
             templates::save_todo_template,
             templates::rename_todo_template,
@@ -127,7 +129,7 @@ mod tests {
             .collect();
         allowed.sort();
         assert_eq!(allowed, commands_in_bindings());
-        assert_eq!(allowed.len(), 37);
+        assert_eq!(allowed.len(), 38);
     }
 
     /// Regenerates `src/lib/bindings.ts` and fails when the committed file was

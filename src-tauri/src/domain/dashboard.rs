@@ -6,6 +6,7 @@ use chrono::NaiveDate;
 use serde::Serialize;
 
 use super::model::{Project, Status, Todo};
+use super::repeat::RepeatsByTodo;
 use super::settings::{ReminderFrequency, Settings};
 use super::subtodo::Family;
 use super::urgency::{Rules, Urgency, attention_order};
@@ -76,6 +77,7 @@ pub fn is_today_work(todo: &Todo, today: NaiveDate) -> bool {
 fn items(
     todos: &[Todo],
     names: &HashMap<i64, String>,
+    repeats: &RepeatsByTodo,
     today: NaiveDate,
     rules: &Rules,
 ) -> Vec<TodoItem> {
@@ -85,7 +87,7 @@ fn items(
         .iter()
         .map(|t| {
             let name = names.get(&t.project_id).cloned().unwrap_or_default();
-            todo_item(t.clone(), name, &family, today, rules)
+            todo_item(t.clone(), name, &family, repeats.get(&t.id), today, rules)
         })
         .collect()
 }
@@ -108,9 +110,15 @@ pub fn attention_list(items: &[TodoItem]) -> Vec<TodoItem> {
 
 /// Builds the dashboard from the active projects and their TODOs (in the
 /// repository's order: project order, then TODO order).
-pub fn build(projects: Vec<Project>, todos: &[Todo], today: NaiveDate, rules: &Rules) -> Dashboard {
+pub fn build(
+    projects: Vec<Project>,
+    todos: &[Todo],
+    repeats: &RepeatsByTodo,
+    today: NaiveDate,
+    rules: &Rules,
+) -> Dashboard {
     let names: HashMap<i64, String> = projects.iter().map(|p| (p.id, p.name.clone())).collect();
-    let all = items(todos, &names, today, rules);
+    let all = items(todos, &names, repeats, today, rules);
 
     let attention = attention_list(&all);
     let mut counts = UrgencyCounts::default();
@@ -352,6 +360,7 @@ mod tests {
                 project(3, "採用サイト改修"),
             ],
             &mock_todos(),
+            &RepeatsByTodo::new(),
             d("2026-11-19"),
             &rules(3),
         )
@@ -368,6 +377,7 @@ mod tests {
                 project(3, "採用サイト改修"),
             ],
             &mock_todos(),
+            &RepeatsByTodo::new(),
             d("2026-11-19"),
             &business_rules(3, vec![]),
         );
@@ -550,6 +560,7 @@ mod tests {
         let dash = build(
             vec![project(1, "基幹システム更改"), project(2, "社内ツール整備")],
             &todos,
+            &RepeatsByTodo::new(),
             today,
             &rules(3),
         );

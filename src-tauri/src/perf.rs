@@ -1,6 +1,7 @@
 //! Performance check (非機能要件「性能」): 5,000 TODOs and 20,000 work logs.
 //! 1,000 of the TODOs are children (S-1): 500 parents with 2 children each.
-//! 30 TODO templates (T-10) with 5 children each.
+//! 30 TODO templates (T-10) with 5 children each. 300 repeating TODOs
+//! (T-12), open and parentless, of every kind of rule.
 //!
 //! Every command is measured twice: with the default 暦日 setting, then with
 //! 営業日 and a yearly custom holiday (年末年始).
@@ -24,12 +25,16 @@ use std::time::{Duration, Instant};
 use chrono::{Days, NaiveDate, TimeZone, Utc};
 use sqlx::SqlitePool;
 
-use crate::commands::{dashboard, gantt, projects, reports, search, settings, templates, todos};
+use crate::commands::{
+    dashboard, gantt, projects, repeats, reports, search, settings, templates, todos,
+};
 use crate::domain::date::{format_date, format_timestamp};
 use crate::domain::listing::{DueFilter, TodoSort};
 use crate::domain::model::{Priority, Status, Todo};
+use crate::domain::repeat::{DayOfWeek, RepeatRule};
 use crate::domain::report::ReportKind;
 use crate::domain::settings::{CustomHoliday, DayCount, Settings};
+use crate::domain::status::StatusChange;
 use crate::domain::template::{TemplateBody, TemplateChild};
 use crate::repo::db;
 
@@ -41,6 +46,8 @@ pub const CHILDREN: usize = 1_000;
 /// TODO templates (T-10), each with [`TEMPLATE_CHILDREN`] children.
 pub const TEMPLATES: usize = 30;
 pub const TEMPLATE_CHILDREN: usize = 5;
+/// Repeating TODOs (T-12): the first open, parentless TODOs with a 日限.
+pub const REPEATS: usize = 300;
 
 /// Searches measured (label, words). The seed's texts: titles
 /// 「TODO 0001 の作業」, memos 「- 進め方のメモ…」, 待っている相手
@@ -241,6 +248,42 @@ pub async fn seed(pool: &SqlitePool, today: NaiveDate) -> sqlx::Result<()> {
         )
         .bind(format!("テンプレート {n:02}"))
         .bind(body.to_json())
+        .bind(&created)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    // 繰り返し: every kind of rule in turn.
+    let rules = [
+        RepeatRule::Daily,
+        RepeatRule::Weekly {
+            weekdays: vec![DayOfWeek::Mon, DayOfWeek::Thu],
+        },
+        RepeatRule::MonthlyDay { day: 31 },
+        RepeatRule::MonthlyWeekday {
+            week: 2,
+            weekday: DayOfWeek::Tue,
+        },
+        RepeatRule::MonthlyLast,
+        RepeatRule::Yearly { month: 2, day: 29 },
+        RepeatRule::EveryDays { days: 10 },
+    ];
+    let ids: Vec<(i64,)> = sqlx::query_as(
+        "SELECT id FROM todos
+         WHERE parent_id IS NULL AND due_date IS NOT NULL
+           AND status IN ('todo', 'doing', 'waiting', 'hold')
+         ORDER BY id LIMIT ?1",
+    )
+    .bind(REPEATS as i64)
+    .fetch_all(&mut *tx)
+    .await?;
+    for (n, (id,)) in ids.into_iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO todo_repeats (todo_id, rule, until_date, created_at, updated_at)
+             VALUES (?1, ?2, NULL, ?3, ?3)",
+        )
+        .bind(id)
+        .bind(rules[n % rules.len()].to_json())
         .bind(&created)
         .execute(&mut *tx)
         .await?;
@@ -475,6 +518,88 @@ async fn measure(pool: &SqlitePool, today: NaiveDate) -> Vec<(&'static str, Dura
         .await,
     ));
 
+    // 繰り返し (T-12): changing a rule (back and forth), and closing a
+    // repeating TODO with 5 children, which makes the next round and its
+    // children in the same transaction. Only the change_status is timed:
+    // the TODO is made from a template before and both rounds are deleted
+    // after, so the counts stay.
+    let (repeating,): (i64,) =
+        sqlx::query_as("SELECT todo_id FROM todo_repeats ORDER BY todo_id LIMIT 1")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    let flip = Cell::new(false);
+    times.push((
+        "set_todo_repeat",
+        median(runs, || {
+            let rule = if flip.replace(!flip.get()) {
+                RepeatRule::MonthlyLast
+            } else {
+                RepeatRule::Weekly {
+                    weekdays: vec![DayOfWeek::Mon],
+                }
+            };
+            async move {
+                let input = repeats::RepeatInput {
+                    rule,
+                    until_date: None,
+                };
+                repeats::set(pool, repeating, Some(input), today, Utc::now())
+                    .await
+                    .unwrap();
+            }
+        })
+        .await,
+    ));
+    let mut closes = Vec::with_capacity(runs + 1);
+    for _ in 0..=runs {
+        let made = todos::create(
+            pool,
+            todos::NewTodoInput {
+                project_id: 3,
+                parent_id: None,
+                template_id: Some(template_id),
+                title: "定例の作業".into(),
+                priority: None,
+                due_date: Some(shift(today, 14)),
+                planned_start: Some(shift(today, 10)),
+                planned_end: Some(shift(today, 13)),
+                memo_md: None,
+            },
+            today,
+            Utc::now(),
+        )
+        .await
+        .unwrap();
+        let id = made.todo.id;
+        let weekly = repeats::RepeatInput {
+            rule: RepeatRule::Weekly {
+                weekdays: vec![DayOfWeek::Mon],
+            },
+            until_date: None,
+        };
+        repeats::set(pool, id, Some(weekly), today, Utc::now())
+            .await
+            .unwrap();
+        let t = Instant::now();
+        todos::change_status_impl(pool, id, &StatusChange::to(Status::Done), today, Utc::now())
+            .await
+            .unwrap();
+        closes.push(t.elapsed());
+        let (next,): (i64,) = sqlx::query_as(
+            "SELECT id FROM todos WHERE id > ?1 AND parent_id IS NULL ORDER BY id LIMIT 1",
+        )
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        todos::delete(pool, next).await.unwrap();
+        todos::delete(pool, id).await.unwrap();
+    }
+    closes.remove(0);
+    closes.sort();
+    times.push(("change_status (repeat round)", closes[runs / 2]));
+
     // What the first screen asks for (App.tsx: settings, projects, the
     // dashboard and its badge, the startup reminder). The screen sends them
     // at once; here they run one after the other.
@@ -637,5 +762,10 @@ async fn perf_5000_todos_20000_logs() {
         .await
         .unwrap();
     assert_eq!(template_count, TEMPLATES as i64);
+    let (repeat_count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM todo_repeats")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(repeat_count, REPEATS as i64);
     pool.close().await;
 }

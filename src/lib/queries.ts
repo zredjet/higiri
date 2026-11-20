@@ -6,6 +6,7 @@ import {
   type GanttQuery,
   type NewTodoInput,
   type ProjectInput,
+  type RepeatInput,
   type ReportKey,
   type Settings,
   type SettingsInput,
@@ -212,6 +213,12 @@ function useTodoChanged() {
   };
 }
 
+/** Reads a TODO as last saved here (the cache), e.g. right after a save. */
+export function useLatestTodo() {
+  const qc = useQueryClient();
+  return (id: number) => qc.getQueryData<TodoItem>(queryKeys.todo(id));
+}
+
 export function useCreateTodo() {
   const changed = useTodoChanged();
   return useMutation({
@@ -260,6 +267,16 @@ export function useSetTodoParent() {
   return useMutation({
     scope: TODO_WRITES,
     mutationFn: ({ id, parentId }: { id: number; parentId: number | null }) => commands.setTodoParent(id, parentId),
+    onSuccess: (item) => changed(item),
+  });
+}
+
+/** Gives a TODO a repetition, changes it, or (`repeat: null`) takes it off (T-12). */
+export function useSetTodoRepeat() {
+  const changed = useTodoChanged();
+  return useMutation({
+    scope: TODO_WRITES,
+    mutationFn: ({ id, repeat }: { id: number; repeat: RepeatInput | null }) => commands.setTodoRepeat(id, repeat),
     onSuccess: (item) => changed(item),
   });
 }

@@ -9,7 +9,8 @@
 //! 作業中 or 待ち, none starting before the day after tomorrow, none due
 //! within the 「間近」 days, none closed on the mock's day. A TODO template
 //! (T-10) 「月次締め」 with three children: templates show on no screen until
-//! one is chosen in 「TODOを追加」.
+//! one is chosen in 「TODOを追加」. A TODO repeating every week (T-12) in
+//! 社内ツール整備, on the day of the week its shifted 日限 falls on.
 //! Status changes are replayed through `domain::status::transition`, so the
 //! actual dates, waiting fields and change history come out exactly as the app
 //! itself would record them.
@@ -20,6 +21,7 @@ use sqlx::SqlitePool;
 use crate::domain::date::{days_between, parse_date};
 use crate::domain::events;
 use crate::domain::model::{Priority, Status};
+use crate::domain::repeat::{DayOfWeek, RepeatRule};
 use crate::domain::status::{StatusChange, StatusFields, transition};
 use crate::domain::template::{TemplateBody, TemplateChild};
 use crate::repo::projects::NewProject;
@@ -56,7 +58,10 @@ struct TodoSpec {
     history: &'static [Step],
 }
 
-const TODOS: [TodoSpec; 15] = [
+/// The TODO that repeats every week (T-12).
+const REPEATING: &str = "社内ツールの更新確認";
+
+const TODOS: [TodoSpec; 16] = [
     TodoSpec {
         project: 0,
         parent: None,
@@ -206,6 +211,16 @@ const TODOS: [TodoSpec; 15] = [
         priority: Priority::Medium,
         due: "2026-12-10",
         planned: ("2026-12-03", "2026-12-09"),
+        history: &[],
+    },
+    // 繰り返し (T-12): every week.
+    TodoSpec {
+        project: 1,
+        parent: None,
+        title: REPEATING,
+        priority: Priority::Low,
+        due: "2026-11-26",
+        planned: ("2026-11-25", "2026-11-26"),
         history: &[],
     },
 ];
@@ -382,6 +397,21 @@ pub async fn seed_if_empty(pool: &SqlitePool, today: NaiveDate) -> Result<bool, 
 
     repo::templates::insert(&mut tx, &template(), shift.at(CREATED_ON, 50)).await?;
 
+    // Every week, on the day its 日限 falls on once shifted.
+    let (_, repeating) = todo_ids
+        .iter()
+        .find(|(t, _)| *t == REPEATING)
+        .expect("the repeating TODO is a sample TODO");
+    let due = TODOS
+        .iter()
+        .find(|t| t.title == REPEATING)
+        .map(|t| shift.date(t.due))
+        .expect("the repeating TODO is a sample TODO");
+    let weekly = RepeatRule::Weekly {
+        weekdays: vec![DayOfWeek::of(due)],
+    };
+    repo::repeats::insert(&mut tx, *repeating, &weekly, None, shift.at(CREATED_ON, 51)).await?;
+
     tx.commit().await?;
     Ok(true)
 }
@@ -426,8 +456,8 @@ mod tests {
             Urgency::ALL.iter().map(|u| (*u, 1)).collect::<Vec<_>>()
         );
 
-        // Per project: attention 3 / 1 / 1, progress 1/5, 2/7 (with the
-        // parent and its children), 0/2.
+        // Per project: attention 3 / 1 / 1, progress 1/5, 2/8 (with the
+        // parent and its children, and the repeating TODO), 0/2.
         let mut c = pool.acquire().await.unwrap();
         let projects = repo::projects::list(&mut c, false).await.unwrap();
         let todos = repo::todos::list(&mut c, &TodoFilter::default())
@@ -437,7 +467,7 @@ mod tests {
             .into_iter()
             .map(|s| (s.attention_count, s.progress_done, s.progress_total))
             .collect();
-        assert_eq!(s, vec![(3, 1, 5), (1, 2, 7), (1, 0, 2)]);
+        assert_eq!(s, vec![(3, 1, 5), (1, 2, 8), (1, 0, 2)]);
 
         // The parent has 3 children; their dates sit inside its due date.
         let parent = todos
@@ -491,6 +521,20 @@ mod tests {
             .map(|c| c.due_offset_days)
             .collect();
         assert_eq!(days, [Some(-3), Some(-2), Some(0)]);
+
+        // One TODO repeats every week, on its due date's day (a Thursday on
+        // the mock's day).
+        let repeats = repo::repeats::list(&mut c).await.unwrap();
+        assert_eq!(repeats.len(), 1);
+        let repeating = todos.iter().find(|t| t.id == repeats[0].todo_id).unwrap();
+        assert_eq!(repeating.title, REPEATING);
+        assert_eq!(repeating.due_date, Some(d("2026-11-26")));
+        assert_eq!(
+            repeats[0].rule,
+            RepeatRule::Weekly {
+                weekdays: vec![DayOfWeek::Thu]
+            }
+        );
     }
 
     #[tokio::test]
@@ -501,6 +545,14 @@ mod tests {
         assert_eq!(
             urgency_counts(&pool, today).await,
             Urgency::ALL.iter().map(|u| (*u, 1)).collect::<Vec<_>>()
+        );
+        // The repetition follows the shifted 日限 (2027-03-08, a Monday).
+        let mut c = pool.acquire().await.unwrap();
+        assert_eq!(
+            repo::repeats::list(&mut c).await.unwrap()[0].rule,
+            RepeatRule::Weekly {
+                weekdays: vec![DayOfWeek::Mon]
+            }
         );
     }
 

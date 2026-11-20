@@ -31,6 +31,7 @@
     "allow-change-status",
     "allow-delete-todo",
     "allow-set-todo-parent",
+    "allow-set-todo-repeat",
     "allow-list-todo-templates",
     "allow-save-todo-template",
     "allow-rename-todo-template",

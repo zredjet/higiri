@@ -1,5 +1,6 @@
 //! TODO: list_todos, get_todo, create_todo, update_todo, change_status,
-//! delete_todo, set_todo_parent (v0.3.0, S-1).
+//! delete_todo, set_todo_parent (v0.3.0, S-1). The repetition (T-12) is set
+//! in `commands::repeats`; closing a repeating TODO makes its next round here.
 
 use std::collections::HashMap;
 
@@ -10,10 +11,12 @@ use tauri::State;
 
 use super::clock;
 use super::error::{AppError, CmdResult};
+use super::repeats;
 use super::validate;
 use crate::domain::events;
 use crate::domain::listing::{DueFilter, TodoSort, due_matches, sort_todos, tree_rows};
 use crate::domain::model::{Priority, Status, Todo};
+use crate::domain::repeat;
 use crate::domain::status::{StatusChange, StatusFields, transition};
 use crate::domain::subtodo::{Family, check_new_child, check_parent};
 use crate::domain::urgency::Rules;
@@ -112,7 +115,8 @@ pub async fn update_todo(
 }
 
 /// Changes the status, fills the automatic dates and records the change, in
-/// one transaction.
+/// one transaction. Closing a parent closes its open children (S-1); closing
+/// a repeating TODO makes its next round and hands it the repetition (T-12).
 #[tauri::command]
 #[specta::specta]
 pub async fn change_status(
@@ -149,9 +153,13 @@ async fn rules(conn: &mut SqliteConnection) -> CmdResult<Rules> {
     Ok(Rules::from_settings(&repo::settings::load(conn).await?))
 }
 
-/// One TODO with its parent's title and its children counts, read from the
-/// database (its family is not at hand).
-async fn item(conn: &mut SqliteConnection, todo: Todo, today: NaiveDate) -> CmdResult<TodoItem> {
+/// One TODO with its parent's title, its children counts and its repetition,
+/// read from the database (its family is not at hand).
+pub(super) async fn item(
+    conn: &mut SqliteConnection,
+    todo: Todo,
+    today: NaiveDate,
+) -> CmdResult<TodoItem> {
     let project = repo::projects::get(conn, todo.project_id).await?;
     let rules = rules(conn).await?;
     let parent = match todo.parent_id {
@@ -160,7 +168,15 @@ async fn item(conn: &mut SqliteConnection, todo: Todo, today: NaiveDate) -> CmdR
     };
     let children = repo::todos::list_children(conn, &[todo.id]).await?;
     let family = Family::new(parent.iter().chain(&children).chain([&todo]));
-    Ok(todo_item(todo, project.name, &family, today, &rules))
+    let repeat = repo::repeats::get(conn, todo.id).await?;
+    Ok(todo_item(
+        todo,
+        project.name,
+        &family,
+        repeat.as_ref(),
+        today,
+        &rules,
+    ))
 }
 
 pub async fn list(pool: &SqlitePool, query: &TodoQuery, today: NaiveDate) -> CmdResult<TodoList> {
@@ -184,6 +200,7 @@ pub async fn list(pool: &SqlitePool, query: &TodoQuery, today: NaiveDate) -> Cmd
     // Every TODO of the list's projects: the counts of children hidden by
     // the filters are still counted.
     let family = Family::new(&todos);
+    let repeats = repeat::by_todo(repo::repeats::list(&mut conn).await?);
 
     // Each TODO is judged by itself (S-1). Tab counts: every filter except
     // the status one.
@@ -209,8 +226,9 @@ pub async fn list(pool: &SqlitePool, query: &TodoQuery, today: NaiveDate) -> Cmd
         .filter_map(|r| {
             let t = slots[r.index].take()?;
             let name = names.get(&t.project_id).cloned().unwrap_or_default();
+            let repeat = repeats.get(&t.id);
             Some(TodoListRow {
-                item: todo_item(t, name, &family, today, &rules),
+                item: todo_item(t, name, &family, repeat, today, &rules),
                 child: r.child,
                 bridge: r.bridge,
             })
@@ -316,6 +334,15 @@ pub async fn update(
 
     let mut tx = pool.begin().await?;
     let before = repo::todos::get(&mut tx, id).await?;
+    // The next round is counted from the 日限 (T-12).
+    if before.due_date.is_some()
+        && fields.due_date.is_none()
+        && repo::repeats::get(&mut tx, id).await?.is_some()
+    {
+        return Err(AppError::validation(
+            "繰り返しのあるTODOは、日限を空にできません。繰り返しを外してから日限を消してください。",
+        ));
+    }
     let mut after = Todo {
         title,
         priority: fields.priority,
@@ -367,7 +394,11 @@ pub async fn change_status_impl(
     let saved = repo::todos::write_status(&mut tx, id, &t.fields, now).await?;
     repo::events::insert(&mut tx, id, &t.event).await?;
     if saved.status.is_closed() {
-        close_children(&mut tx, id, change, today, now).await?;
+        // As they were before closing: the next round copies the children
+        // closed with the parent, not those already 中止 (T-12).
+        let children = repo::todos::list_children(&mut tx, &[id]).await?;
+        close_children(&mut tx, &children, change, today, now).await?;
+        repeats::next_round(&mut tx, &saved, &children, today, now).await?;
     }
     let out = item(&mut tx, saved, today).await?;
     tx.commit().await?;
@@ -379,7 +410,7 @@ pub async fn change_status_impl(
 /// carries the parent's reason. Closed children stay as they are.
 async fn close_children(
     conn: &mut SqliteConnection,
-    parent_id: i64,
+    children: &[Todo],
     change: &StatusChange,
     today: NaiveDate,
     now: DateTime<Utc>,
@@ -390,11 +421,11 @@ async fn close_children(
         follow_up_date: None,
         reason: change.reason.clone(),
     };
-    for child in repo::todos::list_children(conn, &[parent_id]).await? {
+    for child in children {
         if child.status.is_closed() {
             continue;
         }
-        let t = transition(&StatusFields::of(&child), &same, today, now).map_err(|e| {
+        let t = transition(&StatusFields::of(child), &same, today, now).map_err(|e| {
             AppError::validation(format!(
                 "子TODO「{}」を{}にできません。{e}",
                 child.title,
@@ -426,6 +457,12 @@ pub async fn set_parent(
         let has_children = !repo::todos::list_children(&mut tx, &[id]).await?.is_empty();
         check_parent(&todo, has_children, &parent)
             .map_err(|e| AppError::validation(e.to_string()))?;
+        // Only a parentless TODO repeats (T-12).
+        if repo::repeats::get(&mut tx, id).await?.is_some() {
+            return Err(AppError::validation(
+                "繰り返しのあるTODOは、ほかのTODOの子にできません。先に繰り返しを外してください。",
+            ));
+        }
     }
     let saved = repo::todos::set_parent(&mut tx, id, parent_id, now).await?;
     let out = item(&mut tx, saved, today).await?;

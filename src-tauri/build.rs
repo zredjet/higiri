@@ -15,6 +15,7 @@ const APP_COMMANDS: &[&str] = &[
     "change_status",
     "delete_todo",
     "set_todo_parent",
+    "set_todo_repeat",
     "list_todo_templates",
     "save_todo_template",
     "rename_todo_template",

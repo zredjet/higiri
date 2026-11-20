@@ -109,6 +109,28 @@ pub async fn update(
     .into_repeat()
 }
 
+/// Moves a repetition to the next round (T-12): the rule and the end stay,
+/// `created_at` too.
+pub async fn move_to(
+    conn: &mut SqliteConnection,
+    from_todo: i64,
+    to_todo: i64,
+    now: DateTime<Utc>,
+) -> Result<TodoRepeat> {
+    sqlx::query_as::<_, RepeatRow>(
+        "UPDATE todo_repeats SET todo_id = ?2, updated_at = ?3
+         WHERE todo_id = ?1
+         RETURNING *",
+    )
+    .bind(from_todo)
+    .bind(to_todo)
+    .bind(ts_param(now))
+    .fetch_optional(&mut *conn)
+    .await?
+    .ok_or_else(|| not_found(from_todo))?
+    .into_repeat()
+}
+
 /// Removes a TODO's repetition.
 pub async fn delete(conn: &mut SqliteConnection, todo_id: i64) -> Result<()> {
     let done = sqlx::query("DELETE FROM todo_repeats WHERE todo_id = ?1")
@@ -206,6 +228,40 @@ mod tests {
                 ts(2026, 11, 20, 0, 0)
             )
             .await,
+            Err(RepoError::NotFound { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn move_to_hands_the_repeat_to_the_next_round() {
+        let (_pool, mut c) = conn().await;
+        let p = project(&mut c, "P").await;
+        let a = todo(&mut c, p.id, "a").await;
+        let b = todo(&mut c, p.id, "b").await;
+        let made = insert(
+            &mut c,
+            a.id,
+            &weekly(),
+            Some(d("2027-03-31")),
+            ts(2026, 11, 19, 1, 0),
+        )
+        .await
+        .unwrap();
+        let moved = move_to(&mut c, a.id, b.id, ts(2026, 11, 20, 0, 0))
+            .await
+            .unwrap();
+        assert_eq!(
+            moved,
+            TodoRepeat {
+                todo_id: b.id,
+                updated_at: ts(2026, 11, 20, 0, 0),
+                ..made
+            }
+        );
+        assert_eq!(get(&mut c, a.id).await.unwrap(), None);
+        assert_eq!(list(&mut c).await.unwrap(), vec![moved]);
+        assert!(matches!(
+            move_to(&mut c, a.id, b.id, ts(2026, 11, 20, 0, 0)).await,
             Err(RepoError::NotFound { .. })
         ));
     }

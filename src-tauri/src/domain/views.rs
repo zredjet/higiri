@@ -6,6 +6,7 @@ use chrono::NaiveDate;
 use serde::Serialize;
 
 use super::model::{Project, Status, Todo};
+use super::repeat::{RepeatInfo, TodoRepeat};
 use super::status::check_allowed;
 use super::subtodo::{ChildCounts, Family};
 use super::urgency::{Assessment, Rules, assess, classify};
@@ -104,14 +105,19 @@ pub struct TodoItem {
     pub children: Option<ChildCounts>,
     /// An open child due after its parent (「親の日限より後」).
     pub due_after_parent: bool,
+    /// Its repetition (T-12), with the next round's 日限 if it were closed
+    /// today. `null` = it does not repeat.
+    pub repeat: Option<RepeatInfo>,
 }
 
 /// `family` gives the parent's title and the children counts: build it from
-/// the TODOs around this one (see [`Family`]).
+/// the TODOs around this one (see [`Family`]). `repeat` is this TODO's
+/// repetition, if it has one.
 pub fn todo_item(
     todo: Todo,
     project_name: String,
     family: &Family,
+    repeat: Option<&TodoRepeat>,
     today: NaiveDate,
     rules: &Rules,
 ) -> TodoItem {
@@ -124,6 +130,7 @@ pub fn todo_item(
         parent_title: family.parent_title(&todo).map(str::to_owned),
         children: family.children(&todo),
         due_after_parent: family.due_after_parent(&todo),
+        repeat: repeat.map(|r| r.info(todo.due_date, today, rules)),
         todo,
         project_name,
         assessment,
@@ -157,6 +164,7 @@ pub struct TodoList {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::repeat::{DayOfWeek, RepeatRule};
     use crate::domain::testing::{business_rules, d, rules, todo, ts};
 
     fn project(id: i64, name: &str) -> Project {
@@ -232,6 +240,7 @@ mod tests {
             t(1, Status::Todo, Some("2026-11-17")),
             "社内ツール整備".into(),
             &Family::default(),
+            None,
             d("2026-11-19"),
             &rules(3),
         );
@@ -241,6 +250,7 @@ mod tests {
             (item.parent_title, item.children, item.due_after_parent),
             (None, None, false)
         );
+        assert_eq!(item.repeat, None);
         assert_eq!(
             item.next_statuses,
             vec![
@@ -255,6 +265,7 @@ mod tests {
             t(1, Status::Done, None),
             "x".into(),
             &Family::default(),
+            None,
             d("2026-11-19"),
             &rules(3),
         );
@@ -263,6 +274,7 @@ mod tests {
             t(1, Status::Cancelled, None),
             "x".into(),
             &Family::default(),
+            None,
             d("2026-11-19"),
             &rules(3),
         );
@@ -289,7 +301,7 @@ mod tests {
             ..t(1, Status::Done, None)
         };
         let family = Family::new([&parent, &child, &done]);
-        let p = todo_item(parent.clone(), "P".into(), &family, today, &rules(3));
+        let p = todo_item(parent.clone(), "P".into(), &family, None, today, &rules(3));
         assert_eq!(p.parent_title, None);
         assert_eq!(
             p.children,
@@ -300,10 +312,44 @@ mod tests {
             })
         );
         assert!(!p.due_after_parent);
-        let c = todo_item(child, "P".into(), &family, today, &rules(3));
+        let c = todo_item(child, "P".into(), &family, None, today, &rules(3));
         assert_eq!(c.parent_title.as_deref(), Some("親"));
         assert_eq!(c.children, None);
         assert!(c.due_after_parent);
+    }
+
+    #[test]
+    fn todo_item_carries_the_repetition_and_its_next_round() {
+        let today = d("2026-11-19");
+        let repeat = TodoRepeat {
+            todo_id: 1,
+            rule: RepeatRule::Weekly {
+                weekdays: vec![DayOfWeek::Mon],
+            },
+            until_date: Some(d("2026-12-31")),
+            created_at: ts(2026, 11, 1, 0, 0),
+            updated_at: ts(2026, 11, 1, 0, 0),
+        };
+        let item = |due: &str| {
+            todo_item(
+                t(1, Status::Todo, Some(due)),
+                "x".into(),
+                &Family::default(),
+                Some(&repeat),
+                today,
+                &rules(3),
+            )
+            .repeat
+            .unwrap()
+        };
+        let info = item("2026-11-23");
+        assert_eq!(info.rule, repeat.rule);
+        assert_eq!(info.until_date, Some(d("2026-12-31")));
+        assert_eq!(info.next_due, Some(d("2026-11-30")));
+        // Overdue: counted from today.
+        assert_eq!(item("2026-11-02").next_due, Some(d("2026-11-23")));
+        // The last round.
+        assert_eq!(item("2026-12-28").next_due, None);
     }
 
     #[test]
@@ -314,6 +360,7 @@ mod tests {
                 t(1, Status::Doing, None),
                 "x".into(),
                 &Family::default(),
+                None,
                 today,
                 r,
             )

@@ -1,5 +1,6 @@
 import type { Assessment, DaySpan, GanttRow } from "../../lib/bindings";
 import { monthDay } from "../../lib/date";
+import { REPEAT_LABEL, repeatRuleText } from "../todos/repeatText";
 import { displayTitle, DUE_AFTER_PARENT_TEXT, overdueText, SHIFTED_TEXT, STATUS_LABEL } from "../todos/todoText";
 
 /**
@@ -8,6 +9,7 @@ import { displayTitle, DUE_AFTER_PARENT_TEXT, overdueText, SHIFTED_TEXT, STATUS_
  * In business days the counts read 「2営業日超過」, and a due date moved off a
  * holiday adds 「休日のため前倒し」. A child is named 「親 / 子」 and may add
  * 「親の日限より後」 (S-1); a bridge row (a hidden parent) has no bars to read.
+ * A repeating TODO ends with 「繰り返し 毎週 月」 (T-12).
  */
 export function rowLabel(row: GanttRow): string {
   const { todo, assessment } = row.item;
@@ -30,7 +32,8 @@ export function rowLabel(row: GanttRow): string {
     if (row.item.due_after_parent) notes.push(DUE_AFTER_PARENT_TEXT);
     due = `日限 ${monthDay(todo.due_date)}${notes.length > 0 ? `(${notes.join("、")})` : ""}`;
   }
-  return `${name}:${planned}、${actual}、${due}`;
+  const repeat = row.item.repeat ? `、${REPEAT_LABEL} ${repeatRuleText(row.item.repeat.rule)}` : "";
+  return `${name}:${planned}、${actual}、${due}${repeat}`;
 }
 
 /** The dates shown while dragging a planned bar: 「11/20〜11/27」. */

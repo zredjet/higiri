@@ -294,7 +294,7 @@ v0.3.0 は `docs/implementation-plan-v0.3.0.md` のフェーズ17〜24で作る�
   - 作ったもの(フェーズ18)
     - `src-tauri/migrations/0002_v0_3_0.sql`: 設計書の DDL のとおり。新しい DB にも v0.2.0 の DB(`0001` だけの DB)にも当たり、今の行は変わらない(`repo/db.rs` のテスト)。
     - `domain/template.rs`: `TemplateBody { title, priority, memo_md, children }` と `TemplateChild { title, priority, memo_md, due_offset_days, depends_on }`。JSON は設計書の形で、読むときに `depends_on` がなければ `[]`、`due_offset_days` は `null` を `None` にする。`checked` はタイトル(親と子)の前後の空白を除いて空なら断り、`depends_on` が範囲の外・自分・同じ位置の2回・循環(子どうしの依存をたどって戻る)なら断る(`TemplateBodyError`)。`from_json` は読んでから `checked` を通し、通らなければ `None`。保存したテンプレートは `TodoTemplate`。
-    - `domain/repeat.rs`: `RepeatRule`(`kind` で分ける serde の enum。`daily`、`weekly { weekdays }`、`monthly_day { day }`、`monthly_weekday { week, weekday }`、`monthly_last`、`yearly { month, day }`、`every_days { days }`)と曜日の `DayOfWeek`(`mon`〜`sun`)。どちらも specta の型を付けてある(フェーズ21でコマンドに出すため。今はバインディングに出ない)。`check` は範囲の検査(`RepeatRuleError`。`weekdays` は1〜7個で重複なし、`day` は1〜31、`week` は1〜4か-1、`yearly` は暦にある月日で2/29は可、`days` は2〜365)。`from_json` は読んでから `check` を通す。周期の行は `TodoRepeat`。
+    - `domain/repeat.rs`: `RepeatRule`(`kind` で分ける serde の enum。`daily`、`weekly { weekdays }`、`monthly_day { day }`、`monthly_weekday { week, weekday }`、`monthly_last`、`yearly { month, day }`、`every_days { days }`)と曜日の `DayOfWeek`(`mon`〜`sun`)。どちらも specta の型を付けてある(フェーズ21で `set_todo_repeat` と `TodoItem.repeat` からバインディングに出た)。`check` は範囲の検査(`RepeatRuleError`。`weekdays` は1〜7個で重複なし、`day` は1〜31、`week` は1〜4か-1、`yearly` は暦にある月日で2/29は可、`days` は2〜365)。`from_json` は読んでから `check` を通す。周期の行は `TodoRepeat`。
     - `domain/model.rs`: 依存の行 `Dependency { todo_id, depends_on_id, created_at }`。
     - `repo/templates.rs`(一覧は名前の順、1件、追加、名前と本文の更新、削除。書く値は `TemplateFields`)、`repo/repeats.rs`(一覧は `todo_id` の順、1件は `Option`、追加、周期と終わりの日の更新、削除)、`repo/dependencies.rs`(一覧は `todo_id, depends_on_id` の順、1件は `Option`、追加、削除)。読めない `body` と `rule`(検査に通らないものも)は `RepoError::Corrupt`(列は `todo_templates.body`、`todo_repeats.rule`)。名前の重複、依存の組の重複、自分自身への依存は表の制約が断る(呼ぶ側が `is_constraint_violation` で見る)。テストの `repo::testing::todo` で TODO を1件作れる。
     - `json_data.rs`: `Table.since`(その表を足したマイグレーションの番号。5つの表は1、v0.3.0 の3つは2)。ファイルの `schema_version` より新しい表のキーはなくてよく、ある場合は空の配列だけを受け付ける(行があれば、その版の作業用の DB にない表なので `Malformed`)。`body` と `rule` は `note` と同じく JSON の値として埋め込み、取り込みでは JSON の文のまま入れる。
@@ -302,7 +302,7 @@ v0.3.0 は `docs/implementation-plan-v0.3.0.md` のフェーズ17〜24で作る�
   - コマンドは `set_todo_parent(id, parent_id)` を足して33個。子を作るのは `create_todo` の入力の `parent_id`。
   - 作ったもの(フェーズ19)
     - `domain/subtodo.rs`: 親子の検査(`check_parent`、作成のときの `check_new_child`。`ParentError` の文をそのまま画面に出す)、`Family`(TODO の集まりから、親のタイトルと日限、子の数を作る。同じ TODO を2回渡しても1回と数える)、`ChildCounts { total, done, open }`(`total` と `done` は中止を除く。`open` は開いている子)、`display_title`(「親 / 子」)。
-    - 検査の順: 自分自身 → 別のプロジェクト → 親にしようとした TODO が子(孫になる) → 子のある TODO を子にする。`create_todo` は別のプロジェクトと孫だけを見る(アーカイブしたプロジェクトへの追加は今までどおり断る)。閉じた TODO も親・子にできる。付け替えは `updated_at` を変え、変更履歴には残さない(`repo::todos::set_parent`)。繰り返しと依存の検査はフェーズ21・22で足す。
+    - 検査の順: 自分自身 → 別のプロジェクト → 親にしようとした TODO が子(孫になる) → 子のある TODO を子にする。`create_todo` は別のプロジェクトと孫だけを見る(アーカイブしたプロジェクトへの追加は今までどおり断る)。閉じた TODO も親・子にできる。付け替えは `updated_at` を変え、変更履歴には残さない(`repo::todos::set_parent`)。繰り返しの検査はフェーズ21で足した(下の「繰り返しTODO」)。依存の検査はフェーズ22で足す。
     - `TodoItem` の `parent_title`、`children`、`due_after_parent` は `Family` から付ける(`views::todo_item(todo, project_name, &family, today, rules)`)。一覧・ダッシュボード・ガント・日報は読み込んだ全 TODO で `Family` を作る。1件(`get_todo` と、作成・更新・ステータス変更・付け替えの戻り値)は親と子を引いて作る(`commands/todos.rs` の `item`。子は `repo::todos::list_children`)。検索は当たった TODO の親と子を足して作る。`due_after_parent` は、開いている子の日限が親の日限より後(休日に寄せる前の日付で比べる。同じ日は警告しない)。
     - 一覧: `TodoList.rows`(`TodoListRow { item, child, bridge }`。v0.2.0 までの `items` から変えた)。並べ替えたあと `listing::tree_rows` で木の順にする(親どうし、同じ親の子どうしは選んだ並べ替えの順)。絞り込み(優先度・日限・状態のタブ)は1件ずつ判定し、当たった子の親が当たっていなければ、親をつなぎの行(`bridge`)にする。タブの件数は当たった TODO だけを数える。`Family` は絞り込む前の全 TODO で作るので、つなぎの行の「子 2/3」も全部の子で数える。
     - アプリが作らない形の親子(取り込んだファイルなど。親が一覧にない子、親に親がある子、自分を親にしている TODO)は、親の行として出す(`tree_rows`)。
@@ -338,6 +338,32 @@ v0.3.0 は `docs/implementation-plan-v0.3.0.md` のフェーズ17〜24で作る�
       - フックは `queries.ts` の `useTodoTemplates`(キーは `["templates"]`)、`useSaveTodoTemplate`、`useRenameTodoTemplate`、`useDeleteTodoTemplate`(どれもテンプレートの一覧を取り直す)。テンプレートから作るのは `useCreateTodo` のまま(プロジェクトと TODO の一覧を取り直す)。復元と取り込みはすべてを取り直すので、テンプレートも取り直す。
     - サンプル(`sample.rs`): テンプレート「月次締め」(子3件。日数は −3、−2、0)。TODO は足さないので、日報のフィクスチャとダッシュボードは変わらない。
     - perf(`perf.rs`): テンプレート30個(子5件ずつ。`TEMPLATES`、`TEMPLATE_CHILDREN`)。`list_todo_templates`、`save_todo_template`(同じ名前の置き換え)、テンプレートから作って消す(`create_todo` + `delete_todo`)時間を測る。
+- 繰り返しTODO(フェーズ21)
+  - コマンドは `set_todo_repeat(id, repeat)` を足して38個。`repeat` は `RepeatInput { rule, until_date }` か `null`(外す)。次の回は `change_status` が作る。
+  - 作ったもの(フェーズ21)
+    - `domain/repeat.rs`
+      - `next_due(rule, prev_due, today, &rules)`: (1) 前の回の日限より後で周期に合う最初の日。(2) それが今日より前なら、今日以降で周期に合う最初の日(探し始めを `max(前の回の日限の翌日, 今日)` にする)。(3) 営業日の設定では、寄せた日限(`effective_due`)が前の回の日限以前になる日と、今日より前になる日を飛ばす(暦日の設定では何も変わらない)。`every_days` は前の回の日限から数える。毎月の日付は、その月にない日を月末に、毎年の 2/29 は、うるう年でない年は 2/28 にする。第N◯曜日は chrono の `from_weekday_of_month_opt`、最終週は月末から戻る。飛ばすのは400回まで(休日がどれだけ続いても足りる数)。
+      - (3) の「今日より前になる日」は、休日に遅れて閉じたときに、作った直後から超過になる回を作らないため(例: 毎日、前の回の日限が木曜、土曜に完了 → 月曜。設計書の文では土曜になる)。オーケストレーターに確認中に推奨の案で入れた。
+      - `TodoRepeat::next_round_due(due, today, &rules)`: 次の回の日限。終わりの日(`until_date`)より後なら `None`(同じ日は作る)。日限がない(取り込んだデータだけ)ときも `None`。`TodoRepeat::info` が `TodoItem.repeat`(`RepeatInfo { rule, until_date, next_due }`)を作る。`next_due` は今日閉じたときの次の回の日限。
+      - `check_target(todo, until_date)`: 子 → 閉じている → 日限なし → 終わりの日が今の日限より前、の順に断る(`RepeatTargetError` の文をそのまま画面に出す)。`RepeatRuleError` にも画面に出す文を付けた。
+      - `RoundDates`(日限と予定期間。`of(todo)`、`shifted(days)`。片方だけの予定期間は、ある方だけずらす)、`shift`、`copied_children(子)`(中止を除く)、`DayOfWeek::of(date)`、`RepeatsByTodo` と `by_todo`。
+    - `repo/repeats.rs`: `move_to(from_todo, to_todo, now)`(`todo_id` を書き換える。`created_at` は残る)。`repo/todos.rs`: `touch`(`updated_at` だけを書く)。
+    - `commands/repeats.rs`: `set_todo_repeat`(中は `set`)と、`change_status` から呼ぶ `next_round`。付ける・変えるは `check_target` → `RepeatRule::check` の順に見る。外すときは検査しない(閉じたTODOに残った周期も外せる)。付ける・変える・外すは TODO の `updated_at` を変え(付け替えと同じ)、変更履歴には残さない。周期がなくて `null` なら何もしない。
+    - `change_status_impl`: 閉じた結果になったら、閉じる前の子を読んでから `close_children`(子の一覧を受け取る形にした)、続けて `next_round`(同じトランザクション)。`next_round` は、周期がなければ何もしない。次の回の日限が決まらなければ(終わりの日を過ぎる・日限なし)周期を消す。決まれば、前の回をずらした日付で写し(`parent_id` とプロジェクトは前の回のまま)、`copied_children` の子を同じ日数ずらして写し、周期を次の回へ移す。写すのはタイトル・優先度・メモと日付だけで、未着手から始める(作業ログ・実績・待ち・中止の項目は写さない)。子の遷移が断られて全体を断ったときは、次の回も作らない。閉じたTODOがアーカイブしたプロジェクトにあっても作る。
+    - 変更履歴: 次の回と子の「作成」は `events::repeated(from, …)`(`note` は `{"repeated_from":前の回のid}`、子は前の回の子の id)。`EventNote.repeated_from`(数値)。タイムラインは「繰り返しで作成」。JSON の取り込みでは `repeated_from` が数値でないと `Unreadable`。
+    - `update_todo`: 日限があって周期のあるTODOの日限を空にする入力を「繰り返しのあるTODOは、日限を空にできません。繰り返しを外してから日限を消してください。」で断る(日限を動かすのはよい。終わりの日より後にしても断らず、閉じたときに周期が消える)。`set_todo_parent`: 周期のあるTODOを子にするのを「繰り返しのあるTODOは、ほかのTODOの子にできません。先に繰り返しを外してください。」で断る(`check_parent` の後)。
+    - `TodoItem.repeat`: 1件は `repo::repeats::get`、一覧・ダッシュボード・ガント・検索は `repo::repeats::list` をまとめて読み、`todo_item(todo, project_name, &family, repeat, today, rules)` に渡す(`gantt::build` と `dashboard::build` は `&RepeatsByTodo` を受け取る)。
+    - 画面
+      - `src/features/todos/repeatText.ts`: 周期の文(`repeatRuleText`。「毎週 月・木」「毎月 第2火曜」「毎月 最終金曜」「毎月 15日」「毎月 月末」「毎年 3/31」「10日ごと」)、「次の回の日限 12/9」(`nextDueText`。ないときは「次の回はありません(終わりの日を過ぎます)」)、「2027/03/31 まで」、印の文(「繰り返し:毎週 月」)、ダイアログの初めの値(`ruleFromDue`。毎週は日限の曜日、毎月(日付)は日限の日、第N◯曜日は日限の週(29日以降は最終)と曜日、毎年は日限の月日、N日ごとは14日)。日付の計算はしない(初めの値の曜日を読むだけ)。Vitest あり。
+      - 詳細パネルの「繰り返し」(`detail/RepeatField.tsx`): 親のないTODOだけ。周期の文と印、「次の回の日限 …」と終わりの日、「繰り返しを付ける」「繰り返しを変える」のボタン。押すと詳細パネルの保存待ちの入力を保存してから周期のダイアログを開く。周期がないときの説明は「付けると、完了か中止にしたときに次の回のTODOを作ります。」、日限が入っていなければ押せず「日限を入れると、繰り返しを付けられます。」。閉じたTODOは、周期がなければ欄を出さない。
+      - 周期のダイアログ(`detail/RepeatDialog.tsx`): 題は「繰り返しを付ける」「繰り返しを変える」。周期の種類(毎日、毎週、毎月(日付)、毎月(第N◯曜日)、毎月(月末)、毎年、N日ごと)、曜日のチェック、日付・週・曜日・月の選択、日数の欄(整数でなければ 0 を送り、Rust の文を出す)、「終わりの日(任意)」。種類を切り替えても、種類ごとの入力は残る。ボタンは「キャンセル」と「繰り返しを付ける」/「変更する」、変えるときは左に「繰り返しを外す」。エラーはダイアログの上に出す。
+      - 閉じたあとの知らせ: 詳細パネルで完了・中止にして次の回ができたら、パネルの上に「次の回(日限 12/7)を作りました。」(×で閉じる。別のTODOに切り替えると出さない)。日付は保存のあとのキャッシュの `repeat.next_due`(`queries.ts` の `useLatestTodo`)。コマンドの戻り値は変えていない。オーケストレーターに確認中に推奨の案で入れた。
+      - 一覧のタイトルの右とガントの名前の欄の右に、繰り返しの印(`repeat-mark`。`repeat` のアイコン、読み上げ名「繰り返し」、マウスを載せると「繰り返し:毎週 月」)。ガントの行の読み上げ名の最後に「、繰り返し 毎週 月」。
+      - `repeat` のアイコンは `src/components/aizome/Icon.tsx` に足した(Aizome にない。24pxの枠、線幅1.75、丸い線端)。
+      - 削除の確認の文は `deleteTodoText(title, children, repeats)` で「繰り返しも止まります。」を添える。
+      - フックは `queries.ts` の `useSetTodoRepeat`(`TODO_WRITES` の列に並べる)。
+    - サンプル(`sample.rs`): 社内ツール整備に「社内ツールの更新確認」(優先度 低、未着手、日限はモックの 11/26、予定 11/25〜11/26)。周期は毎週、ずらしたあとの日限の曜日(モックの日なら木曜)。日報のフィクスチャとダッシュボードの日限注意は変わらない。社内ツール整備の進捗は 2/8、ガントの行は8行になる。
+    - perf(`perf.rs`): 開いている親のないTODO 300件に、7種類の周期を順に付ける(`REPEATS`)。`set_todo_repeat`(周期を行き来)と、子5件のTODOを閉じて次の回を作る `change_status`(前後で作って消すので件数は変わらない。測るのは `change_status` だけ)を測る。
 
 ## 品質の決めごと
 
@@ -370,7 +396,7 @@ v0.3.0 は `docs/implementation-plan-v0.3.0.md` のフェーズ17〜24で作る�
 | Rust の書式の確認(直すときは `cargo fmt --manifest-path src-tauri/Cargo.toml`) | `npm run fmt:rust` |
 | Rust の lint(警告はエラー扱い) | `npm run lint:rust` |
 | まとめて確認(型チェック、Rust の書式、Vitest、cargo test、clippy) | `npm run check` |
-| 性能の確認(TODO 5,000件・作業ログ 20,000件でコマンドの時間を測る。最適化ビルド。検索、営業日の設定、TODO の保存(`get_todo` と `update_todo`)、起動の Rust 側、JSON の書き出しと取り込みも測る) | `npm run test:perf` |
+| 性能の確認(TODO 5,000件・作業ログ 20,000件でコマンドの時間を測る。最適化ビルド。検索、営業日の設定、TODO の保存(`get_todo` と `update_todo`)、テンプレート、繰り返し、起動の Rust 側、JSON の書き出しと取り込みも測る) | `npm run test:perf` |
 | アプリアイコンを原画から作り直す | `npm run icons` |
 | 配布物のビルド(実行ファイルの ZIP を `release/` に作る) | `npm run build` |
 

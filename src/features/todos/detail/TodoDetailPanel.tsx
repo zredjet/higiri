@@ -104,7 +104,7 @@ export function TodoDetailPanel({
   );
 }
 
-/** The delete confirmation: the children go with their parent (S-1). */
+/** The delete confirmation: the children go with their parent (S-1), the repetition stops (T-12). */
 function DeleteTodo({
   item,
   ...props
@@ -118,5 +118,5 @@ function DeleteTodo({
   const family = useFamily(item);
   // All children, 中止 included (the counts leave 中止 out).
   const children = family.loaded ? family.children.length : (item.children?.total ?? 0);
-  return <ConfirmDelete title="TODOを削除しますか" description={deleteTodoText(item.todo.title, children)} {...props} />;
+  return <ConfirmDelete title="TODOを削除しますか" description={deleteTodoText(item.todo.title, children, item.repeat !== null)} {...props} />;
 }
