@@ -1,6 +1,8 @@
-//! Filtering and sorting of the TODO list (T-4). Pure.
+//! Filtering and sorting of the TODO list (T-4), and its tree order (S-1).
+//! Pure.
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
@@ -84,6 +86,73 @@ pub fn sort_todos<T>(items: &mut [T], sort: TodoSort, todo: impl Fn(&T) -> &Todo
                 .then_with(|| a.id.cmp(&b.id))
         }),
     }
+}
+
+/// A row of the tree order: which item it shows, and how.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TreeRow {
+    /// Index into the items given to [`tree_rows`].
+    pub index: usize,
+    /// Shown under its parent.
+    pub child: bool,
+    /// A parent that does not match, shown only to hold its matching children.
+    pub bridge: bool,
+}
+
+/// Puts sorted items in tree order (S-1): each parent, then its children,
+/// both in the given order. `hit` says whether an item matches the filters
+/// (each one is judged by itself); items that do not match are left out,
+/// except a parent with matching children, which comes as a bridge row.
+///
+/// A child is listed under its parent only when the parent is among the
+/// items and has no parent itself; otherwise (data the app would not make,
+/// such as an imported file) it is listed as a parent.
+pub fn tree_rows<T>(
+    items: &[T],
+    todo: impl Fn(&T) -> &Todo,
+    hit: impl Fn(&T) -> bool,
+) -> Vec<TreeRow> {
+    let index: HashMap<i64, usize> = items
+        .iter()
+        .enumerate()
+        .map(|(i, t)| (todo(t).id, i))
+        .collect();
+    let parent_of = |t: &Todo| -> Option<usize> {
+        let p = *index.get(&t.parent_id?)?;
+        let parent = todo(&items[p]);
+        (parent.id != t.id && parent.parent_id.is_none()).then_some(p)
+    };
+    let mut children: Vec<Vec<usize>> = vec![Vec::new(); items.len()];
+    let mut roots = Vec::new();
+    for (i, t) in items.iter().enumerate() {
+        match parent_of(todo(t)) {
+            Some(p) => children[p].push(i),
+            None => roots.push(i),
+        }
+    }
+    let mut out = Vec::new();
+    for r in roots {
+        let matching: Vec<usize> = children[r]
+            .iter()
+            .copied()
+            .filter(|&c| hit(&items[c]))
+            .collect();
+        let root_hit = hit(&items[r]);
+        if !root_hit && matching.is_empty() {
+            continue;
+        }
+        out.push(TreeRow {
+            index: r,
+            child: false,
+            bridge: !root_hit,
+        });
+        out.extend(matching.into_iter().map(|c| TreeRow {
+            index: c,
+            child: true,
+            bridge: false,
+        }));
+    }
+    out
 }
 
 #[cfg(test)]
@@ -224,5 +293,118 @@ mod tests {
         let mut by_priority = items;
         sort_todos(&mut by_priority, TodoSort::Priority, |t| t);
         assert_eq!(ids(&by_priority), vec![4, 2, 3, 1]);
+    }
+
+    fn node(id: i64, parent: Option<i64>, due: Option<&str>, priority: Priority) -> Todo {
+        Todo {
+            parent_id: parent,
+            ..t(id, due, priority)
+        }
+    }
+
+    /// (id, child, bridge) of the tree rows.
+    fn tree(items: &[Todo], hit: impl Fn(&Todo) -> bool) -> Vec<(i64, bool, bool)> {
+        tree_rows(items, |t| t, hit)
+            .into_iter()
+            .map(|r| (items[r.index].id, r.child, r.bridge))
+            .collect()
+    }
+
+    fn family() -> Vec<Todo> {
+        vec![
+            node(1, None, Some("2026-11-30"), Priority::Low),
+            node(2, Some(1), Some("2026-11-25"), Priority::Medium),
+            node(3, None, Some("2026-11-20"), Priority::Medium),
+            node(4, Some(1), Some("2026-11-21"), Priority::High),
+            node(5, Some(3), None, Priority::High),
+            node(6, None, None, Priority::High),
+        ]
+    }
+
+    #[test]
+    fn tree_puts_children_under_their_parent_in_each_sort() {
+        let all = |_: &Todo| true;
+        // 登録順.
+        let manual = family();
+        assert_eq!(
+            tree(&manual, all),
+            vec![
+                (1, false, false),
+                (2, true, false),
+                (4, true, false),
+                (3, false, false),
+                (5, true, false),
+                (6, false, false),
+            ]
+        );
+        // 日限: parents by due date, children by due date under them.
+        let mut by_due = family();
+        sort_todos(&mut by_due, TodoSort::DueDate, |t| t);
+        assert_eq!(
+            tree(&by_due, all),
+            vec![
+                (3, false, false),
+                (5, true, false),
+                (1, false, false),
+                (4, true, false),
+                (2, true, false),
+                (6, false, false),
+            ]
+        );
+        // 優先度: high first, among parents and among children.
+        let mut by_priority = family();
+        sort_todos(&mut by_priority, TodoSort::Priority, |t| t);
+        assert_eq!(
+            tree(&by_priority, all),
+            vec![
+                (6, false, false),
+                (3, false, false),
+                (5, true, false),
+                (1, false, false),
+                (4, true, false),
+                (2, true, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_matching_child_brings_its_parent_as_a_bridge() {
+        let items = family();
+        // Only 4 and 6 match: 1 comes as a bridge for 4; 2 does not match.
+        assert_eq!(
+            tree(&items, |t| matches!(t.id, 4 | 6)),
+            vec![(1, false, true), (4, true, false), (6, false, false)]
+        );
+        // A matching parent shows only its matching children.
+        assert_eq!(
+            tree(&items, |t| matches!(t.id, 1 | 3)),
+            vec![(1, false, false), (3, false, false)]
+        );
+        // Nothing matches.
+        assert!(tree(&items, |_| false).is_empty());
+    }
+
+    #[test]
+    fn tree_lists_broken_families_as_parents() {
+        let items = vec![
+            // Parent not among the items.
+            node(1, Some(99), None, Priority::Medium),
+            // Two levels (not made by the app): 3 is under 2, 4 under 3.
+            node(2, None, None, Priority::Medium),
+            node(3, Some(2), None, Priority::Medium),
+            node(4, Some(3), None, Priority::Medium),
+            // Its own parent.
+            node(5, Some(5), None, Priority::Medium),
+        ];
+        assert_eq!(
+            tree(&items, |_| true),
+            vec![
+                (1, false, false),
+                (2, false, false),
+                (3, true, false),
+                (4, false, false),
+                (5, false, false),
+            ]
+        );
     }
 }

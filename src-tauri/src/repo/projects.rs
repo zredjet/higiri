@@ -301,6 +301,7 @@ mod tests {
                 &mut c,
                 &NewTodo {
                     project_id: p.id,
+                    parent_id: None,
                     title: "作業".into(),
                     priority: Priority::Medium,
                     due_date: None,

@@ -14,6 +14,7 @@ const APP_COMMANDS: &[&str] = &[
     "update_todo",
     "change_status",
     "delete_todo",
+    "set_todo_parent",
     "list_timeline",
     "save_work_log",
     "delete_work_log",

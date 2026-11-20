@@ -27,8 +27,16 @@ export const commands = {
 	 *  one transaction.
 	 */
 	changeStatus: (id: number, change: StatusChange, options?: InvokeOptions) => __TAURI_INVOKE<TodoItem>("change_status", { id, change }, options),
-	/**  Deletes a TODO with its work logs and history. The screen confirms first. */
+	/**
+	 *  Deletes a TODO with its work logs and history, and its children (S-1).
+	 *  The screen confirms first.
+	 */
 	deleteTodo: (id: number, options?: InvokeOptions) => __TAURI_INVOKE<null>("delete_todo", { id }, options),
+	/**
+	 *  Puts a TODO under a parent, moves it to another one, or (`null`) takes it
+	 *  out (S-1). Same project, one level. Not recorded in the history.
+	 */
+	setTodoParent: (id: number, parentId: number | null, options?: InvokeOptions) => __TAURI_INVOKE<TodoItem>("set_todo_parent", { id, parentId }, options),
 	/**  Work logs and recorded changes of one TODO, newest first. */
 	listTimeline: (todoId: number, options?: InvokeOptions) => __TAURI_INVOKE<TimelineEntry[]>("list_timeline", { todoId }, options),
 	/**  Adds (`id = null`) or updates a work log. */
@@ -183,6 +191,17 @@ export type BackupKind =
 /**  復元・取り込みの前の状態 (taken just before a restore or a JSON import). */
 "before_restore";
 
+/**
+ *  Children of a parent: `total` and `done` leave 中止 out (the progress
+ *  「2/3 完了」), `open` counts the open ones (the confirmation when the
+ *  parent is closed).
+ */
+export type ChildCounts = {
+	total: number,
+	done: number,
+	open: number,
+};
+
 /**  本日完了・中止. */
 export type ClosedOptions = {
 	/**  「(理由:…)」 of 中止. */
@@ -314,6 +333,13 @@ export type GanttRow = {
 	actual: DaySpan | null,
 	/**  待ち spans inside the actual bar (G-7). */
 	waiting: DaySpan[],
+	/**  Shown indented under its parent (S-1). */
+	child: boolean,
+	/**
+	 *  A hidden (完了・中止) parent shown only to hold its shown children:
+	 *  no bars and no due mark (all spans are empty).
+	 */
+	bridge: boolean,
 };
 
 /**  A holiday with its name, as `list_holidays` returns it. */
@@ -337,6 +363,11 @@ export type MatchField =
 
 export type NewTodoInput = {
 	project_id: number,
+	/**
+	 *  Adds it as a child of this TODO (S-1), which must be in the same
+	 *  project and have no parent. `null` = a TODO of its own.
+	 */
+	parent_id: number | null,
 	title: string,
 	/**  `null` = 中. */
 	priority: Priority | null,
@@ -591,7 +622,10 @@ export type TimelineEntry = { type: "work_log"; entry: WorkLog } | { type: "even
 export type Todo = {
 	id: number,
 	project_id: number,
-	/**  Reserved for sub-TODOs (future). Always `None` in the MVP. */
+	/**
+	 *  The parent, for a child (サブTODO, v0.3.0). One level only, same
+	 *  project (checked by the app: `domain::subtodo`).
+	 */
 	parent_id: number | null,
 	title: string,
 	status: Status,
@@ -666,18 +700,36 @@ export type TodoItem = {
 	 *  setting's days (business days in 営業日) after today.
 	 */
 	follow_up_default: string,
+	/**  The parent's title, for a child (S-1). Shown as 「親 / 子」. */
+	parent_title: string | null,
+	/**  The children counts, for a TODO with children (S-1). */
+	children: ChildCounts | null,
+	/**  An open child due after its parent (「親の日限より後」). */
+	due_after_parent: boolean,
 };
 
 /**
  *  The TODO list with the counts for its status tabs. The counts cover the
  *  project, 日限 and 優先度 filters but not the status filter, so every tab
- *  shows how many rows it would list.
+ *  shows how many rows it would list (bridge rows are not counted).
  */
 export type TodoList = {
-	items: TodoItem[],
+	rows: TodoListRow[],
 	counts: StatusCounts,
 	/**  The 「すべて」 tab. */
 	total: number,
+};
+
+/**  A row of the TODO list, in tree order (S-1): a parent, then its children. */
+export type TodoListRow = {
+	item: TodoItem,
+	/**  Shown indented under its parent. */
+	child: boolean,
+	/**
+	 *  A parent that does not match the filters, shown (dimmed) only to
+	 *  hold its matching children. Not counted in the tabs.
+	 */
+	bridge: boolean,
 };
 
 export type TodoQuery = {

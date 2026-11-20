@@ -128,6 +128,7 @@ pub(crate) mod testing {
             conn,
             &super::todos::NewTodo {
                 project_id,
+                parent_id: None,
                 title: title.into(),
                 priority: crate::domain::model::Priority::Medium,
                 due_date: None,

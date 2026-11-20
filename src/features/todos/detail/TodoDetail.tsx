@@ -5,24 +5,32 @@ import type { Priority, Status, TodoItem } from "../../../lib/bindings";
 import { errorMessage } from "../../../lib/errors";
 import { shortcutText } from "../../../lib/keys";
 import { useChangeStatus, useTimeline } from "../../../lib/queries";
-import { PRIORITIES, PRIORITY_LABEL, STATUSES, STATUS_LABEL, waitingMessage } from "../todoText";
+import { cancelChildrenNote, PRIORITIES, PRIORITY_LABEL, STATUSES, STATUS_LABEL, waitingMessage } from "../todoText";
+import { ChildrenSection, ParentField, useFamily } from "./FamilySection";
 import { MarkdownField } from "./MarkdownField";
-import { CancelDialog, WaitDialog } from "./StatusDialogs";
+import { CancelDialog, DoneWithChildrenDialog, WaitDialog } from "./StatusDialogs";
 import { useTodoDraft } from "./useTodoDraft";
 import { WorkLogSection } from "./WorkLogSection";
 
-/** The fields, memo and work log of one TODO (docs/ui-mock/Todos.dc.html, right side). */
-export function TodoDetail({ item }: { item: TodoItem }) {
+/**
+ * The fields, memo and work log of one TODO (docs/ui-mock/Todos.dc.html,
+ * right side), with its parent and children (S-1). `onOpenTodo` opens
+ * another TODO in the panel (the parent, a child).
+ */
+export function TodoDetail({ item, onOpenTodo }: { item: TodoItem; onOpenTodo: (id: number) => void }) {
   const { todo, assessment } = item;
   const { draft, set, save, error, saving } = useTodoDraft(item);
   const status = useChangeStatus();
   const timeline = useTimeline(todo.id);
-  const [asking, setAsking] = useState<null | "waiting" | "cancelled">(null);
+  const family = useFamily(item);
+  const [asking, setAsking] = useState<null | "waiting" | "cancelled" | "done">(null);
+  /** Open children close with the parent (S-1): asked first. */
+  const openChildren = item.children?.open ?? 0;
   const [tab, setTab] = useState<"log" | "memo">("log");
   const [memoPreview, setMemoPreview] = useState(false);
 
   async function changeStatus(to: Status) {
-    if (to === "waiting" || to === "cancelled") {
+    if (to === "waiting" || to === "cancelled" || (to === "done" && openChildren > 0)) {
       status.reset();
       setAsking(to);
       return;
@@ -115,6 +123,9 @@ export function TodoDetail({ item }: { item: TodoItem }) {
         {assessment.warnings.plan_misses_due ? (
           <Alert tone="warning">予定終了日が日限より後になっています。予定を見直すか、日限を変えてください。</Alert>
         ) : null}
+        {item.due_after_parent ? (
+          <Alert tone="warning">日限が親のTODOの日限より後になっています。日限を見直すか、親のTODOの日限を変えてください。</Alert>
+        ) : null}
         <div className="detail-fields__row">
           <DateField
             label="実績開始"
@@ -133,6 +144,13 @@ export function TodoDetail({ item }: { item: TodoItem }) {
           {saving ? "保存しています。" : "入力は自動で保存されます。"}
         </span>
       </div>
+
+      {item.children === null ? (
+        <ParentField item={item} candidates={family.candidates} loaded={family.loaded} onOpenTodo={onOpenTodo} />
+      ) : null}
+      {todo.parent_id === null ? (
+        <ChildrenSection item={item} childItems={family.children} onOpenTodo={onOpenTodo} />
+      ) : null}
 
       <Tabs
         label="記録の種類"
@@ -181,8 +199,24 @@ export function TodoDetail({ item }: { item: TodoItem }) {
           }}
         />
       ) : null}
+      {asking === "done" ? (
+        <DoneWithChildrenDialog
+          openChildren={openChildren}
+          pending={status.isPending}
+          error={status.error}
+          onClose={() => setAsking(null)}
+          onConfirm={async () => {
+            await save();
+            status.mutate(
+              { id: todo.id, change: { to: "done", waiting_on: null, follow_up_date: null, reason: null } },
+              { onSuccess: () => setAsking(null) },
+            );
+          }}
+        />
+      ) : null}
       {asking === "cancelled" ? (
         <CancelDialog
+          childrenNote={openChildren > 0 ? cancelChildrenNote(openChildren) : undefined}
           pending={status.isPending}
           error={status.error}
           onClose={() => setAsking(null)}

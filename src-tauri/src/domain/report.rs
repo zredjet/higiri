@@ -26,6 +26,7 @@ use super::report_template::{
     AttentionOptions, ClosedOptions, ReportTemplate, SectionBody, SectionKind, TomorrowOptions,
     WaitingOptions, WorkOptions,
 };
+use super::subtodo::display_title;
 use super::urgency::{Assessment, Rules, Urgency, assess, attention_order, waiting_day};
 
 /// Report kinds (`reports.kind`). The MVP makes daily reports only.
@@ -124,6 +125,15 @@ impl<'a> Lookup<'a> {
             .unwrap_or("")
     }
 
+    /// 「親 / 子」 for a child (S-1), the title otherwise.
+    fn title(&self, t: &Todo) -> String {
+        let parent = t
+            .parent_id
+            .and_then(|p| self.todos.get(&p))
+            .map(|p| p.title.as_str());
+        display_title(&t.title, parent)
+    }
+
     fn is_active(&self, t: &Todo) -> bool {
         self.projects
             .get(&t.project_id)
@@ -188,7 +198,7 @@ fn work_line(t: &Todo, minutes: i64, o: &WorkOptions, lk: &Lookup) -> String {
     } else {
         format!("{} / ", lk.project_name(t))
     };
-    format!("- {project}**{}**{meta}{gap}{time}", t.title)
+    format!("- {project}**{}**{meta}{gap}{time}", lk.title(t))
 }
 
 /// 本日の作業: logs grouped by project (or not, without project headings),
@@ -297,7 +307,7 @@ fn closed_section(input: &ReportInput, lk: &Lookup, o: &ClosedOptions) -> Vec<St
                 "- 【{}】{} / {}{reason}",
                 t.status.label(),
                 lk.project_name(t),
-                t.title
+                lk.title(t)
             )
         })
         .collect()
@@ -340,7 +350,7 @@ fn waiting_section(input: &ReportInput, lk: &Lookup, o: &WaitingOptions) -> Vec<
             format!(
                 "- {} / {}{}",
                 lk.project_name(t),
-                t.title,
+                lk.title(t),
                 parenthesized(&parts)
             )
         })
@@ -356,7 +366,7 @@ fn tomorrow_section(input: &ReportInput, lk: &Lookup, o: &TomorrowOptions) -> Ve
         .iter()
         .filter(|t| lk.is_active(t))
         .filter_map(|t| match t.status {
-            Status::Doing => Some(format!("- {} / {}", lk.project_name(t), t.title)),
+            Status::Doing => Some(format!("- {} / {}", lk.project_name(t), lk.title(t))),
             Status::Todo if t.planned_start.is_some_and(|s| s <= tomorrow) => {
                 let period = if o.planned_period {
                     let start = t.planned_start.map(month_day_slash).unwrap_or_default();
@@ -365,7 +375,11 @@ fn tomorrow_section(input: &ReportInput, lk: &Lookup, o: &TomorrowOptions) -> Ve
                 } else {
                     String::new()
                 };
-                Some(format!("- {} / {}{period}", lk.project_name(t), t.title))
+                Some(format!(
+                    "- {} / {}{period}",
+                    lk.project_name(t),
+                    lk.title(t)
+                ))
             }
             _ => None,
         })
@@ -453,7 +467,7 @@ fn attention_section(input: &ReportInput, lk: &Lookup, o: &AttentionOptions) -> 
                 "- 【{}】{} / {}{}",
                 u.label(),
                 lk.project_name(t),
-                t.title,
+                lk.title(t),
                 parenthesized(&attention_parts(t, u, &a, o))
             )
         })
@@ -808,6 +822,88 @@ mod tests {
             body.contains("### P\n- **T**(完了)\n  まとめ\n\n  - 箇条書き\n    - 入れ子\n"),
             "{body}"
         );
+    }
+
+    #[test]
+    fn children_are_written_with_their_parent() {
+        let p = Project {
+            id: 1,
+            name: "P".into(),
+            color: "#3B6FD4".into(),
+            description: String::new(),
+            sort_order: 1,
+            archived_at: None,
+            created_at: ts(2026, 11, 1, 0, 0),
+            updated_at: ts(2026, 11, 1, 0, 0),
+        };
+        let parent = Todo {
+            id: 1,
+            project_id: 1,
+            title: "親".into(),
+            due_date: Some(d("2026-11-30")),
+            ..todo(Status::Doing)
+        };
+        let child = |id: i64, title: &str, status: Status| Todo {
+            id,
+            project_id: 1,
+            parent_id: Some(1),
+            title: title.into(),
+            ..todo(status)
+        };
+        let todos = vec![
+            parent.clone(),
+            Todo {
+                due_date: Some(d("2026-11-18")),
+                ..child(2, "作業中の子", Status::Doing)
+            },
+            Todo {
+                close_reason: Some("不要".into()),
+                ..child(3, "中止した子", Status::Cancelled)
+            },
+            Todo {
+                waiting_on: Some("相手の回答".into()),
+                waiting_since: Some(d("2026-11-19")),
+                follow_up_date: Some(d("2026-11-20")),
+                ..child(4, "待ちの子", Status::Waiting)
+            },
+        ];
+        let log = WorkLog {
+            id: 1,
+            todo_id: 2,
+            log_date: d("2026-11-19"),
+            body_md: "- 進めた".into(),
+            minutes: Some(30),
+            created_at: ts(2026, 11, 19, 1, 0),
+            updated_at: ts(2026, 11, 19, 1, 0),
+        };
+        let cancelled = TodoEvent {
+            id: 1,
+            todo_id: 3,
+            event_date: d("2026-11-19"),
+            kind: EventKind::Status,
+            old_value: Some("todo".into()),
+            new_value: Some("cancelled".into()),
+            note: crate::domain::events::EventNote::default(),
+            occurred_at: ts(2026, 11, 19, 2, 0),
+        };
+        let input = ReportInput {
+            date: d("2026-11-19"),
+            rules: &rules(3),
+            projects: std::slice::from_ref(&p),
+            todos: &todos,
+            logs: std::slice::from_ref(&log),
+            events: std::slice::from_ref(&cancelled),
+        };
+        let body = generate_body(&input, &default_template());
+        for line in [
+            "### P\n- **親 / 作業中の子**(作業中 / 日限 11/18)0.5h\n  - 進めた\n",
+            "## 本日完了・中止\n- 【中止】P / 親 / 中止した子(理由:不要)\n",
+            "## 待ち\n- P / 親 / 待ちの子(相手の回答待ち、1日目、確認日 11/20)\n",
+            "## 明日の予定\n- P / 親\n- P / 親 / 作業中の子\n\n",
+            "## 日限注意\n- 【超過】P / 親 / 作業中の子(日限 11/18、1日超過)\n",
+        ] {
+            assert!(body.contains(line), "{line}\n---\n{body}");
+        }
     }
 
     #[test]

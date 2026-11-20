@@ -207,6 +207,56 @@ body,
   color: var(--text-muted);
 }
 
+/* サブTODO (S-1): the title line holds the fold button and 「子 2/3」. */
+.todo-cell__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.todo-cell--child {
+  padding-left: var(--space-4);
+}
+
+.todo-cell__progress {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The fold button sits in the cell's left padding, so titles line up with
+ * or without it (the list and the Gantt names).
+ */
+.tree-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-4);
+  height: var(--space-5);
+  margin-left: calc(-1 * var(--space-4));
+  margin-right: calc(-1 * var(--space-2));
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.tree-toggle:hover {
+  color: var(--text);
+}
+
+.tree-toggle:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: var(--focus-ring);
+}
+
 .todo-cell__sub {
   font-size: 12px;
   line-height: 18px;
@@ -275,6 +325,126 @@ body,
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+
+/* サブTODO (S-1): 「親のTODO」 and 「子TODO」 in the detail panel. */
+.family {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.family__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.family__label {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.family__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.family__link {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--link);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.family__link:hover {
+  text-decoration: underline;
+}
+
+.family__link:focus-visible {
+  outline: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--focus-ring);
+}
+
+.family__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.family__list li + li {
+  border-top: 1px solid var(--border);
+}
+
+.family-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.family__list li:first-child .family-item {
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+.family__list li:last-child .family-item {
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+}
+
+.family__list li:only-child .family-item {
+  border-radius: var(--radius-md);
+}
+
+.family-item:hover {
+  background: var(--surface-hover);
+}
+
+.family-item:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+
+.family-item__title {
+  min-width: 0;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.family-item__title.is-closed {
+  color: var(--text-muted);
+}
+
+.family-item__badges {
+  flex: 0 0 auto;
+  display: flex;
+  gap: var(--space-1);
 }
 
 .worklog-form__row {
@@ -1175,6 +1345,35 @@ input[type="date"][data-empty="true"]:not(:focus) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* サブTODO (S-1): children indented, a bridge row (a hidden parent) dimmed. */
+.gantt-name--child {
+  padding-left: var(--space-8);
+}
+
+.gantt-name--bridge .gantt-name__title {
+  color: var(--text-muted);
+}
+
+.gantt-name__side {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.gantt-name__warning {
+  display: inline-flex;
+  color: var(--warning);
+}
+
+/* The fold button: the left padding of the row, its full height. */
+.gantt-name__toggle {
+  position: absolute;
+  left: 0;
+  margin: 0;
+  border-radius: 0;
 }
 
 .gantt-grid {

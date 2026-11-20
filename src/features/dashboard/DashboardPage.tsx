@@ -5,7 +5,9 @@ import type { Dashboard, ProjectSummary, Status, TodoItem, Urgency } from "../..
 import { formatDate, formatDateWithWeekday, monthDay } from "../../lib/date";
 import { errorMessage } from "../../lib/errors";
 import { useChangeStatus, useDashboard } from "../../lib/queries";
+import { DoneWithChildrenDialog } from "../todos/detail/StatusDialogs";
 import {
+  displayTitle,
   periodText,
   situationText,
   STATUS_LABEL,
@@ -96,9 +98,23 @@ interface RowAction {
 function AttentionSection({ dash, onOpenTodo }: { dash: Dashboard; onOpenTodo: (id: number) => void }) {
   const status = useChangeStatus();
   const [dateEdit, setDateEdit] = useState<{ item: TodoItem; target: DateTarget } | null>(null);
+  /** A parent with open children, asked about before 完了 (S-1). */
+  const [closing, setClosing] = useState<TodoItem | null>(null);
 
-  function changeTo(item: TodoItem, to: Status) {
-    status.mutate({ id: item.todo.id, change: { to, waiting_on: null, follow_up_date: null, reason: null } });
+  function changeTo(item: TodoItem, to: Status, then?: () => void) {
+    status.mutate(
+      { id: item.todo.id, change: { to, waiting_on: null, follow_up_date: null, reason: null } },
+      { onSuccess: then },
+    );
+  }
+
+  function complete(item: TodoItem) {
+    if ((item.children?.open ?? 0) > 0) {
+      status.reset();
+      setClosing(item);
+    } else {
+      changeTo(item, "done");
+    }
   }
 
   /** The two buttons of a row, as in the mock. */
@@ -109,7 +125,7 @@ function AttentionSection({ dash, onOpenTodo }: { dash: Dashboard; onOpenTodo: (
         ? { label: "着手する", icon: "arrow-right", run: () => changeTo(item, "doing") }
         : item.todo.status === "waiting"
           ? { label: "作業に戻す", icon: "arrow-right", run: () => changeTo(item, "doing") }
-          : { label: "完了にする", icon: "check", run: () => changeTo(item, "done") };
+          : { label: "完了にする", icon: "check", run: () => complete(item) };
     const second: RowAction =
       u === "follow_up"
         ? { label: "確認日を変更", icon: "calendar", run: () => setDateEdit({ item, target: "follow_up_date" }) }
@@ -129,7 +145,7 @@ function AttentionSection({ dash, onOpenTodo }: { dash: Dashboard; onOpenTodo: (
           </Badge>
         ) : null,
     },
-    { key: "title", header: "TODO", render: (i) => <span className="dash-strong">{i.todo.title}</span> },
+    { key: "title", header: "TODO", render: (i) => <span className="dash-strong">{displayTitle(i)}</span> },
     { key: "project", header: "プロジェクト", render: (i) => <span className="text-muted">{i.project_name}</span> },
     {
       key: "due",
@@ -176,7 +192,7 @@ function AttentionSection({ dash, onOpenTodo }: { dash: Dashboard; onOpenTodo: (
         <h2 className="section-title">日限注意</h2>
         <span className="text-caption">区分の重い順、日限の古い順に並べています</span>
       </div>
-      {status.error ? <Alert tone="danger">{errorMessage(status.error)}</Alert> : null}
+      {status.error && !closing ? <Alert tone="danger">{errorMessage(status.error)}</Alert> : null}
       <Table<TodoItem>
         columns={columns}
         rows={dash.attention.map((i) => ({ ...i, id: i.todo.id }))}
@@ -186,6 +202,18 @@ function AttentionSection({ dash, onOpenTodo }: { dash: Dashboard; onOpenTodo: (
       />
       {dateEdit ? (
         <ChangeDateDialog item={dateEdit.item} target={dateEdit.target} onClose={() => setDateEdit(null)} />
+      ) : null}
+      {closing ? (
+        <DoneWithChildrenDialog
+          openChildren={closing.children?.open ?? 0}
+          pending={status.isPending}
+          error={status.error}
+          onClose={() => {
+            status.reset();
+            setClosing(null);
+          }}
+          onConfirm={() => changeTo(closing, "done", () => setClosing(null))}
+        />
       ) : null}
     </section>
   );
@@ -212,10 +240,10 @@ function TodayWorkCard({ items, onOpenTodo }: { items: TodoItem[]; onOpenTodo: (
         <p className="text-muted">今日の作業はありません。予定期間を入れたTODOが、その期間に入るとここに出ます。</p>
       ) : (
         <div className="dash-rows">
-          {items.map(({ todo, project_name }) => (
+          {items.map(({ todo, project_name, parent_title }) => (
             <DashRow
               key={todo.id}
-              title={todo.title}
+              title={displayTitle({ todo, parent_title })}
               sub={`${project_name} ・ ${periodText("予定", todo.planned_start, todo.planned_end)}`}
               right={
                 <Badge tone={STATUS_TONE[todo.status]} dot>
@@ -238,10 +266,10 @@ function WaitingCard({ items, onOpenTodo }: { items: TodoItem[]; onOpenTodo: (id
         <p className="text-muted">待ちのTODOはありません。</p>
       ) : (
         <div className="dash-rows">
-          {items.map(({ todo, assessment }) => (
+          {items.map(({ todo, assessment, parent_title }) => (
             <DashRow
               key={todo.id}
-              title={todo.title}
+              title={displayTitle({ todo, parent_title })}
               sub={`${todo.waiting_on ?? ""}待ち${assessment.waiting_day ? ` ・ ${assessment.waiting_day}日目` : ""}`}
               right={
                 assessment.urgency === "follow_up" ? (

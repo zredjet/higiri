@@ -135,7 +135,8 @@ pub struct Project {
 pub struct Todo {
     pub id: i64,
     pub project_id: i64,
-    /// Reserved for sub-TODOs (future). Always `None` in the MVP.
+    /// The parent, for a child (サブTODO, v0.3.0). One level only, same
+    /// project (checked by the app: `domain::subtodo`).
     pub parent_id: Option<i64>,
     pub title: String,
     pub status: Status,

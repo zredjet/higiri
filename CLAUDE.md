@@ -298,6 +298,29 @@ v0.3.0 は `docs/implementation-plan-v0.3.0.md` のフェーズ17〜24で作る�
     - `domain/model.rs`: 依存の行 `Dependency { todo_id, depends_on_id, created_at }`。
     - `repo/templates.rs`(一覧は名前の順、1件、追加、名前と本文の更新、削除。書く値は `TemplateFields`)、`repo/repeats.rs`(一覧は `todo_id` の順、1件は `Option`、追加、周期と終わりの日の更新、削除)、`repo/dependencies.rs`(一覧は `todo_id, depends_on_id` の順、1件は `Option`、追加、削除)。読めない `body` と `rule`(検査に通らないものも)は `RepoError::Corrupt`(列は `todo_templates.body`、`todo_repeats.rule`)。名前の重複、依存の組の重複、自分自身への依存は表の制約が断る(呼ぶ側が `is_constraint_violation` で見る)。テストの `repo::testing::todo` で TODO を1件作れる。
     - `json_data.rs`: `Table.since`(その表を足したマイグレーションの番号。5つの表は1、v0.3.0 の3つは2)。ファイルの `schema_version` より新しい表のキーはなくてよく、ある場合は空の配列だけを受け付ける(行があれば、その版の作業用の DB にない表なので `Malformed`)。`body` と `rule` は `note` と同じく JSON の値として埋め込み、取り込みでは JSON の文のまま入れる。
+- サブTODO(フェーズ19)
+  - コマンドは `set_todo_parent(id, parent_id)` を足して33個。子を作るのは `create_todo` の入力の `parent_id`。
+  - 作ったもの(フェーズ19)
+    - `domain/subtodo.rs`: 親子の検査(`check_parent`、作成のときの `check_new_child`。`ParentError` の文をそのまま画面に出す)、`Family`(TODO の集まりから、親のタイトルと日限、子の数を作る。同じ TODO を2回渡しても1回と数える)、`ChildCounts { total, done, open }`(`total` と `done` は中止を除く。`open` は開いている子)、`display_title`(「親 / 子」)。
+    - 検査の順: 自分自身 → 別のプロジェクト → 親にしようとした TODO が子(孫になる) → 子のある TODO を子にする。`create_todo` は別のプロジェクトと孫だけを見る(アーカイブしたプロジェクトへの追加は今までどおり断る)。閉じた TODO も親・子にできる。付け替えは `updated_at` を変え、変更履歴には残さない(`repo::todos::set_parent`)。繰り返しと依存の検査はフェーズ21・22で足す。
+    - `TodoItem` の `parent_title`、`children`、`due_after_parent` は `Family` から付ける(`views::todo_item(todo, project_name, &family, today, rules)`)。一覧・ダッシュボード・ガント・日報は読み込んだ全 TODO で `Family` を作る。1件(`get_todo` と、作成・更新・ステータス変更・付け替えの戻り値)は親と子を引いて作る(`commands/todos.rs` の `item`。子は `repo::todos::list_children`)。検索は当たった TODO の親と子を足して作る。`due_after_parent` は、開いている子の日限が親の日限より後(休日に寄せる前の日付で比べる。同じ日は警告しない)。
+    - 一覧: `TodoList.rows`(`TodoListRow { item, child, bridge }`。v0.2.0 までの `items` から変えた)。並べ替えたあと `listing::tree_rows` で木の順にする(親どうし、同じ親の子どうしは選んだ並べ替えの順)。絞り込み(優先度・日限・状態のタブ)は1件ずつ判定し、当たった子の親が当たっていなければ、親をつなぎの行(`bridge`)にする。タブの件数は当たった TODO だけを数える。`Family` は絞り込む前の全 TODO で作るので、つなぎの行の「子 2/3」も全部の子で数える。
+    - アプリが作らない形の親子(取り込んだファイルなど。親が一覧にない子、親に親がある子、自分を親にしている TODO)は、親の行として出す(`tree_rows`)。
+    - ガント: `GanttRow.child`、`bridge`。プロジェクトごとに `tree_rows` で並べる。完了・中止を隠す設定で親だけが隠れて子が出るときは、親をつなぎの行(予定・実績・待ちの区間を空)にする。
+    - `change_status`: 閉じた結果になったら(`close_children`)、開いている子を親と同じ行き先(中止なら同じ理由。待ちの項目は渡さない)で1件ずつ `transition` に通し、書いて記録する。閉じている子は変えない。親を再開しても子は閉じたまま。子の遷移が断られたら(子の実績開始日が今日より後など)全体を断り、「子TODO「…」を完了にできません。」に遷移のエラーの文を続ける。
+    - 日報: 行のタイトルは `Lookup::title`(「プロジェクト / 親 / 子」、本日の作業の太字は「**親 / 子**」)。子を親の下にまとめることはしない(並びは今までどおり)。
+    - 画面
+      - `src/features/todos/tree.ts`: 折りたたみで描く行(`foldRows`)、開閉のボタンを付ける親(`parentsWithChildRows`)、`toggled`。Vitest あり。見えている行だけを描く処理(`useVirtualRows`)には、折りたたんだあとの行を渡す。
+      - `src/features/todos/useFolded.ts`: 折りたたんだ親の集まり。アプリを開いている間だけ覚え、一覧とガントで共有する。初めはすべて開いている。
+      - 一覧(`TodoTable.tsx`): 子は `todo-cell--child` で字下げ。開閉のボタン(`tree-toggle`、`aria-expanded`)は表のセルの左の余白に置き、ボタンのない行とタイトルの位置をそろえる。「子 2/3」は `childProgressText`(中止を除いた数が0なら出さない)。つなぎの行は文字を薄くし、日限の下の文と警告は出さない。「親の日限より後」は `warningTexts(a, due_after_parent)` の最後に並ぶ。
+      - ガント(`GanttPage.tsx`): 名前の欄に開閉のボタン(左の余白、行の高さいっぱい)、子の字下げ(`gantt-name--child`)、つなぎの行の薄い文字(`gantt-name--bridge`)、「子 2/3」、子の「親の日限より後」の警告アイコン(`gantt-name__warning`。既存の2つの警告はガントに出さないまま)。つなぎの行はバー・ひし形・ドラッグがない。プロジェクトの見出しの件数はつなぎの行を数えない。行の読み上げ名(`rowLabel.ts`)は「親 / 子:…」で、日限の括弧に「親の日限より後」を足し、つなぎの行は「親:完了(子TODOだけを表示しています)」。
+      - 詳細パネル(`detail/FamilySection.tsx`): `useFamily`(そのプロジェクトの全 TODO の `list_todos` から、子と親の候補を取る)。`ParentField`(子のない TODO だけ。「親のTODO」の選択、「「親」を開く」、「親から外す」。候補は同じプロジェクトの親のない TODO で自分を除き、閉じたものは「(完了)」のように添える)。`ChildrenSection`(親のない TODO だけ。子の一覧(日限注意の区分とステータス。押すと開く)、「2/3 完了」、子がすべて閉じて親が開いていれば「子TODOはすべて終わりました。」、タイトルを打って Enter で足す欄)。親や子を開くと、パネルがその TODO に切り替わる(`TodoDetailPanel` の `onOpenTodo`)。付け替えのフックは `queries.ts` の `useSetTodoParent`(`TODO_WRITES` の列に並べる)。
+      - 子の日限が親の日限より後なら、詳細パネルにも「予定終了日が日限より後」と同じく警告を出す。
+      - 閉じるときの確認: 完了は `StatusDialogs.tsx` の `DoneWithChildrenDialog`(詳細パネルとダッシュボードの「完了にする」)。中止は `CancelDialog` の説明に `cancelChildrenNote` を続ける。
+      - 削除の確認の文は `deleteTodoText`(子の数は中止も含めて、プロジェクトの一覧から数える)。
+      - 表示の名前は `todoText.ts` の `displayTitle`(ダッシュボードの日限注意・今日の作業・待ち、リマインド、日付の変更のダイアログ)。検索の結果はタイトルの前に「親 / 」を付ける。
+    - サンプル(`sample.rs`): 社内ツール整備に親「開発環境の標準化」と子3件(1件は完了)。作業中・待ちにせず、予定開始を明後日以降、日限を「間近」より先にし、モックの日に閉じないので、日報のフィクスチャとダッシュボードの日限注意は変わらない。社内ツール整備の進捗は 2/7、ガントの行は7行になる。
+    - perf(`perf.rs`): 5,000件のうち1,000件を子にする(500件の親に2件ずつ。`CHILDREN`)。
 
 ## 品質の決めごと
 

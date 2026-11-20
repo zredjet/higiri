@@ -1,7 +1,8 @@
 import { Badge, Icon, Table, type TableColumn } from "../../components/aizome";
-import type { TodoItem } from "../../lib/bindings";
+import type { TodoListRow } from "../../lib/bindings";
 import { formatDate } from "../../lib/date";
 import {
+  childProgressText,
   dueNote,
   periodText,
   PRIORITY_LABEL,
@@ -10,10 +11,12 @@ import {
   subLine,
   warningTexts,
 } from "./todoText";
+import { foldRows, parentsWithChildRows, type TreeInfo } from "./tree";
+import { useFolded } from "./useFolded";
 import { useVirtualRows } from "./useVirtualRows";
 
 interface TodoTableProps {
-  items: TodoItem[];
+  rows: TodoListRow[];
   /** Adds a プロジェクト column (the all-projects list). */
   showProject: boolean;
   selectedId: number | null;
@@ -21,22 +24,48 @@ interface TodoTableProps {
   emptyText: string;
 }
 
+const treeInfo = (r: TodoListRow): TreeInfo => ({ id: r.item.todo.id, parentId: r.item.todo.parent_id, child: r.child });
+
 /**
  * The TODO list (docs/ui-mock/Todos.dc.html), plus 優先度 and the warnings.
+ * Children come indented under their parent (S-1), which can be folded; a
+ * parent that does not match the filters is shown dimmed (a bridge row).
  * Long lists draw only the rows near the screen (useVirtualRows).
  */
-export function TodoTable({ items, showProject, selectedId, onOpen, emptyText }: TodoTableProps) {
-  const { window: shown, wrapperProps } = useVirtualRows(items.map((i) => i.todo.id));
-  const columns: TableColumn<TodoItem>[] = [
+export function TodoTable({ rows, showProject, selectedId, onOpen, emptyText }: TodoTableProps) {
+  const { folded, toggle } = useFolded();
+  const parents = parentsWithChildRows(rows, treeInfo);
+  const drawn = foldRows(rows, folded, treeInfo);
+  const { window: shown, wrapperProps } = useVirtualRows(drawn.map((r) => r.item.todo.id));
+  const columns: TableColumn<TodoListRow>[] = [
     {
       key: "title",
       header: "TODO",
-      render: ({ todo }) => {
-        const sub = subLine(todo);
+      render: ({ item: { todo, children }, child, bridge }) => {
+        const sub = bridge ? null : subLine(todo);
+        const closed = todo.status === "done" || todo.status === "cancelled";
+        const progress = childProgressText(children);
+        const canFold = parents.has(todo.id);
+        const isFolded = folded.has(todo.id);
         return (
-          <div className="todo-cell">
-            <span className={todo.status === "done" || todo.status === "cancelled" ? "todo-cell__title is-closed" : "todo-cell__title"}>
-              {todo.title}
+          <div className={child ? "todo-cell todo-cell--child" : "todo-cell"}>
+            <span className="todo-cell__head">
+              {canFold ? (
+                <button
+                  type="button"
+                  className="tree-toggle"
+                  aria-expanded={!isFolded}
+                  aria-label={`「${todo.title}」の子TODOを${isFolded ? "開く" : "折りたたむ"}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggle(todo.id);
+                  }}
+                >
+                  <Icon name={isFolded ? "chevron-right" : "chevron-down"} size={16} />
+                </button>
+              ) : null}
+              <span className={closed || bridge ? "todo-cell__title is-closed" : "todo-cell__title"}>{todo.title}</span>
+              {progress ? <span className="todo-cell__progress">{progress}</span> : null}
             </span>
             {sub ? <span className="todo-cell__sub">{sub}</span> : null}
           </div>
@@ -49,7 +78,7 @@ export function TodoTable({ items, showProject, selectedId, onOpen, emptyText }:
             key: "project",
             header: "プロジェクト",
             width: 160,
-            render: (i: TodoItem) => <span className="text-muted">{i.project_name}</span>,
+            render: (r: TodoListRow) => <span className="text-muted">{r.item.project_name}</span>,
           },
         ]
       : []),
@@ -57,7 +86,7 @@ export function TodoTable({ items, showProject, selectedId, onOpen, emptyText }:
       key: "status",
       header: "ステータス",
       width: 96,
-      render: ({ todo }) => (
+      render: ({ item: { todo } }) => (
         <Badge tone={STATUS_TONE[todo.status]} dot>
           {STATUS_LABEL[todo.status]}
         </Badge>
@@ -67,17 +96,19 @@ export function TodoTable({ items, showProject, selectedId, onOpen, emptyText }:
       key: "priority",
       header: "優先度",
       width: 64,
-      render: ({ todo }) => PRIORITY_LABEL[todo.priority],
+      render: ({ item: { todo }, bridge }) => (
+        <span className={bridge ? "text-muted" : undefined}>{PRIORITY_LABEL[todo.priority]}</span>
+      ),
     },
     {
       key: "due",
       header: "日限",
       width: 120,
-      render: ({ todo, assessment }) => {
-        const note = dueNote(assessment);
+      render: ({ item: { todo, assessment }, bridge }) => {
+        const note = bridge ? null : dueNote(assessment);
         return (
           <div className="todo-cell">
-            <span className="tabular">{todo.due_date ? formatDate(todo.due_date) : "なし"}</span>
+            <span className={bridge ? "tabular text-muted" : "tabular"}>{todo.due_date ? formatDate(todo.due_date) : "なし"}</span>
             {note ? (
               <span className="todo-note" style={{ color: note.color }}>
                 <Icon name={note.icon} size={14} />
@@ -92,16 +123,18 @@ export function TodoTable({ items, showProject, selectedId, onOpen, emptyText }:
       key: "period",
       header: "期間",
       width: 140,
-      render: ({ todo, assessment }) => (
-        <div className="todo-period">
+      render: ({ item: { todo, assessment, due_after_parent }, bridge }) => (
+        <div className={bridge ? "todo-period text-muted" : "todo-period"}>
           <span>{periodText("予定", todo.planned_start, todo.planned_end)}</span>
           <span className="az-table__muted">{periodText("実績", todo.actual_start, todo.actual_end)}</span>
-          {warningTexts(assessment).map((w) => (
-            <span key={w} className="todo-note" style={{ color: "var(--warning)" }}>
-              <Icon name="alert-triangle" size={14} />
-              {w}
-            </span>
-          ))}
+          {bridge
+            ? null
+            : warningTexts(assessment, due_after_parent).map((w) => (
+                <span key={w} className="todo-note" style={{ color: "var(--warning)" }}>
+                  <Icon name="alert-triangle" size={14} />
+                  {w}
+                </span>
+              ))}
         </div>
       ),
     },
@@ -109,12 +142,12 @@ export function TodoTable({ items, showProject, selectedId, onOpen, emptyText }:
 
   return (
     <div {...wrapperProps}>
-      <Table<TodoItem>
+      <Table<TodoListRow & { id: number }>
         columns={columns}
-        rows={items.slice(shown.first, shown.end).map((i) => ({ ...i, id: i.todo.id }))}
+        rows={drawn.slice(shown.first, shown.end).map((r) => ({ ...r, id: r.item.todo.id }))}
         rowKey="id"
         selectedKey={selectedId ?? undefined}
-        onRowClick={(i) => onOpen(i.todo.id)}
+        onRowClick={(r) => onOpen(r.item.todo.id)}
         emptyText={emptyText}
       />
     </div>

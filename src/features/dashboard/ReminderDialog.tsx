@@ -1,7 +1,7 @@
 import { Badge, Button, Dialog } from "../../components/aizome";
 import type { StartupReminder } from "../../lib/bindings";
 import { formatDateWithWeekday } from "../../lib/date";
-import { reminderSide, URGENCY_LABEL, URGENCY_TONE } from "../todos/todoText";
+import { displayTitle, reminderSide, URGENCY_LABEL, URGENCY_TONE } from "../todos/todoText";
 
 /**
  * 起動時リマインド (docs/ui-mock/Reminder.dc.html). It closes only with
@@ -28,7 +28,8 @@ export function ReminderDialog({ reminder, onClose }: { reminder: StartupReminde
       }
     >
       <div className="reminder-list">
-        {reminder.items.map(({ todo, assessment, project_name }) => {
+        {reminder.items.map((item) => {
+          const { todo, assessment, project_name } = item;
           const side = reminderSide(todo, assessment);
           const sub =
             assessment.urgency === "follow_up" && todo.waiting_on
@@ -44,7 +45,7 @@ export function ReminderDialog({ reminder, onClose }: { reminder: StartupReminde
                 ) : null}
               </div>
               <div className="reminder-row__text">
-                <span className="dash-strong">{todo.title}</span>
+                <span className="dash-strong">{displayTitle(item)}</span>
                 <span className="text-caption">{sub}</span>
               </div>
               <div className="reminder-row__side">

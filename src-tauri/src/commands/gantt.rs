@@ -94,13 +94,31 @@ mod tests {
             .iter()
             .map(|p| (p.project.name.clone(), p.rows.len()))
             .collect();
-        // Done shown, cancelled hidden: 5 / 3 / 2 rows as in the mock.
+        // Done shown, cancelled hidden: 5 / 3 / 2 rows as in the mock, and
+        // the sample's parent with its 3 children in 社内ツール整備.
         assert_eq!(
             shape,
             vec![
                 ("基幹システム更改".to_owned(), 5),
-                ("社内ツール整備".to_owned(), 3),
+                ("社内ツール整備".to_owned(), 7),
                 ("採用サイト改修".to_owned(), 2)
+            ]
+        );
+        let tools: Vec<(&str, bool)> = g.projects[1]
+            .rows
+            .iter()
+            .map(|r| (r.item.todo.title.as_str(), r.child))
+            .collect();
+        assert_eq!(
+            tools,
+            vec![
+                ("ライセンス棚卸し", false),
+                ("デプロイ手順書の更新", false),
+                ("監視ダッシュボードの整理", false),
+                ("開発環境の標準化", false),
+                ("必要なツールの洗い出し", true),
+                ("セットアップ手順書の作成", true),
+                ("新メンバーでの試行", true),
             ]
         );
 
@@ -143,7 +161,9 @@ mod tests {
         assert_eq!(all.projects[0].rows.len(), 6);
         let open_only = get(&pool, &q(false, false), today).await.unwrap();
         let rows: usize = open_only.projects.iter().map(|p| p.rows.len()).sum();
-        assert_eq!(rows, 8);
+        // The mock's 8 open TODOs, and the sample's open parent with its 2
+        // open children.
+        assert_eq!(rows, 11);
 
         let pid = all.projects[2].project.id;
         let one = get(

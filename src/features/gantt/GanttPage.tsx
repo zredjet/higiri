@@ -1,11 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Alert, Badge, Button, Checkbox, Select, Tabs } from "../../components/aizome";
+import { Alert, Badge, Button, Checkbox, Icon, Select, Tabs } from "../../components/aizome";
 import { PageHeader } from "../../components/PageHeader";
 import type { DaySpan, GanttProject, GanttRow } from "../../lib/bindings";
 import { formatDate } from "../../lib/date";
 import { errorMessage } from "../../lib/errors";
 import { useGantt, useHolidays, useProjects } from "../../lib/queries";
-import { STATUS_LABEL, STATUS_TONE } from "../todos/todoText";
+import { childProgressText, DUE_AFTER_PARENT_TEXT, STATUS_LABEL, STATUS_TONE } from "../todos/todoText";
+import { foldRows, parentsWithChildRows, type TreeInfo } from "../todos/tree";
+import { useFolded } from "../todos/useFolded";
 import {
   addDays,
   barGrips,
@@ -41,6 +43,8 @@ interface GanttPageProps {
 }
 
 type Row = LaidOutRow<GanttProject, GanttRow>;
+
+const treeInfo = (r: GanttRow): TreeInfo => ({ id: r.item.todo.id, parentId: r.item.todo.parent_id, child: r.child });
 
 const SCALE_TABS: Array<{ id: Scale; label: string }> = [
   { id: "day", label: "日" },
@@ -85,6 +89,12 @@ export function GanttPage({ selectedTodoId, onOpenTodo }: GanttPageProps) {
   const holidays = useHolidays(range && scale !== "month" ? { start: range.start, end: rangeEnd(range) } : null);
   const names = useMemo(() => holidayNames(holidays.data ?? []), [holidays.data]);
 
+  // Parents fold as in the TODO list (S-1); the state is shared with it.
+  const { folded, toggle } = useFolded();
+  const parents = useMemo(
+    () => parentsWithChildRows((gantt.data?.projects ?? []).flatMap((p) => p.rows), treeInfo),
+    [gantt.data],
+  );
   const layout = useMemo(
     () =>
       layoutRows(
@@ -93,10 +103,10 @@ export function GanttPage({ selectedTodoId, onOpenTodo }: GanttPageProps) {
           .map((p) => ({
             key: String(p.project.id),
             project: p,
-            todos: p.rows.map((r) => ({ key: String(r.item.todo.id), todo: r })),
+            todos: foldRows(p.rows, folded, treeInfo).map((r) => ({ key: String(r.item.todo.id), todo: r })),
           })),
       ),
-    [gantt.data],
+    [gantt.data, folded],
   );
   const bodyHeight = Math.max(0, size.height - LAYOUT.headerHeight);
   const shown = visibleRows(layout.rows, scrollTop, bodyHeight);
@@ -194,7 +204,15 @@ export function GanttPage({ selectedTodoId, onOpenTodo }: GanttPageProps) {
                 <div className="gantt__body" style={{ height: layout.height }}>
                   <div className="gantt__names">
                     {shown.map((r) => (
-                      <NameCell key={r.key} row={r} selected={r.todo?.item.todo.id === selectedTodoId} onOpen={onOpenTodo} />
+                      <NameCell
+                        key={r.key}
+                        row={r}
+                        selected={r.todo?.item.todo.id === selectedTodoId}
+                        onOpen={onOpenTodo}
+                        canFold={r.todo !== undefined && parents.has(r.todo.item.todo.id)}
+                        folded={r.todo !== undefined && folded.has(r.todo.item.todo.id)}
+                        onToggle={toggle}
+                      />
                     ))}
                   </div>
                   <Chart
@@ -332,28 +350,71 @@ function Header({
   );
 }
 
-function NameCell({ row, selected, onOpen }: { row: Row; selected: boolean; onOpen: (id: number) => void }) {
+function NameCell({
+  row,
+  selected,
+  onOpen,
+  canFold,
+  folded,
+  onToggle,
+}: {
+  row: Row;
+  selected: boolean;
+  onOpen: (id: number) => void;
+  /** A parent with child rows: it gets the fold button (S-1). */
+  canFold: boolean;
+  folded: boolean;
+  onToggle: (id: number) => void;
+}) {
   if (row.kind === "project") {
     return (
       <div className="gantt-name gantt-name--project" style={{ top: row.top, height: row.height }}>
         <span>{row.project.project.name}</span>
-        <span className="text-caption">{row.project.rows.length}件</span>
+        <span className="text-caption">{row.project.rows.filter((r) => !r.bridge).length}件</span>
       </div>
     );
   }
-  const todo = row.todo!.item.todo;
+  const { item, child, bridge } = row.todo!;
+  const { todo } = item;
+  const progress = childProgressText(item.children);
+  const classes = ["gantt-name", "gantt-name--todo"];
+  if (selected) classes.push("is-selected");
+  if (child) classes.push("gantt-name--child");
+  if (bridge) classes.push("gantt-name--bridge");
   return (
-    <button
-      type="button"
-      className={selected ? "gantt-name gantt-name--todo is-selected" : "gantt-name gantt-name--todo"}
-      style={{ top: row.top, height: row.height }}
-      onClick={() => onOpen(todo.id)}
-    >
-      <span className="gantt-name__title">{todo.title}</span>
-      <Badge tone={STATUS_TONE[todo.status]} dot>
-        {STATUS_LABEL[todo.status]}
-      </Badge>
-    </button>
+    <>
+      <button
+        type="button"
+        className={classes.join(" ")}
+        style={{ top: row.top, height: row.height }}
+        onClick={() => onOpen(todo.id)}
+      >
+        <span className="gantt-name__title">{todo.title}</span>
+        <span className="gantt-name__side">
+          {progress ? <span className="todo-cell__progress">{progress}</span> : null}
+          {item.due_after_parent ? (
+            <span className="gantt-name__warning" title={DUE_AFTER_PARENT_TEXT}>
+              <Icon name="alert-triangle" size={14} label={DUE_AFTER_PARENT_TEXT} />
+            </span>
+          ) : null}
+          <Badge tone={STATUS_TONE[todo.status]} dot>
+            {STATUS_LABEL[todo.status]}
+          </Badge>
+        </span>
+      </button>
+      {canFold ? (
+        <button
+          type="button"
+          className="tree-toggle gantt-name__toggle"
+          style={{ top: row.top, height: row.height }}
+          aria-expanded={!folded}
+          aria-label={`「${todo.title}」の子TODOを${folded ? "開く" : "折りたたむ"}`}
+          onClick={() => onToggle(todo.id)}
+        >
+          <Icon name={folded ? "chevron-right" : "chevron-down"} size={16} />
+        </button>
+      ) : null}
+    </>
   );
 }
 
@@ -478,11 +539,12 @@ function TodoBars({
 }) {
   const { todo, assessment } = row.item;
   const planned = plannedSpan ? spanRect(range, plannedSpan, dayWidth) : null;
-  const grips = canDrag(todo.status, plannedSpan) ? barGrips(range, plannedSpan, dayWidth) : null;
+  const grips = !row.bridge && canDrag(todo.status, plannedSpan) ? barGrips(range, plannedSpan, dayWidth) : null;
   const gripY = top + LAYOUT.plannedTop - GRIP.padY;
   const gripHeight = LAYOUT.plannedHeight + 2 * GRIP.padY;
   const actual = row.actual ? spanRect(range, row.actual, dayWidth) : null;
-  const dueX = todo.due_date ? dayCenter(range, todo.due_date, dayWidth) : null;
+  // A bridge row (a hidden parent of shown children) has no bars and no due mark.
+  const dueX = todo.due_date && !row.bridge ? dayCenter(range, todo.due_date, dayWidth) : null;
   const dueClass =
     assessment.urgency === "overdue" ? "gantt-due is-overdue" : assessment.urgency === "due_today" ? "gantt-due is-today" : "gantt-due";
   const cy = top + LAYOUT.todoRow / 2;

@@ -18,6 +18,9 @@ use crate::domain::status::StatusFields;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewTodo {
     pub project_id: i64,
+    /// The parent (S-1). The caller checks the family rules
+    /// (`domain::subtodo`).
+    pub parent_id: Option<i64>,
     pub title: String,
     pub priority: Priority,
     pub due_date: Option<NaiveDate>,
@@ -116,10 +119,10 @@ pub async fn insert(
     sqlx::query_as::<_, TodoRow>(
         "INSERT INTO todos
            (project_id, title, priority, due_date, planned_start, planned_end, memo_md,
-            sort_order, created_at, updated_at)
+            sort_order, created_at, updated_at, parent_id)
          VALUES
            (?1, ?2, ?3, ?4, ?5, ?6, ?7,
-            (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM todos WHERE project_id = ?1), ?8, ?8)
+            (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM todos WHERE project_id = ?1), ?8, ?8, ?9)
          RETURNING *",
     )
     .bind(new.project_id)
@@ -130,6 +133,7 @@ pub async fn insert(
     .bind(date_param(new.planned_end))
     .bind(&new.memo_md)
     .bind(ts_param(now))
+    .bind(new.parent_id)
     .fetch_one(&mut *conn)
     .await?
     .into_todo()
@@ -186,6 +190,43 @@ pub async fn list_by_ids(conn: &mut SqliteConnection, ids: &[i64]) -> Result<Vec
         .filter_map(|id| rows.remove(id))
         .map(TodoRow::into_todo)
         .collect()
+}
+
+/// The children of these parents (S-1), in TODO order.
+pub async fn list_children(conn: &mut SqliteConnection, parent_ids: &[i64]) -> Result<Vec<Todo>> {
+    if parent_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    sqlx::query_as::<_, TodoRow>(
+        "SELECT * FROM todos WHERE parent_id IN (SELECT value FROM json_each(?1))
+         ORDER BY sort_order, id",
+    )
+    .bind(serde_json::Value::from(parent_ids.to_vec()).to_string())
+    .fetch_all(&mut *conn)
+    .await?
+    .into_iter()
+    .map(TodoRow::into_todo)
+    .collect()
+}
+
+/// Sets (`Some`) or clears (`None`) the parent (S-1). The caller checks the
+/// family rules (`domain::subtodo`).
+pub async fn set_parent(
+    conn: &mut SqliteConnection,
+    id: i64,
+    parent_id: Option<i64>,
+    now: DateTime<Utc>,
+) -> Result<Todo> {
+    sqlx::query_as::<_, TodoRow>(
+        "UPDATE todos SET parent_id = ?2, updated_at = ?3 WHERE id = ?1 RETURNING *",
+    )
+    .bind(id)
+    .bind(parent_id)
+    .bind(ts_param(now))
+    .fetch_optional(&mut *conn)
+    .await?
+    .ok_or_else(|| not_found(id))?
+    .into_todo()
 }
 
 /// Writes the editable (non-status) fields of `todo`: title, priority, due
@@ -308,6 +349,7 @@ mod tests {
     fn new_todo(project_id: i64, title: &str) -> NewTodo {
         NewTodo {
             project_id,
+            parent_id: None,
             title: title.into(),
             priority: Priority::Medium,
             due_date: None,
@@ -712,5 +754,72 @@ mod tests {
             .unwrap();
         assert_eq!(found, vec![c3, a, b]);
         assert!(list_by_ids(&mut c, &[]).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn children_and_parent_round_trip() {
+        let (_pool, mut c) = conn().await;
+        let p = project(&mut c, "P").await;
+        let parent = insert(&mut c, &new_todo(p.id, "親"), now()).await.unwrap();
+        let other = insert(&mut c, &new_todo(p.id, "別"), now()).await.unwrap();
+        let a = insert(
+            &mut c,
+            &NewTodo {
+                parent_id: Some(parent.id),
+                ..new_todo(p.id, "子a")
+            },
+            now(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(a.parent_id, Some(parent.id));
+        let b = insert(&mut c, &new_todo(p.id, "子b"), now()).await.unwrap();
+        let later = ts(2026, 11, 20, 1, 0);
+        let b = set_parent(&mut c, b.id, Some(parent.id), later)
+            .await
+            .unwrap();
+        assert_eq!(b.parent_id, Some(parent.id));
+        assert_eq!(b.updated_at, later);
+
+        let ids = |v: Vec<Todo>| v.into_iter().map(|t| t.id).collect::<Vec<_>>();
+        assert_eq!(
+            ids(list_children(&mut c, &[parent.id]).await.unwrap()),
+            vec![a.id, b.id]
+        );
+        assert!(list_children(&mut c, &[other.id]).await.unwrap().is_empty());
+        assert!(list_children(&mut c, &[]).await.unwrap().is_empty());
+
+        let a = set_parent(&mut c, a.id, None, later).await.unwrap();
+        assert_eq!(a.parent_id, None);
+        assert_eq!(
+            ids(list_children(&mut c, &[parent.id, other.id]).await.unwrap()),
+            vec![b.id]
+        );
+        assert!(matches!(
+            set_parent(&mut c, 999, None, later).await,
+            Err(RepoError::NotFound { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn deleting_a_parent_deletes_its_children() {
+        let (_pool, mut c) = conn().await;
+        let p = project(&mut c, "P").await;
+        let parent = insert(&mut c, &new_todo(p.id, "親"), now()).await.unwrap();
+        let child = insert(
+            &mut c,
+            &NewTodo {
+                parent_id: Some(parent.id),
+                ..new_todo(p.id, "子")
+            },
+            now(),
+        )
+        .await
+        .unwrap();
+        delete(&mut c, parent.id).await.unwrap();
+        assert!(matches!(
+            get(&mut c, child.id).await,
+            Err(RepoError::NotFound { .. })
+        ));
     }
 }

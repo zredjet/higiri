@@ -18,6 +18,7 @@ pub mod report_template;
 pub mod search;
 pub mod settings;
 pub mod status;
+pub mod subtodo;
 pub mod template;
 pub mod timeline;
 pub mod urgency;

@@ -5,6 +5,7 @@ import type { TodoItem } from "../../lib/bindings";
 import { errorMessage } from "../../lib/errors";
 import { useUpdateTodo } from "../../lib/queries";
 import { fieldsOf } from "../todos/detail/draft";
+import { displayTitle } from "../todos/todoText";
 
 export type DateTarget = "due_date" | "follow_up_date";
 
@@ -30,7 +31,7 @@ export function ChangeDateDialog({
       size="sm"
       onClose={update.isPending ? undefined : onClose}
       title={`${label}を変更`}
-      description={`「${item.todo.title}」の${label}を変えます。`}
+      description={`「${displayTitle(item)}」の${label}を変えます。`}
       footer={
         <>
           <Button onClick={onClose} disabled={update.isPending}>

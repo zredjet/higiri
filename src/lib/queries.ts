@@ -253,6 +253,16 @@ export function useChangeStatus() {
   });
 }
 
+/** Puts a TODO under a parent, moves it, or (`parentId: null`) takes it out (S-1). */
+export function useSetTodoParent() {
+  const changed = useTodoChanged();
+  return useMutation({
+    scope: TODO_WRITES,
+    mutationFn: ({ id, parentId }: { id: number; parentId: number | null }) => commands.setTodoParent(id, parentId),
+    onSuccess: (item) => changed(item),
+  });
+}
+
 export function useDeleteTodo() {
   const changed = useTodoChanged();
   return useMutation({

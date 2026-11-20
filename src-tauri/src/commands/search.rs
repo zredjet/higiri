@@ -9,6 +9,7 @@ use tauri::State;
 use super::clock;
 use super::error::CmdResult;
 use crate::domain::search::{MAX_HITS, SearchResult, logs_by_todo, rank, search_hit, split_terms};
+use crate::domain::subtodo::Family;
 use crate::domain::urgency::Rules;
 use crate::domain::views::todo_item;
 use crate::repo;
@@ -32,6 +33,11 @@ pub async fn search(pool: &SqlitePool, text: &str, today: NaiveDate) -> CmdResul
     let ids = rank(candidates, &terms, MAX_HITS);
 
     let todos = repo::todos::list_by_ids(&mut conn, &ids).await?;
+    // Parents (for 「親 / 子」) and children (for the counts) of the hits.
+    let parent_ids: Vec<i64> = todos.iter().filter_map(|t| t.parent_id).collect();
+    let parents = repo::todos::list_by_ids(&mut conn, &parent_ids).await?;
+    let children = repo::todos::list_children(&mut conn, &ids).await?;
+    let family = Family::new(todos.iter().chain(&parents).chain(&children));
     let mut logs = logs_by_todo(repo::work_logs::list_by_todos(&mut conn, &ids).await?);
     let names: HashMap<i64, String> = repo::projects::list(&mut conn, true)
         .await?
@@ -45,7 +51,7 @@ pub async fn search(pool: &SqlitePool, text: &str, today: NaiveDate) -> CmdResul
         .map(|t| {
             let own = logs.remove(&t.id).unwrap_or_default();
             let name = names.get(&t.project_id).cloned().unwrap_or_default();
-            search_hit(todo_item(t, name, today, &rules), &own, &terms)
+            search_hit(todo_item(t, name, &family, today, &rules), &own, &terms)
         })
         .collect();
     Ok(SearchResult { hits, total })
@@ -88,6 +94,7 @@ mod tests {
             pool,
             NewTodoInput {
                 project_id,
+                parent_id: None,
                 title: title.into(),
                 priority: Some(Priority::Medium),
                 due_date: None,

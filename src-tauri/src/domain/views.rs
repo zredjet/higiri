@@ -7,6 +7,7 @@ use serde::Serialize;
 
 use super::model::{Project, Status, Todo};
 use super::status::check_allowed;
+use super::subtodo::{ChildCounts, Family};
 use super::urgency::{Assessment, Rules, assess, classify};
 
 /// Number of TODOs per status.
@@ -97,15 +98,32 @@ pub struct TodoItem {
     /// The follow-up date offered when this TODO goes 待ち today: the
     /// setting's days (business days in 営業日) after today.
     pub follow_up_default: NaiveDate,
+    /// The parent's title, for a child (S-1). Shown as 「親 / 子」.
+    pub parent_title: Option<String>,
+    /// The children counts, for a TODO with children (S-1).
+    pub children: Option<ChildCounts>,
+    /// An open child due after its parent (「親の日限より後」).
+    pub due_after_parent: bool,
 }
 
-pub fn todo_item(todo: Todo, project_name: String, today: NaiveDate, rules: &Rules) -> TodoItem {
+/// `family` gives the parent's title and the children counts: build it from
+/// the TODOs around this one (see [`Family`]).
+pub fn todo_item(
+    todo: Todo,
+    project_name: String,
+    family: &Family,
+    today: NaiveDate,
+    rules: &Rules,
+) -> TodoItem {
     let assessment = assess(&todo, today, rules);
     let next_statuses = Status::ALL
         .into_iter()
         .filter(|to| check_allowed(todo.status, *to).is_ok())
         .collect();
     TodoItem {
+        parent_title: family.parent_title(&todo).map(str::to_owned),
+        children: family.children(&todo),
+        due_after_parent: family.due_after_parent(&todo),
         todo,
         project_name,
         assessment,
@@ -114,12 +132,23 @@ pub fn todo_item(todo: Todo, project_name: String, today: NaiveDate, rules: &Rul
     }
 }
 
+/// A row of the TODO list, in tree order (S-1): a parent, then its children.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
+pub struct TodoListRow {
+    pub item: TodoItem,
+    /// Shown indented under its parent.
+    pub child: bool,
+    /// A parent that does not match the filters, shown (dimmed) only to
+    /// hold its matching children. Not counted in the tabs.
+    pub bridge: bool,
+}
+
 /// The TODO list with the counts for its status tabs. The counts cover the
 /// project, 日限 and 優先度 filters but not the status filter, so every tab
-/// shows how many rows it would list.
+/// shows how many rows it would list (bridge rows are not counted).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
 pub struct TodoList {
-    pub items: Vec<TodoItem>,
+    pub rows: Vec<TodoListRow>,
     pub counts: StatusCounts,
     /// The 「すべて」 tab.
     pub total: i64,
@@ -202,11 +231,16 @@ mod tests {
         let item = todo_item(
             t(1, Status::Todo, Some("2026-11-17")),
             "社内ツール整備".into(),
+            &Family::default(),
             d("2026-11-19"),
             &rules(3),
         );
         assert_eq!(item.project_name, "社内ツール整備");
         assert_eq!(item.assessment.days_until_due, Some(-2));
+        assert_eq!(
+            (item.parent_title, item.children, item.due_after_parent),
+            (None, None, false)
+        );
         assert_eq!(
             item.next_statuses,
             vec![
@@ -220,6 +254,7 @@ mod tests {
         let done = todo_item(
             t(1, Status::Done, None),
             "x".into(),
+            &Family::default(),
             d("2026-11-19"),
             &rules(3),
         );
@@ -227,6 +262,7 @@ mod tests {
         let cancelled = todo_item(
             t(1, Status::Cancelled, None),
             "x".into(),
+            &Family::default(),
             d("2026-11-19"),
             &rules(3),
         );
@@ -234,9 +270,54 @@ mod tests {
     }
 
     #[test]
+    fn todo_item_carries_the_family() {
+        let today = d("2026-11-19");
+        let parent = Todo {
+            id: 1,
+            title: "親".into(),
+            ..t(1, Status::Doing, Some("2026-11-20"))
+        };
+        let child = Todo {
+            id: 2,
+            parent_id: Some(1),
+            title: "子".into(),
+            ..t(1, Status::Todo, Some("2026-11-21"))
+        };
+        let done = Todo {
+            id: 3,
+            parent_id: Some(1),
+            ..t(1, Status::Done, None)
+        };
+        let family = Family::new([&parent, &child, &done]);
+        let p = todo_item(parent.clone(), "P".into(), &family, today, &rules(3));
+        assert_eq!(p.parent_title, None);
+        assert_eq!(
+            p.children,
+            Some(ChildCounts {
+                total: 2,
+                done: 1,
+                open: 1
+            })
+        );
+        assert!(!p.due_after_parent);
+        let c = todo_item(child, "P".into(), &family, today, &rules(3));
+        assert_eq!(c.parent_title.as_deref(), Some("親"));
+        assert_eq!(c.children, None);
+        assert!(c.due_after_parent);
+    }
+
+    #[test]
     fn follow_up_default_counts_like_the_setting() {
         let today = d("2026-11-19"); // Thursday
-        let item = |r: &Rules| todo_item(t(1, Status::Doing, None), "x".into(), today, r);
+        let item = |r: &Rules| {
+            todo_item(
+                t(1, Status::Doing, None),
+                "x".into(),
+                &Family::default(),
+                today,
+                r,
+            )
+        };
         assert_eq!(item(&rules(3)).follow_up_default, d("2026-11-22"));
         // 11/20, 11/24, 11/25 (11/21–11/23 are off).
         assert_eq!(

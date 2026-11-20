@@ -1,15 +1,18 @@
 import type { Assessment, DaySpan, GanttRow } from "../../lib/bindings";
 import { monthDay } from "../../lib/date";
-import { overdueText, SHIFTED_TEXT } from "../todos/todoText";
+import { displayTitle, DUE_AFTER_PARENT_TEXT, overdueText, SHIFTED_TEXT, STATUS_LABEL } from "../todos/todoText";
 
 /**
  * Accessible name of a chart row, as in the mock:
  * 「API設計書のレビュー対応:予定 11/16〜11/19、実績 11/17〜(11/19から待ち)、日限 11/20」.
  * In business days the counts read 「2営業日超過」, and a due date moved off a
- * holiday adds 「休日のため前倒し」.
+ * holiday adds 「休日のため前倒し」. A child is named 「親 / 子」 and may add
+ * 「親の日限より後」 (S-1); a bridge row (a hidden parent) has no bars to read.
  */
 export function rowLabel(row: GanttRow): string {
   const { todo, assessment } = row.item;
+  const name = displayTitle(row.item);
+  if (row.bridge) return `${name}:${STATUS_LABEL[todo.status]}(子TODOだけを表示しています)`;
   const planned =
     todo.planned_start || todo.planned_end
       ? `予定 ${todo.planned_start ? monthDay(todo.planned_start) : ""}〜${todo.planned_end ? monthDay(todo.planned_end) : ""}`
@@ -24,9 +27,10 @@ export function rowLabel(row: GanttRow): string {
     if (assessment.urgency === "due_today") notes.push("今日");
     else if (assessment.urgency === "overdue" && assessment.days_until_due !== null) notes.push(overdueText(assessment));
     if (assessment.due_shifted) notes.push(SHIFTED_TEXT);
+    if (row.item.due_after_parent) notes.push(DUE_AFTER_PARENT_TEXT);
     due = `日限 ${monthDay(todo.due_date)}${notes.length > 0 ? `(${notes.join("、")})` : ""}`;
   }
-  return `${todo.title}:${planned}、${actual}、${due}`;
+  return `${name}:${planned}、${actual}、${due}`;
 }
 
 /** The dates shown while dragging a planned bar: 「11/20〜11/27」. */

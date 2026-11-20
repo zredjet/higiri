@@ -156,6 +156,7 @@ export function SearchDialog({ open, onClose, onOpenTodo }: SearchDialogProps) {
             >
               <div className="search-hit__head">
                 <span className="search-hit__title">
+                  {hit.item.parent_title ? `${hit.item.parent_title} / ` : null}
                   <Marked segments={hit.title} />
                 </span>
                 <span className="search-hit__badges">

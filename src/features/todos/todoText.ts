@@ -3,7 +3,7 @@
 // business days (「営業日」) and whether the due date was moved off a holiday
 // (「休日のため前倒し」) also come from the Assessment.
 import type { BadgeTone, IconName } from "../../components/aizome";
-import type { Assessment, Priority, Status, Todo, Urgency } from "../../lib/bindings";
+import type { Assessment, ChildCounts, Priority, Status, Todo, Urgency } from "../../lib/bindings";
 import { monthDay } from "../../lib/date";
 
 export const STATUS_LABEL: Record<Status, string> = {
@@ -112,12 +112,55 @@ export function dueNote(a: Assessment): Note | null {
   return { text: text + shifted, icon: URGENCY_ICON[a.urgency], color: TONE_COLOR[URGENCY_TONE[a.urgency]] };
 }
 
-/** The small warnings of the list (計画が間に合わない, 予定超過). */
-export function warningTexts(a: Assessment): string[] {
+/** A child due after its parent (S-1, like 計画が間に合わない). */
+export const DUE_AFTER_PARENT_TEXT = "親の日限より後";
+
+/**
+ * The small warnings of the list (計画が間に合わない, 予定超過, and for a
+ * child 親の日限より後).
+ */
+export function warningTexts(a: Assessment, dueAfterParent = false): string[] {
   const out: string[] = [];
   if (a.warnings.plan_misses_due) out.push("計画が間に合わない");
   if (a.warnings.plan_overrun) out.push("予定超過");
+  if (dueAfterParent) out.push(DUE_AFTER_PARENT_TEXT);
   return out;
+}
+
+// ---- サブTODO (S-1) ----------------------------------------------------------
+
+/** 「親 / 子」 for a child (dashboard, reminder, search), the title otherwise. */
+export function displayTitle(item: { todo: Todo; parent_title: string | null }): string {
+  return item.parent_title ? `${item.parent_title} / ${item.todo.title}` : item.todo.title;
+}
+
+/** 「子 2/3」 next to a parent's title (中止 not counted). null when no child counts. */
+export function childProgressText(c: ChildCounts | null): string | null {
+  return c && c.total > 0 ? `子 ${c.done}/${c.total}` : null;
+}
+
+/** 「2/3 完了」 in the detail panel's 子TODO section. */
+export function childDoneText(c: ChildCounts): string {
+  return `${c.done}/${c.total} 完了`;
+}
+
+/** Shown when every child is 完了 or 中止 and the parent is still open. */
+export const CHILDREN_ALL_CLOSED = "子TODOはすべて終わりました。";
+
+/** Asked before 完了 when the parent has open children. */
+export function closeChildrenQuestion(open: number): string {
+  return `開いている子TODOが${open}件あります。一緒に完了にしますか。`;
+}
+
+/** Added to the 中止 dialog when the parent has open children. */
+export function cancelChildrenNote(open: number): string {
+  return `開いている子TODO ${open}件も中止になります。`;
+}
+
+/** The delete confirmation: children go with their parent. */
+export function deleteTodoText(title: string, children: number): string {
+  const kids = children > 0 ? `子TODO ${children}件も削除されます。` : "";
+  return `「${title}」と、その作業ログ・変更履歴をすべて削除します。${kids}削除したものは元に戻せません。不要になっただけなら、ステータスを「中止」にすると記録が残ります。`;
 }
 
 /** 「予定 11/11〜11/18」「実績 11/12〜」「実績 なし」. */

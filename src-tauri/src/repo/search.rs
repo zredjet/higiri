@@ -83,6 +83,7 @@ mod tests {
             c,
             &NewTodo {
                 project_id,
+                parent_id: None,
                 title: title.into(),
                 priority: Priority::Medium,
                 due_date: None,

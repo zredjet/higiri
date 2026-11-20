@@ -155,7 +155,7 @@ export default function App() {
       </main>
 
       {openTodoId !== null && PANEL_PAGES.includes(route.page) ? (
-        <TodoDetailPanel key={openTodoId} todoId={openTodoId} onClose={closeTodo} />
+        <TodoDetailPanel key={openTodoId} todoId={openTodoId} onClose={closeTodo} onOpenTodo={setOpenTodoId} />
       ) : null}
 
       {reminder ? <ReminderDialog reminder={reminder} onClose={acknowledge} /> : null}

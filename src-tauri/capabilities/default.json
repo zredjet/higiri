@@ -30,6 +30,7 @@
     "allow-update-todo",
     "allow-change-status",
     "allow-delete-todo",
+    "allow-set-todo-parent",
     "allow-list-timeline",
     "allow-save-work-log",
     "allow-delete-work-log",

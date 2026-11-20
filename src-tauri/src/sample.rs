@@ -2,6 +2,12 @@
 //!
 //! The UI mock's 3 projects and 11 TODOs (docs/ui-mock/README.md), with every
 //! date shifted so that the mock's "today" (2026-11-19) becomes the real today.
+//!
+//! v0.3.0 adds TODOs the mock does not have, chosen so that the mock's
+//! screens (the dashboard's 日限注意, the daily report of the mock's day) stay
+//! as they are: a parent with three children (S-1) in 社内ツール整備, none
+//! 作業中 or 待ち, none starting before the day after tomorrow, none due
+//! within the 「間近」 days, none closed on the mock's day.
 //! Status changes are replayed through `domain::status::transition`, so the
 //! actual dates, waiting fields and change history come out exactly as the app
 //! itself would record them.
@@ -37,6 +43,8 @@ enum Step {
 
 struct TodoSpec {
     project: usize,
+    /// Title of the parent (an earlier entry), for a child.
+    parent: Option<&'static str>,
     title: &'static str,
     priority: Priority,
     due: &'static str,
@@ -44,9 +52,10 @@ struct TodoSpec {
     history: &'static [Step],
 }
 
-const TODOS: [TodoSpec; 11] = [
+const TODOS: [TodoSpec; 15] = [
     TodoSpec {
         project: 0,
+        parent: None,
         title: "移行手順書のドラフト",
         priority: Priority::Medium,
         due: "2026-11-19",
@@ -55,6 +64,7 @@ const TODOS: [TodoSpec; 11] = [
     },
     TodoSpec {
         project: 0,
+        parent: None,
         title: "API設計書のレビュー対応",
         priority: Priority::High,
         due: "2026-11-20",
@@ -66,6 +76,7 @@ const TODOS: [TodoSpec; 11] = [
     },
     TodoSpec {
         project: 0,
+        parent: None,
         title: "結合テスト計画の作成",
         priority: Priority::Medium,
         due: "2026-11-30",
@@ -74,6 +85,7 @@ const TODOS: [TodoSpec; 11] = [
     },
     TodoSpec {
         project: 0,
+        parent: None,
         title: "性能試験の環境準備",
         priority: Priority::Medium,
         due: "2026-12-04",
@@ -82,6 +94,7 @@ const TODOS: [TodoSpec; 11] = [
     },
     TodoSpec {
         project: 0,
+        parent: None,
         title: "要件定義書の改訂",
         priority: Priority::Medium,
         due: "2026-11-13",
@@ -93,6 +106,7 @@ const TODOS: [TodoSpec; 11] = [
     },
     TodoSpec {
         project: 0,
+        parent: None,
         title: "旧帳票の移行検証",
         priority: Priority::Medium,
         due: "2026-11-27",
@@ -101,6 +115,7 @@ const TODOS: [TodoSpec; 11] = [
     },
     TodoSpec {
         project: 1,
+        parent: None,
         title: "ライセンス棚卸し",
         priority: Priority::Medium,
         due: "2026-11-17",
@@ -109,6 +124,7 @@ const TODOS: [TodoSpec; 11] = [
     },
     TodoSpec {
         project: 1,
+        parent: None,
         title: "デプロイ手順書の更新",
         priority: Priority::Medium,
         due: "2026-11-24",
@@ -120,6 +136,7 @@ const TODOS: [TodoSpec; 11] = [
     },
     TodoSpec {
         project: 1,
+        parent: None,
         title: "監視ダッシュボードの整理",
         priority: Priority::Medium,
         due: "2026-12-03",
@@ -128,6 +145,7 @@ const TODOS: [TodoSpec; 11] = [
     },
     TodoSpec {
         project: 2,
+        parent: None,
         title: "募集要項ページの原稿確認",
         priority: Priority::Medium,
         due: "2026-11-27",
@@ -139,10 +157,51 @@ const TODOS: [TodoSpec; 11] = [
     },
     TodoSpec {
         project: 2,
+        parent: None,
         title: "応募フォームの項目見直し",
         priority: Priority::Medium,
         due: "2026-12-02",
         planned: ("2026-11-25", "2026-11-27"),
+        history: &[],
+    },
+    // サブTODO (S-1): 1 of 3 children done.
+    TodoSpec {
+        project: 1,
+        parent: None,
+        title: "開発環境の標準化",
+        priority: Priority::Medium,
+        due: "2026-12-11",
+        planned: ("2026-11-24", "2026-12-10"),
+        history: &[],
+    },
+    TodoSpec {
+        project: 1,
+        parent: Some("開発環境の標準化"),
+        title: "必要なツールの洗い出し",
+        priority: Priority::Medium,
+        due: "2026-11-18",
+        planned: ("2026-11-16", "2026-11-18"),
+        history: &[
+            Step::To("2026-11-16", Status::Doing),
+            Step::To("2026-11-18", Status::Done),
+        ],
+    },
+    TodoSpec {
+        project: 1,
+        parent: Some("開発環境の標準化"),
+        title: "セットアップ手順書の作成",
+        priority: Priority::Medium,
+        due: "2026-12-04",
+        planned: ("2026-11-24", "2026-12-02"),
+        history: &[],
+    },
+    TodoSpec {
+        project: 1,
+        parent: Some("開発環境の標準化"),
+        title: "新メンバーでの試行",
+        priority: Priority::Medium,
+        due: "2026-12-10",
+        planned: ("2026-12-03", "2026-12-09"),
         history: &[],
     },
 ];
@@ -231,10 +290,18 @@ pub async fn seed_if_empty(pool: &SqlitePool, today: NaiveDate) -> Result<bool, 
     for (i, spec) in TODOS.iter().enumerate() {
         let minute = u32::try_from(i).unwrap_or(0);
         let created_at = shift.at(CREATED_ON, minute);
+        let parent_id = spec.parent.map(|title| {
+            todo_ids
+                .iter()
+                .find(|(t, _)| *t == title)
+                .map(|(_, id)| *id)
+                .expect("a parent comes before its children")
+        });
         let mut todo = repo::todos::insert(
             &mut tx,
             &NewTodo {
                 project_id: project_ids[spec.project],
+                parent_id,
                 title: spec.title.into(),
                 priority: spec.priority,
                 due_date: Some(shift.date(spec.due)),
@@ -292,6 +359,7 @@ pub async fn seed_if_empty(pool: &SqlitePool, today: NaiveDate) -> Result<bool, 
 mod tests {
     use super::*;
     use crate::domain::events::EventKind;
+    use crate::domain::model::Todo;
     use crate::domain::testing::{d, rules};
     use crate::domain::urgency::{Urgency, classify};
     use crate::domain::views::project_summaries;
@@ -327,7 +395,8 @@ mod tests {
             Urgency::ALL.iter().map(|u| (*u, 1)).collect::<Vec<_>>()
         );
 
-        // Per project: attention 3 / 1 / 1, progress 1/5, 1/3, 0/2.
+        // Per project: attention 3 / 1 / 1, progress 1/5, 2/7 (with the
+        // parent and its children), 0/2.
         let mut c = pool.acquire().await.unwrap();
         let projects = repo::projects::list(&mut c, false).await.unwrap();
         let todos = repo::todos::list(&mut c, &TodoFilter::default())
@@ -337,7 +406,19 @@ mod tests {
             .into_iter()
             .map(|s| (s.attention_count, s.progress_done, s.progress_total))
             .collect();
-        assert_eq!(s, vec![(3, 1, 5), (1, 1, 3), (1, 0, 2)]);
+        assert_eq!(s, vec![(3, 1, 5), (1, 2, 7), (1, 0, 2)]);
+
+        // The parent has 3 children; their dates sit inside its due date.
+        let parent = todos
+            .iter()
+            .find(|t| t.title == "開発環境の標準化")
+            .unwrap();
+        let children: Vec<&Todo> = todos
+            .iter()
+            .filter(|t| t.parent_id == Some(parent.id))
+            .collect();
+        assert_eq!(children.len(), 3);
+        assert!(children.iter().all(|c| c.due_date <= parent.due_date));
 
         // The API review TODO went 未着手 → 作業中 (11/17) → 待ち (11/19).
         let api = todos

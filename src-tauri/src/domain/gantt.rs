@@ -2,6 +2,8 @@
 //!
 //! Spans are whole days, both ends included. The screen turns them into
 //! coordinates (src/features/gantt/geometry.ts).
+//!
+//! Rows follow the list's tree order (S-1): a parent, then its children.
 
 use std::collections::HashMap;
 
@@ -9,7 +11,9 @@ use chrono::{Days, NaiveDate};
 use serde::Serialize;
 
 use super::events::{EventKind, TodoEvent};
+use super::listing::tree_rows;
 use super::model::{Project, Status, Todo};
+use super::subtodo::Family;
 use super::urgency::Rules;
 use super::views::{TodoItem, todo_item};
 
@@ -30,6 +34,11 @@ pub struct GanttRow {
     pub actual: Option<DaySpan>,
     /// 待ち spans inside the actual bar (G-7).
     pub waiting: Vec<DaySpan>,
+    /// Shown indented under its parent (S-1).
+    pub child: bool,
+    /// A hidden (完了・中止) parent shown only to hold its shown children:
+    /// no bars and no due mark (all spans are empty).
+    pub bridge: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
@@ -110,6 +119,20 @@ pub fn row(item: TodoItem, events: &[&TodoEvent], today: NaiveDate) -> GanttRow 
         planned,
         actual,
         waiting,
+        child: false,
+        bridge: false,
+    }
+}
+
+/// A bridge row: the TODO without its bars.
+fn bridge_row(item: TodoItem) -> GanttRow {
+    GanttRow {
+        item,
+        planned: None,
+        actual: None,
+        waiting: Vec::new(),
+        child: false,
+        bridge: true,
     }
 }
 
@@ -130,7 +153,10 @@ impl GanttFilter {
     }
 }
 
-/// Groups the TODOs by project, in the order given (project order, then TODO order).
+/// Groups the TODOs by project, in the order given (project order, then TODO
+/// order), each parent followed by its children. `todos` should hold every
+/// TODO of the projects (the hidden ones too), so the children counts and
+/// the bridge rows come out right.
 pub fn build(
     projects: Vec<Project>,
     todos: &[Todo],
@@ -143,16 +169,27 @@ pub fn build(
     for e in events {
         by_todo.entry(e.todo_id).or_default().push(e);
     }
+    let family = Family::new(todos);
     let projects = projects
         .into_iter()
         .map(|project| {
-            let rows = todos
+            let own: Vec<&Todo> = todos
                 .iter()
-                .filter(|t| t.project_id == project.id && filter.shows(t.status))
-                .map(|t| {
-                    let item = todo_item(t.clone(), project.name.clone(), today, rules);
+                .filter(|t| t.project_id == project.id)
+                .collect();
+            let rows = tree_rows(&own, |t| t, |t| filter.shows(t.status))
+                .into_iter()
+                .map(|r| {
+                    let t = own[r.index];
+                    let item = todo_item(t.clone(), project.name.clone(), &family, today, rules);
+                    if r.bridge {
+                        return bridge_row(item);
+                    }
                     let evs = by_todo.get(&t.id).map(Vec::as_slice).unwrap_or(&[]);
-                    row(item, evs, today)
+                    GanttRow {
+                        child: r.child,
+                        ..row(item, evs, today)
+                    }
                 })
                 .collect();
             GanttProject { project, rows }
@@ -165,7 +202,7 @@ pub fn build(
 mod tests {
     use super::*;
     use crate::domain::events::EventNote;
-    use crate::domain::testing::{d, todo};
+    use crate::domain::testing::{d, rules, todo};
 
     fn span(a: &str, b: &str) -> DaySpan {
         DaySpan {
@@ -316,5 +353,121 @@ mod tests {
         assert!(f.shows(Status::Done));
         assert!(!f.shows(Status::Cancelled));
         assert!(f.shows(Status::Hold));
+    }
+
+    fn project(id: i64) -> Project {
+        Project {
+            id,
+            name: format!("P{id}"),
+            color: "#3B6FD4".into(),
+            description: String::new(),
+            sort_order: id,
+            archived_at: None,
+            created_at: crate::domain::testing::ts(2026, 11, 1, 0, 0),
+            updated_at: crate::domain::testing::ts(2026, 11, 1, 0, 0),
+        }
+    }
+
+    fn node(id: i64, parent: Option<i64>, status: Status) -> Todo {
+        Todo {
+            id,
+            parent_id: parent,
+            planned_start: Some(d("2026-11-16")),
+            planned_end: Some(d("2026-11-20")),
+            actual_start: Some(d("2026-11-16")),
+            due_date: Some(d("2026-11-25")),
+            ..todo(status)
+        }
+    }
+
+    /// (id, child, bridge, has bars) of the rows.
+    fn shape(g: &Gantt) -> Vec<(i64, bool, bool, bool)> {
+        g.projects[0]
+            .rows
+            .iter()
+            .map(|r| {
+                (
+                    r.item.todo.id,
+                    r.child,
+                    r.bridge,
+                    r.planned.is_some() || r.actual.is_some(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn children_follow_their_parent() {
+        let todos = vec![
+            node(1, None, Status::Doing),
+            node(2, None, Status::Todo),
+            node(3, Some(1), Status::Doing),
+            node(4, Some(1), Status::Done),
+        ];
+        let all = GanttFilter {
+            include_done: true,
+            include_cancelled: true,
+        };
+        let g = build(
+            vec![project(1)],
+            &todos,
+            &[],
+            all,
+            d("2026-11-19"),
+            &rules(3),
+        );
+        assert_eq!(
+            shape(&g),
+            vec![
+                (1, false, false, true),
+                (3, true, false, true),
+                (4, true, false, true),
+                (2, false, false, true),
+            ]
+        );
+        assert_eq!(
+            g.projects[0].rows[0]
+                .item
+                .children
+                .map(|c| (c.done, c.total)),
+            Some((1, 2))
+        );
+        assert_eq!(
+            g.projects[0].rows[1].item.parent_title.as_deref(),
+            Some("テスト")
+        );
+    }
+
+    #[test]
+    fn hidden_parent_of_shown_children_is_a_bridge_without_bars() {
+        let todos = vec![
+            node(1, None, Status::Done),
+            node(2, Some(1), Status::Doing),
+            node(3, Some(1), Status::Done),
+            node(4, None, Status::Done),
+        ];
+        let open_only = GanttFilter {
+            include_done: false,
+            include_cancelled: false,
+        };
+        let g = build(
+            vec![project(1)],
+            &todos,
+            &[],
+            open_only,
+            d("2026-11-19"),
+            &rules(3),
+        );
+        assert_eq!(
+            shape(&g),
+            vec![(1, false, true, false), (2, true, false, true)]
+        );
+        let bridge = &g.projects[0].rows[0];
+        assert!(bridge.waiting.is_empty());
+        // Its counts still cover the hidden child.
+        assert_eq!(
+            bridge.item.children.map(|c| (c.done, c.total)),
+            Some((1, 2))
+        );
     }
 }

@@ -7,6 +7,7 @@ use serde::Serialize;
 
 use super::model::{Project, Status, Todo};
 use super::settings::{ReminderFrequency, Settings};
+use super::subtodo::Family;
 use super::urgency::{Rules, Urgency, attention_order};
 use super::views::{ProjectSummary, TodoItem, project_summaries, todo_item};
 
@@ -78,11 +79,13 @@ fn items(
     today: NaiveDate,
     rules: &Rules,
 ) -> Vec<TodoItem> {
+    // Children show 「親 / 子」 (S-1).
+    let family = Family::new(todos);
     todos
         .iter()
         .map(|t| {
             let name = names.get(&t.project_id).cloned().unwrap_or_default();
-            todo_item(t.clone(), name, today, rules)
+            todo_item(t.clone(), name, &family, today, rules)
         })
         .collect()
 }
@@ -529,5 +532,36 @@ mod tests {
         let r = startup_reminder(&Settings::default(), dash.attention.clone(), today).unwrap();
         assert_eq!(r.items.len(), 5);
         assert_eq!(r.frequency, ReminderFrequency::EveryLaunch);
+    }
+
+    #[test]
+    fn a_child_is_judged_by_itself_and_carries_its_parent() {
+        let today = d("2026-11-19");
+        let mut todos = mock_todos();
+        let parent_id = todos[0].id;
+        todos.push(Todo {
+            id: 100,
+            project_id: 1,
+            parent_id: Some(parent_id),
+            title: "切り戻し手順の確認".into(),
+            due_date: Some(d("2026-11-18")),
+            ..todo(Status::Todo)
+        });
+        let dash = build(
+            vec![project(1, "基幹システム更改"), project(2, "社内ツール整備")],
+            &todos,
+            today,
+            &rules(3),
+        );
+        assert_eq!(dash.counts.overdue, 2);
+        let child = dash.attention.iter().find(|i| i.todo.id == 100).unwrap();
+        assert_eq!(child.parent_title.as_deref(), Some("移行手順書のドラフト"));
+        assert_eq!(child.assessment.urgency, Some(Urgency::Overdue));
+        let parent = dash
+            .attention
+            .iter()
+            .find(|i| i.todo.id == parent_id)
+            .unwrap();
+        assert_eq!(parent.children.map(|c| c.open), Some(1));
     }
 }

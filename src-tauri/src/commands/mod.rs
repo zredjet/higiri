@@ -46,6 +46,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             todos::update_todo,
             todos::change_status,
             todos::delete_todo,
+            todos::set_todo_parent,
             work_logs::list_timeline,
             work_logs::save_work_log,
             work_logs::delete_work_log,
@@ -121,7 +122,7 @@ mod tests {
             .collect();
         allowed.sort();
         assert_eq!(allowed, commands_in_bindings());
-        assert_eq!(allowed.len(), 32);
+        assert_eq!(allowed.len(), 33);
     }
 
     /// Regenerates `src/lib/bindings.ts` and fails when the committed file was

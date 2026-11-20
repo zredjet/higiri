@@ -80,7 +80,7 @@ function TodosView({ projectId, selectedTodoId, onOpenTodo, onEditProject, onAdd
       {list.error ? <Alert tone="danger">{errorMessage(list.error)}</Alert> : null}
       {list.data ? (
         <TodoTable
-          items={list.data.items}
+          rows={list.data.rows}
           showProject={projectId === null}
           selectedId={selectedTodoId}
           onOpen={onOpenTodo}

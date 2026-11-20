@@ -28,6 +28,7 @@ export function QuickAdd({ projectId, onAdded }: { projectId: number; onAdded?: 
         create.mutate(
           {
             project_id: projectId,
+            parent_id: null,
             title,
             priority: null,
             due_date: null,

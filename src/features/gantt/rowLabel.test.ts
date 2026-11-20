@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Assessment, GanttRow, Todo } from "../../lib/bindings";
 import { dragText, dueMarkText, rowLabel } from "./rowLabel";
 
-function row(todo: Partial<Todo>, assessment: Partial<Assessment> = {}): GanttRow {
+function row(todo: Partial<Todo>, assessment: Partial<Assessment> = {}, more: Partial<GanttRow> = {}): GanttRow {
   return {
     item: {
       todo: {
@@ -42,14 +42,33 @@ function row(todo: Partial<Todo>, assessment: Partial<Assessment> = {}): GanttRo
       },
       next_statuses: [],
       follow_up_default: "2026-11-22",
+      parent_title: null,
+      children: null,
+      due_after_parent: false,
     },
     planned: null,
     actual: null,
     waiting: [],
+    child: false,
+    bridge: false,
+    ...more,
   };
 }
 
 describe("rowLabel", () => {
+  it("names a child with its parent and warns about its due date", () => {
+    const child = row({ title: "子", due_date: "2026-11-25" }, {}, { child: true });
+    child.item.parent_title = "親";
+    child.item.due_after_parent = true;
+    expect(rowLabel(child)).toBe("親 / 子:予定なし、実績なし、日限 11/25(親の日限より後)");
+  });
+
+  it("reads a bridge row as a hidden parent", () => {
+    expect(rowLabel(row({ title: "親", status: "done" }, {}, { bridge: true }))).toBe(
+      "親:完了(子TODOだけを表示しています)",
+    );
+  });
+
   it("matches the mock's labels", () => {
     expect(
       rowLabel(

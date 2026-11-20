@@ -1,6 +1,20 @@
 import { describe, expect, it } from "vitest";
 import type { Assessment, Todo } from "../../lib/bindings";
-import { dueNote, periodText, reminderSide, situationText, subLine, waitingMessage, warningTexts } from "./todoText";
+import {
+  cancelChildrenNote,
+  childDoneText,
+  childProgressText,
+  closeChildrenQuestion,
+  deleteTodoText,
+  displayTitle,
+  dueNote,
+  periodText,
+  reminderSide,
+  situationText,
+  subLine,
+  waitingMessage,
+  warningTexts,
+} from "./todoText";
 
 function assessment(over: Partial<Assessment> = {}): Assessment {
   return {
@@ -204,6 +218,38 @@ describe("business days (営業日)", () => {
     );
     expect(waitingMessage(waiting, biz({ waiting_day: 4, days_until_due: -2, due_shifted: true }))).toBe(
       "認証担当の回答を待っています。待ち4日目で、日限(休日のため前倒し)を2営業日過ぎています。",
+    );
+  });
+});
+
+describe("サブTODO", () => {
+  it("names a child with its parent", () => {
+    expect(displayTitle({ todo: todo({ title: "子" }), parent_title: "親" })).toBe("親 / 子");
+    expect(displayTitle({ todo: todo({ title: "単独" }), parent_title: null })).toBe("単独");
+  });
+
+  it("shows the progress without cancelled children", () => {
+    expect(childProgressText({ total: 3, done: 2, open: 1 })).toBe("子 2/3");
+    expect(childProgressText({ total: 0, done: 0, open: 0 })).toBeNull();
+    expect(childProgressText(null)).toBeNull();
+    expect(childDoneText({ total: 3, done: 2, open: 1 })).toBe("2/3 完了");
+  });
+
+  it("warns about a child due after its parent after the other warnings", () => {
+    const a = assessment({ warnings: { plan_misses_due: true, plan_overrun: false } });
+    expect(warningTexts(a, true)).toEqual(["計画が間に合わない", "親の日限より後"]);
+    expect(warningTexts(a)).toEqual(["計画が間に合わない"]);
+    expect(warningTexts(assessment(), true)).toEqual(["親の日限より後"]);
+  });
+
+  it("words the closing and deleting of a parent", () => {
+    expect(closeChildrenQuestion(2)).toBe("開いている子TODOが2件あります。一緒に完了にしますか。");
+    expect(cancelChildrenNote(2)).toBe("開いている子TODO 2件も中止になります。");
+    expect(deleteTodoText("親", 3)).toBe(
+      "「親」と、その作業ログ・変更履歴をすべて削除します。子TODO 3件も削除されます。削除したものは元に戻せません。不要になっただけなら、ステータスを「中止」にすると記録が残ります。",
+    );
+    expect(deleteTodoText("単独", 0)).toBe(
+      "「単独」と、その作業ログ・変更履歴をすべて削除します。削除したものは元に戻せません。不要になっただけなら、ステータスを「中止」にすると記録が残ります。",
     );
   });
 });

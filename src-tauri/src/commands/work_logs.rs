@@ -187,6 +187,7 @@ mod tests {
             &pool,
             NewTodoInput {
                 project_id: p.id,
+                parent_id: None,
                 title: "API設計書のレビュー対応".into(),
                 priority: None,
                 due_date: None,
@@ -355,6 +356,7 @@ mod tests {
             &mut c,
             &repo::todos::NewTodo {
                 project_id: 1,
+                parent_id: None,
                 title: "別".into(),
                 priority: Default::default(),
                 due_date: None,

@@ -1,5 +1,5 @@
 //! TODO: list_todos, get_todo, create_todo, update_todo, change_status,
-//! delete_todo.
+//! delete_todo, set_todo_parent (v0.3.0, S-1).
 
 use std::collections::HashMap;
 
@@ -12,11 +12,12 @@ use super::clock;
 use super::error::{AppError, CmdResult};
 use super::validate;
 use crate::domain::events;
-use crate::domain::listing::{DueFilter, TodoSort, due_matches, sort_todos};
+use crate::domain::listing::{DueFilter, TodoSort, due_matches, sort_todos, tree_rows};
 use crate::domain::model::{Priority, Status, Todo};
 use crate::domain::status::{StatusChange, StatusFields, transition};
+use crate::domain::subtodo::{Family, check_new_child, check_parent};
 use crate::domain::urgency::Rules;
-use crate::domain::views::{StatusCounts, TodoItem, TodoList, todo_item};
+use crate::domain::views::{StatusCounts, TodoItem, TodoList, TodoListRow, todo_item};
 use crate::repo;
 use crate::repo::todos::{NewTodo, TodoFilter};
 
@@ -38,6 +39,9 @@ pub struct TodoQuery {
 #[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct NewTodoInput {
     pub project_id: i64,
+    /// Adds it as a child of this TODO (S-1), which must be in the same
+    /// project and have no parent. `null` = a TODO of its own.
+    pub parent_id: Option<i64>,
     pub title: String,
     /// `null` = 中.
     pub priority: Option<Priority>,
@@ -113,11 +117,24 @@ pub async fn change_status(
     change_status_impl(&pool, id, &change, clock::today(), clock::now()).await
 }
 
-/// Deletes a TODO with its work logs and history. The screen confirms first.
+/// Deletes a TODO with its work logs and history, and its children (S-1).
+/// The screen confirms first.
 #[tauri::command]
 #[specta::specta]
 pub async fn delete_todo(pool: State<'_, SqlitePool>, id: i64) -> CmdResult<()> {
     delete(&pool, id).await
+}
+
+/// Puts a TODO under a parent, moves it to another one, or (`null`) takes it
+/// out (S-1). Same project, one level. Not recorded in the history.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_todo_parent(
+    pool: State<'_, SqlitePool>,
+    id: i64,
+    parent_id: Option<i64>,
+) -> CmdResult<TodoItem> {
+    set_parent(&pool, id, parent_id, clock::today(), clock::now()).await
 }
 
 // ---- implementation ----------------------------------------------------------
@@ -126,10 +143,18 @@ async fn rules(conn: &mut SqliteConnection) -> CmdResult<Rules> {
     Ok(Rules::from_settings(&repo::settings::load(conn).await?))
 }
 
+/// One TODO with its parent's title and its children counts, read from the
+/// database (its family is not at hand).
 async fn item(conn: &mut SqliteConnection, todo: Todo, today: NaiveDate) -> CmdResult<TodoItem> {
     let project = repo::projects::get(conn, todo.project_id).await?;
     let rules = rules(conn).await?;
-    Ok(todo_item(todo, project.name, today, &rules))
+    let parent = match todo.parent_id {
+        Some(p) => repo::todos::list_by_ids(conn, &[p]).await?,
+        None => Vec::new(),
+    };
+    let children = repo::todos::list_children(conn, &[todo.id]).await?;
+    let family = Family::new(parent.iter().chain(&children).chain([&todo]));
+    Ok(todo_item(todo, project.name, &family, today, &rules))
 }
 
 pub async fn list(pool: &SqlitePool, query: &TodoQuery, today: NaiveDate) -> CmdResult<TodoList> {
@@ -141,7 +166,7 @@ pub async fn list(pool: &SqlitePool, query: &TodoQuery, today: NaiveDate) -> Cmd
         .map(|p| (p.id, p.name))
         .collect();
     let due = query.due.unwrap_or_default();
-    let todos: Vec<Todo> = repo::todos::list(
+    let mut todos: Vec<Todo> = repo::todos::list(
         &mut conn,
         &TodoFilter {
             project_id: query.project_id,
@@ -149,33 +174,44 @@ pub async fn list(pool: &SqlitePool, query: &TodoQuery, today: NaiveDate) -> Cmd
             include_archived_projects: query.project_id.is_some(),
         },
     )
-    .await?
-    .into_iter()
-    .filter(|t| query.priority.is_none_or(|p| t.priority == p))
-    .filter(|t| due_matches(t, due, today, &rules))
-    .collect();
+    .await?;
+    // Every TODO of the list's projects: the counts of children hidden by
+    // the filters are still counted.
+    let family = Family::new(&todos);
 
-    // Tab counts: every filter except the status one.
+    // Each TODO is judged by itself (S-1). Tab counts: every filter except
+    // the status one.
+    let matches_filters = |t: &Todo| {
+        query.priority.is_none_or(|p| t.priority == p) && due_matches(t, due, today, &rules)
+    };
+    let matches_status = |t: &Todo| {
+        query
+            .statuses
+            .as_ref()
+            .is_none_or(|s| s.contains(&t.status))
+    };
     let mut counts = StatusCounts::default();
-    for t in &todos {
+    for t in todos.iter().filter(|t| matches_filters(t)) {
         counts.add(t.status);
     }
-    let mut items: Vec<TodoItem> = todos
+
+    sort_todos(&mut todos, query.sort.unwrap_or_default(), |t| t);
+    let tree = tree_rows(&todos, |t| t, |t| matches_filters(t) && matches_status(t));
+    let mut slots: Vec<Option<Todo>> = todos.into_iter().map(Some).collect();
+    let rows = tree
         .into_iter()
-        .filter(|t| {
-            query
-                .statuses
-                .as_ref()
-                .is_none_or(|s| s.contains(&t.status))
-        })
-        .map(|t| {
+        .filter_map(|r| {
+            let t = slots[r.index].take()?;
             let name = names.get(&t.project_id).cloned().unwrap_or_default();
-            todo_item(t, name, today, &rules)
+            Some(TodoListRow {
+                item: todo_item(t, name, &family, today, &rules),
+                child: r.child,
+                bridge: r.bridge,
+            })
         })
         .collect();
-    sort_todos(&mut items, query.sort.unwrap_or_default(), |i| &i.todo);
     Ok(TodoList {
-        items,
+        rows,
         total: counts.total(),
         counts,
     })
@@ -203,10 +239,15 @@ pub async fn create(
             "アーカイブしたプロジェクトにはTODOを追加できません。プロジェクトを元に戻してから追加してください。",
         ));
     }
+    if let Some(parent_id) = input.parent_id {
+        let parent = repo::todos::get(&mut tx, parent_id).await?;
+        check_new_child(project.id, &parent).map_err(|e| AppError::validation(e.to_string()))?;
+    }
     let todo = repo::todos::insert(
         &mut tx,
         &NewTodo {
             project_id: project.id,
+            parent_id: input.parent_id,
             title,
             priority: input.priority.unwrap_or_default(),
             due_date: input.due_date,
@@ -286,14 +327,71 @@ pub async fn change_status_impl(
     let t = transition(&StatusFields::of(&before), change, today, now)?;
     let saved = repo::todos::write_status(&mut tx, id, &t.fields, now).await?;
     repo::events::insert(&mut tx, id, &t.event).await?;
+    if saved.status.is_closed() {
+        close_children(&mut tx, id, change, today, now).await?;
+    }
     let out = item(&mut tx, saved, today).await?;
     tx.commit().await?;
     Ok(out)
 }
 
+/// Closing a parent closes its open children the same way (S-1): each one
+/// goes through the transition table and records its own change. A 中止
+/// carries the parent's reason. Closed children stay as they are.
+async fn close_children(
+    conn: &mut SqliteConnection,
+    parent_id: i64,
+    change: &StatusChange,
+    today: NaiveDate,
+    now: DateTime<Utc>,
+) -> CmdResult<()> {
+    let same = StatusChange {
+        to: change.to,
+        waiting_on: None,
+        follow_up_date: None,
+        reason: change.reason.clone(),
+    };
+    for child in repo::todos::list_children(conn, &[parent_id]).await? {
+        if child.status.is_closed() {
+            continue;
+        }
+        let t = transition(&StatusFields::of(&child), &same, today, now).map_err(|e| {
+            AppError::validation(format!(
+                "子TODO「{}」を{}にできません。{e}",
+                child.title,
+                change.to.label()
+            ))
+        })?;
+        repo::todos::write_status(conn, child.id, &t.fields, now).await?;
+        repo::events::insert(conn, child.id, &t.event).await?;
+    }
+    Ok(())
+}
+
 pub async fn delete(pool: &SqlitePool, id: i64) -> CmdResult<()> {
     let mut conn = pool.acquire().await?;
     Ok(repo::todos::delete(&mut conn, id).await?)
+}
+
+pub async fn set_parent(
+    pool: &SqlitePool,
+    id: i64,
+    parent_id: Option<i64>,
+    today: NaiveDate,
+    now: DateTime<Utc>,
+) -> CmdResult<TodoItem> {
+    let mut tx = pool.begin().await?;
+    let todo = repo::todos::get(&mut tx, id).await?;
+    if let Some(parent_id) = parent_id {
+        let parent = repo::todos::get(&mut tx, parent_id).await?;
+        let has_children = !repo::todos::list_children(&mut tx, &[id]).await?.is_empty();
+        check_parent(&todo, has_children, &parent)
+            .map_err(|e| AppError::validation(e.to_string()))?;
+    }
+    let saved = repo::todos::set_parent(&mut tx, id, parent_id, now).await?;
+    let out = item(&mut tx, saved, today).await?;
+    tx.commit().await?;
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -302,6 +400,7 @@ mod tests {
     use crate::commands::error::ErrorKind;
     use crate::commands::projects::{self, ProjectInput};
     use crate::domain::events::EventKind;
+    use crate::domain::subtodo::ChildCounts;
     use crate::domain::testing::{d, ts};
     use crate::domain::urgency::Urgency;
     use crate::repo::db;
@@ -333,6 +432,7 @@ mod tests {
     fn new_input(project_id: i64, title: &str) -> NewTodoInput {
         NewTodoInput {
             project_id,
+            parent_id: None,
             title: title.into(),
             priority: None,
             due_date: None,
@@ -616,7 +716,7 @@ mod tests {
         .unwrap();
 
         let all = list(&pool, &TodoQuery::default(), today()).await.unwrap();
-        assert_eq!(all.items.len(), 2);
+        assert_eq!(all.rows.len(), 2);
         assert_eq!(all.total, 2);
         let doing = list(
             &pool,
@@ -628,8 +728,8 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(doing.items.len(), 1);
-        assert_eq!(doing.items[0].todo.title, "a");
+        assert_eq!(doing.rows.len(), 1);
+        assert_eq!(doing.rows[0].item.todo.title, "a");
         // Tab counts ignore the status filter.
         assert_eq!(
             (doing.total, doing.counts.doing, doing.counts.todo),
@@ -641,7 +741,7 @@ mod tests {
             list(&pool, &TodoQuery::default(), today())
                 .await
                 .unwrap()
-                .items
+                .rows
                 .is_empty()
         );
         let in_project = TodoQuery {
@@ -649,7 +749,7 @@ mod tests {
             ..TodoQuery::default()
         };
         assert_eq!(
-            list(&pool, &in_project, today()).await.unwrap().items.len(),
+            list(&pool, &in_project, today()).await.unwrap().rows.len(),
             2
         );
     }
@@ -671,9 +771,9 @@ mod tests {
             create(&pool, input, today(), now()).await.unwrap();
         }
         let titles = |l: TodoList| {
-            l.items
+            l.rows
                 .into_iter()
-                .map(|i| i.todo.title)
+                .map(|r| r.item.todo.title)
                 .collect::<Vec<_>>()
         };
         let q = |due, priority, sort| TodoQuery {
@@ -726,6 +826,422 @@ mod tests {
         );
         assert_eq!(
             delete(&pool, item.todo.id).await.unwrap_err().kind,
+            ErrorKind::NotFound
+        );
+    }
+
+    // ---- サブTODO (S-1) ----------------------------------------------------
+
+    async fn add(pool: &SqlitePool, pid: i64, parent: Option<i64>, title: &str) -> TodoItem {
+        create(
+            pool,
+            NewTodoInput {
+                parent_id: parent,
+                ..new_input(pid, title)
+            },
+            today(),
+            now(),
+        )
+        .await
+        .unwrap()
+    }
+
+    async fn other_project(pool: &SqlitePool) -> i64 {
+        projects::create(
+            pool,
+            ProjectInput {
+                name: "社内ツール整備".into(),
+                color: None,
+                description: String::new(),
+            },
+            now(),
+        )
+        .await
+        .unwrap()
+        .id
+    }
+
+    #[tokio::test]
+    async fn create_adds_a_child_in_the_parents_project_only() {
+        let (pool, pid) = setup().await;
+        let parent = add(&pool, pid, None, "親").await;
+        let child = add(&pool, pid, Some(parent.todo.id), "子").await;
+        assert_eq!(child.todo.parent_id, Some(parent.todo.id));
+        assert_eq!(child.parent_title.as_deref(), Some("親"));
+        assert_eq!(
+            get(&pool, parent.todo.id, today()).await.unwrap().children,
+            Some(ChildCounts {
+                total: 1,
+                done: 0,
+                open: 1
+            })
+        );
+
+        let qid = other_project(&pool).await;
+        let try_add = |project_id: i64, parent: i64| {
+            create(
+                &pool,
+                NewTodoInput {
+                    parent_id: Some(parent),
+                    ..new_input(project_id, "x")
+                },
+                today(),
+                now(),
+            )
+        };
+        let e = try_add(qid, parent.todo.id).await.unwrap_err();
+        assert_eq!(
+            e.message,
+            "別のプロジェクトのTODOは親にできません。同じプロジェクトのTODOを選んでください。"
+        );
+        // A grandchild.
+        let e = try_add(pid, child.todo.id).await.unwrap_err();
+        assert_eq!(
+            e.message,
+            "子TODOは親にできません(親子は1段だけです)。親のないTODOを選んでください。"
+        );
+        assert_eq!(
+            try_add(pid, 999).await.unwrap_err().kind,
+            ErrorKind::NotFound
+        );
+    }
+
+    #[tokio::test]
+    async fn set_parent_checks_the_family_rules() {
+        let (pool, pid) = setup().await;
+        let a = add(&pool, pid, None, "A").await.todo.id;
+        let b = add(&pool, pid, None, "B").await.todo.id;
+        let c = add(&pool, pid, Some(a), "C").await.todo.id;
+        let qid = other_project(&pool).await;
+        let x = add(&pool, qid, None, "X").await.todo.id;
+        let message = |r: CmdResult<TodoItem>| r.map(|i| i.todo.id).map_err(|e| e.message);
+
+        assert_eq!(
+            message(set_parent(&pool, b, Some(b), today(), now()).await),
+            Err("自分自身を親にはできません。ほかのTODOを親に選んでください。".into())
+        );
+        assert_eq!(
+            message(set_parent(&pool, b, Some(x), today(), now()).await),
+            Err(
+                "別のプロジェクトのTODOは親にできません。同じプロジェクトのTODOを選んでください。"
+                    .into()
+            )
+        );
+        // C is a child: it cannot be a parent.
+        assert_eq!(
+            message(set_parent(&pool, b, Some(c), today(), now()).await),
+            Err("子TODOは親にできません(親子は1段だけです)。親のないTODOを選んでください。".into())
+        );
+        // A has a child: it cannot become a child.
+        assert_eq!(
+            message(set_parent(&pool, a, Some(b), today(), now()).await),
+            Err("子TODOのあるTODOは、ほかのTODOの子にできません(親子は1段だけです)。先に子TODOを親から外してください。".into())
+        );
+        assert_eq!(
+            set_parent(&pool, b, Some(999), today(), now())
+                .await
+                .unwrap_err()
+                .kind,
+            ErrorKind::NotFound
+        );
+
+        // Move C from A to B, then take it out. No history is recorded.
+        let moved = set_parent(&pool, c, Some(b), today(), now()).await.unwrap();
+        assert_eq!(moved.todo.parent_id, Some(b));
+        assert_eq!(moved.parent_title.as_deref(), Some("B"));
+        assert_eq!(get(&pool, a, today()).await.unwrap().children, None);
+        let out = set_parent(&pool, c, None, today(), now()).await.unwrap();
+        assert_eq!(out.todo.parent_id, None);
+        assert_eq!(out.parent_title, None);
+        assert_eq!(event_kinds(&pool, c).await, vec![EventKind::Created]);
+        // A TODO with no children (A, now) may become a child.
+        assert_eq!(
+            set_parent(&pool, a, Some(b), today(), now())
+                .await
+                .unwrap()
+                .todo
+                .parent_id,
+            Some(b)
+        );
+    }
+
+    /// The status changes of a TODO: (old, new, reason).
+    async fn status_events(
+        pool: &SqlitePool,
+        id: i64,
+    ) -> Vec<(Option<String>, Option<String>, Option<String>)> {
+        let mut c = pool.acquire().await.unwrap();
+        repo::events::list_by_todo(&mut c, id)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.kind == EventKind::Status)
+            .map(|e| (e.old_value, e.new_value, e.note.reason))
+            .collect()
+    }
+
+    fn s(v: &str) -> Option<String> {
+        Some(v.to_owned())
+    }
+
+    #[tokio::test]
+    async fn closing_a_parent_closes_its_open_children() {
+        let (pool, pid) = setup().await;
+        let parent = add(&pool, pid, None, "親").await.todo.id;
+        let open = add(&pool, pid, Some(parent), "開いている子").await.todo.id;
+        let waiting = add(&pool, pid, Some(parent), "待ちの子").await.todo.id;
+        let done = add(&pool, pid, Some(parent), "完了した子").await.todo.id;
+        let other = add(&pool, pid, None, "ほかのTODO").await.todo.id;
+        change_status_impl(
+            &pool,
+            waiting,
+            &StatusChange::waiting("相手", d("2026-11-20")),
+            today(),
+            now(),
+        )
+        .await
+        .unwrap();
+        change_status_impl(&pool, done, &StatusChange::to(Status::Done), today(), now())
+            .await
+            .unwrap();
+        let before_done = get(&pool, done, today()).await.unwrap();
+
+        let out = change_status_impl(
+            &pool,
+            parent,
+            &StatusChange::to(Status::Done),
+            today(),
+            now(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out.todo.status, Status::Done);
+        assert_eq!(
+            out.children,
+            Some(ChildCounts {
+                total: 3,
+                done: 3,
+                open: 0
+            })
+        );
+        for id in [open, waiting] {
+            let c = get(&pool, id, today()).await.unwrap();
+            assert_eq!(c.todo.status, Status::Done);
+            assert_eq!(c.todo.closed_at, Some(now()));
+        }
+        // One status row per child, from where each one was.
+        assert_eq!(
+            status_events(&pool, open).await,
+            vec![(s("todo"), s("done"), None)]
+        );
+        assert_eq!(
+            status_events(&pool, waiting).await.last().cloned(),
+            Some((s("waiting"), s("done"), None))
+        );
+        assert_eq!(
+            get(&pool, waiting, today()).await.unwrap().todo.waiting_on,
+            None
+        );
+        // A closed child stays as it was; other TODOs are not touched.
+        assert_eq!(get(&pool, done, today()).await.unwrap(), before_done);
+        assert_eq!(
+            get(&pool, other, today()).await.unwrap().todo.status,
+            Status::Todo
+        );
+
+        // Reopening the parent leaves the children closed.
+        change_status_impl(
+            &pool,
+            parent,
+            &StatusChange::to(Status::Doing),
+            today(),
+            now(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            get(&pool, open, today()).await.unwrap().todo.status,
+            Status::Done
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_parent_gives_its_children_the_same_reason() {
+        let (pool, pid) = setup().await;
+        let parent = add(&pool, pid, None, "親").await.todo.id;
+        let child = add(&pool, pid, Some(parent), "子").await.todo.id;
+        change_status_impl(
+            &pool,
+            child,
+            &StatusChange::to(Status::Doing),
+            today(),
+            now(),
+        )
+        .await
+        .unwrap();
+        change_status_impl(
+            &pool,
+            parent,
+            &StatusChange::cancel(" 計画の見直し "),
+            today(),
+            now(),
+        )
+        .await
+        .unwrap();
+        let c = get(&pool, child, today()).await.unwrap();
+        assert_eq!(c.todo.status, Status::Cancelled);
+        assert_eq!(c.todo.close_reason.as_deref(), Some("計画の見直し"));
+        assert_eq!(c.todo.actual_end, Some(today()));
+        assert_eq!(
+            status_events(&pool, child).await.last().cloned(),
+            Some((s("doing"), s("cancelled"), s("計画の見直し")))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_child_that_cannot_close_stops_the_whole_change() {
+        let (pool, pid) = setup().await;
+        let parent = add(&pool, pid, None, "親").await.todo.id;
+        let child = add(&pool, pid, Some(parent), "先の子").await;
+        // An actual start after today: 完了 would end before it starts.
+        let mut f = fields_of(&child.todo);
+        f.actual_start = Some(d("2026-11-25"));
+        update(&pool, child.todo.id, f, today(), now())
+            .await
+            .unwrap();
+
+        let e = change_status_impl(
+            &pool,
+            parent,
+            &StatusChange::to(Status::Done),
+            today(),
+            now(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(e.kind, ErrorKind::Validation);
+        assert!(
+            e.message
+                .starts_with("子TODO「先の子」を完了にできません。実績開始日(11月25日)"),
+            "{}",
+            e.message
+        );
+        // Nothing changed, nothing recorded.
+        assert_eq!(
+            get(&pool, parent, today()).await.unwrap().todo.status,
+            Status::Todo
+        );
+        assert!(status_events(&pool, parent).await.is_empty());
+        assert!(status_events(&pool, child.todo.id).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_is_a_tree_with_bridge_rows_left_out_of_the_counts() {
+        let (pool, pid) = setup().await;
+        let parent = add(&pool, pid, None, "親").await.todo.id;
+        add(&pool, pid, None, "単独").await;
+        let a = add(&pool, pid, Some(parent), "子a").await.todo.id;
+        add(&pool, pid, Some(parent), "子b").await;
+        change_status_impl(&pool, a, &StatusChange::to(Status::Doing), today(), now())
+            .await
+            .unwrap();
+        let shape = |l: &TodoList| {
+            l.rows
+                .iter()
+                .map(|r| (r.item.todo.title.clone(), r.child, r.bridge))
+                .collect::<Vec<_>>()
+        };
+        let row = |t: &str, child: bool, bridge: bool| (t.to_owned(), child, bridge);
+
+        let all = list(&pool, &TodoQuery::default(), today()).await.unwrap();
+        assert_eq!(
+            shape(&all),
+            vec![
+                row("親", false, false),
+                row("子a", true, false),
+                row("子b", true, false),
+                row("単独", false, false),
+            ]
+        );
+        assert_eq!(all.total, 4);
+        assert_eq!(
+            all.rows[0].item.children,
+            Some(ChildCounts {
+                total: 2,
+                done: 0,
+                open: 2
+            })
+        );
+
+        // 作業中 tab: only 子a matches; its parent comes as a bridge row
+        // that the tabs do not count.
+        let doing = list(
+            &pool,
+            &TodoQuery {
+                statuses: Some(vec![Status::Doing]),
+                ..TodoQuery::default()
+            },
+            today(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            shape(&doing),
+            vec![row("親", false, true), row("子a", true, false)]
+        );
+        assert_eq!(
+            (doing.total, doing.counts.doing, doing.counts.todo),
+            (4, 1, 3)
+        );
+        // The bridge row still carries every child in its counts.
+        assert_eq!(doing.rows[0].item.children.map(|c| c.total), Some(2));
+    }
+
+    #[tokio::test]
+    async fn due_after_parent_is_judged_on_the_dates_as_entered() {
+        let (pool, pid) = setup().await;
+        let parent = create(
+            &pool,
+            NewTodoInput {
+                due_date: Some(d("2026-11-20")),
+                ..new_input(pid, "親")
+            },
+            today(),
+            now(),
+        )
+        .await
+        .unwrap();
+        let child = create(
+            &pool,
+            NewTodoInput {
+                parent_id: Some(parent.todo.id),
+                due_date: Some(d("2026-11-21")),
+                ..new_input(pid, "子")
+            },
+            today(),
+            now(),
+        )
+        .await
+        .unwrap();
+        assert!(child.due_after_parent);
+        let mut f = fields_of(&child.todo);
+        f.due_date = Some(d("2026-11-20"));
+        assert!(
+            !update(&pool, child.todo.id, f, today(), now())
+                .await
+                .unwrap()
+                .due_after_parent
+        );
+    }
+
+    #[tokio::test]
+    async fn deleting_a_parent_deletes_its_children() {
+        let (pool, pid) = setup().await;
+        let parent = add(&pool, pid, None, "親").await.todo.id;
+        let child = add(&pool, pid, Some(parent), "子").await.todo.id;
+        delete(&pool, parent).await.unwrap();
+        assert_eq!(
+            get(&pool, child, today()).await.unwrap_err().kind,
             ErrorKind::NotFound
         );
     }

@@ -2,13 +2,28 @@ import { useState } from "react";
 import { Alert } from "../../../components/aizome";
 import { MenuButton } from "../../../components/Menu";
 import { DetailPanel } from "../../../app/DetailPanel";
+import type { TodoItem } from "../../../lib/bindings";
 import { errorMessage } from "../../../lib/errors";
 import { useDeleteTodo, useTodo } from "../../../lib/queries";
+import { deleteTodoText } from "../todoText";
 import { ConfirmDelete } from "./ConfirmDelete";
+import { useFamily } from "./FamilySection";
 import { TodoDetail } from "./TodoDetail";
 
-/** The right-hand panel for one TODO: loads it, offers deletion, shows the detail. */
-export function TodoDetailPanel({ todoId, onClose }: { todoId: number; onClose: () => void }) {
+/**
+ * The right-hand panel for one TODO: loads it, offers deletion, shows the
+ * detail. `onOpenTodo` switches the panel to another TODO (its parent or a
+ * child).
+ */
+export function TodoDetailPanel({
+  todoId,
+  onClose,
+  onOpenTodo,
+}: {
+  todoId: number;
+  onClose: () => void;
+  onOpenTodo: (id: number) => void;
+}) {
   const query = useTodo(todoId);
   const del = useDeleteTodo();
   const [deleting, setDeleting] = useState(false);
@@ -28,11 +43,10 @@ export function TodoDetailPanel({ todoId, onClose }: { todoId: number; onClose: 
       }
     >
       {query.error ? <Alert tone="danger">{errorMessage(query.error)}</Alert> : null}
-      {item ? <TodoDetail key={item.todo.id} item={item} /> : null}
+      {item ? <TodoDetail key={item.todo.id} item={item} onOpenTodo={onOpenTodo} /> : null}
       {deleting && item ? (
-        <ConfirmDelete
-          title="TODOを削除しますか"
-          description={`「${item.todo.title}」と、その作業ログ・変更履歴をすべて削除します。削除したものは元に戻せません。不要になっただけなら、ステータスを「中止」にすると記録が残ります。`}
+        <DeleteTodo
+          item={item}
           pending={del.isPending}
           error={del.error}
           onClose={() => {
@@ -51,4 +65,21 @@ export function TodoDetailPanel({ todoId, onClose }: { todoId: number; onClose: 
       ) : null}
     </DetailPanel>
   );
+}
+
+/** The delete confirmation: the children go with their parent (S-1). */
+function DeleteTodo({
+  item,
+  ...props
+}: {
+  item: TodoItem;
+  pending: boolean;
+  error: unknown;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const family = useFamily(item);
+  // All children, 中止 included (the counts leave 中止 out).
+  const children = family.loaded ? family.children.length : (item.children?.total ?? 0);
+  return <ConfirmDelete title="TODOを削除しますか" description={deleteTodoText(item.todo.title, children)} {...props} />;
 }

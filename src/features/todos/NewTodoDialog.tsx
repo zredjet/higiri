@@ -39,6 +39,7 @@ function NewTodoForm({ projectId, onClose, onCreated }: NewTodoDialogProps) {
     create.mutate(
       {
         project_id: Number(projectValue),
+        parent_id: null,
         title,
         priority,
         due_date: due,

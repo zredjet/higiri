@@ -1,4 +1,5 @@
 //! Performance check (非機能要件「性能」): 5,000 TODOs and 20,000 work logs.
+//! 1,000 of the TODOs are children (S-1): 500 parents with 2 children each.
 //!
 //! Every command is measured twice: with the default 暦日 setting, then with
 //! 営業日 and a yearly custom holiday (年末年始).
@@ -33,6 +34,8 @@ use crate::repo::db;
 pub const PROJECTS: usize = 20;
 pub const TODOS: usize = 5_000;
 pub const WORK_LOGS: usize = 20_000;
+/// Children among the TODOs (S-1).
+pub const CHILDREN: usize = 1_000;
 
 /// Searches measured (label, words). The seed's texts: titles
 /// 「TODO 0001 の作業」, memos 「- 進め方のメモ…」, 待っている相手
@@ -184,6 +187,16 @@ pub async fn seed(pool: &SqlitePool, today: NaiveDate) -> sqlx::Result<()> {
             .await?;
         }
     }
+
+    // サブTODO: in each project, of every 10 TODOs in a row the 8th and 9th
+    // become children of the 7th (same project, one level).
+    sqlx::query(
+        "UPDATE todos SET parent_id = id - ?1 * (((id - 1) / ?1) % 10 - 6)
+         WHERE ((id - 1) / ?1) % 10 IN (7, 8)",
+    )
+    .bind(PROJECTS as i64)
+    .execute(&mut *tx)
+    .await?;
 
     for n in 0..WORK_LOGS {
         let todo = rng.below(TODOS as u64) as i64 + 1;
@@ -468,7 +481,7 @@ async fn perf_5000_todos_20000_logs() {
     let g = gantt::get(&pool, &gantt_all, today).await.unwrap();
     println!(
         "rows: list {} / gantt {}",
-        items.items.len(),
+        items.rows.len(),
         g.projects.iter().map(|p| p.rows.len()).sum::<usize>()
     );
     for (label, words) in SEARCHES {
@@ -529,5 +542,11 @@ async fn perf_5000_todos_20000_logs() {
             .await
             .unwrap();
     assert_eq!(counts, (TODOS as i64, WORK_LOGS as i64));
+    let (children,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM todos WHERE parent_id IS NOT NULL")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(children, CHILDREN as i64);
     pool.close().await;
 }
