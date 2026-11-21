@@ -448,6 +448,20 @@ fn attention_parts(t: &Todo, u: Urgency, a: &Assessment, o: &AttentionOptions) -
     parts
 }
 
+/// What the parentheses of a 日限注意 line say with the default template, for
+/// a TODO in any category (「日限 11/18、2日超過」「確認日 11/19、待ち3日目」
+/// 「予定開始 11/17、2日経過」): higiri-cli's `urgency.text` (v0.5.0), so that
+/// it reads like the daily report. `None` when it is not 日限注意.
+pub fn urgency_text(t: &Todo, a: &Assessment) -> Option<String> {
+    // The default template's items, with every category.
+    let o = AttentionOptions {
+        days: true,
+        waiting_mark: true,
+        follow_up_and_late_start: true,
+    };
+    Some(attention_parts(t, a.urgency?, a, &o).join("、"))
+}
+
 /// 日限注意: 超過・本日・間近 (and 要確認・着手遅れ when chosen) with `date` as
 /// today.
 pub(super) fn attention_lines(
@@ -1079,6 +1093,121 @@ mod tests {
             )),
             "{calendar}"
         );
+    }
+
+    #[test]
+    fn urgency_text_is_the_parentheses_of_the_attention_line() {
+        let p = Project {
+            id: 1,
+            name: "P".into(),
+            color: "#3B6FD4".into(),
+            description: String::new(),
+            sort_order: 1,
+            archived_at: None,
+            created_at: ts(2026, 11, 1, 0, 0),
+            updated_at: ts(2026, 11, 1, 0, 0),
+        };
+        let todos = [
+            Todo {
+                id: 1,
+                title: "超過".into(),
+                due_date: Some(d("2026-11-18")),
+                ..todo(Status::Doing)
+            },
+            Todo {
+                id: 2,
+                title: "本日・待ち".into(),
+                due_date: Some(d("2026-11-20")),
+                waiting_on: Some("相手".into()),
+                waiting_since: Some(d("2026-11-18")),
+                follow_up_date: Some(d("2026-11-25")),
+                ..todo(Status::Waiting)
+            },
+            Todo {
+                id: 3,
+                title: "休日の日限".into(),
+                due_date: Some(d("2026-11-22")),
+                ..todo(Status::Todo)
+            },
+            Todo {
+                id: 4,
+                title: "要確認".into(),
+                waiting_on: Some("相手".into()),
+                waiting_since: Some(d("2026-11-18")),
+                follow_up_date: Some(d("2026-11-19")),
+                ..todo(Status::Waiting)
+            },
+            Todo {
+                id: 5,
+                title: "着手遅れ".into(),
+                planned_start: Some(d("2026-11-17")),
+                planned_end: Some(d("2026-11-30")),
+                ..todo(Status::Todo)
+            },
+            Todo {
+                id: 6,
+                title: "日限注意でない".into(),
+                due_date: Some(d("2026-12-20")),
+                ..todo(Status::Todo)
+            },
+        ];
+        let mut template = default_template();
+        for s in template.sections.iter_mut() {
+            if let SectionBody::Attention(o) = &mut s.body {
+                o.follow_up_and_late_start = true;
+            }
+        }
+        // Friday 11/20 (11/21–11/23 are off in 営業日).
+        let date = d("2026-11-20");
+        for rules in [rules(3), business_rules(3, vec![])] {
+            let body = generate_body(
+                &ReportInput {
+                    date,
+                    rules: &rules,
+                    projects: std::slice::from_ref(&p),
+                    todos: &todos,
+                    logs: &[],
+                    events: &[],
+                },
+                &template,
+            );
+            let texts: Vec<Option<String>> = todos
+                .iter()
+                .map(|t| urgency_text(t, &assess(t, date, &rules)))
+                .collect();
+            for (t, text) in todos.iter().zip(&texts) {
+                match text {
+                    Some(text) => assert!(
+                        body.contains(&format!(" / {}({text})\n", t.title)),
+                        "{text}\n{body}"
+                    ),
+                    None => assert!(!body.contains(&t.title), "{body}"),
+                }
+            }
+            let expected: [Option<&str>; 6] = if rules.business() {
+                [
+                    Some("日限 11/18、2営業日超過"),
+                    Some("日限 11/20、待ち"),
+                    Some("日限 11/22、休日のため前倒し"),
+                    Some("確認日 11/19、待ち3日目"),
+                    Some("予定開始 11/17、3営業日経過"),
+                    None,
+                ]
+            } else {
+                [
+                    Some("日限 11/18、2日超過"),
+                    Some("日限 11/20、待ち"),
+                    Some("日限 11/22、あと2日"),
+                    Some("確認日 11/19、待ち3日目"),
+                    Some("予定開始 11/17、3日経過"),
+                    None,
+                ]
+            };
+            assert_eq!(
+                texts.iter().map(Option::as_deref).collect::<Vec<_>>(),
+                expected
+            );
+        }
     }
 
     #[test]

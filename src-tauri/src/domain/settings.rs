@@ -70,6 +70,9 @@ pub struct Settings {
     /// The newest daily backup that reached the mirror (written by the app,
     /// not by update_settings).
     pub backup_mirror_last_ok: Option<NaiveDate>,
+    /// Projects whose TODOs higiri-cli does not show (v0.5.0): their ids, in
+    /// increasing order, each once. Empty: the CLI shows every project.
+    pub cli_hidden_projects: Vec<i64>,
 }
 
 pub const DEFAULT_SOON_DAYS: u32 = 3;
@@ -111,8 +114,22 @@ impl Default for Settings {
             zoom: DEFAULT_ZOOM,
             backup_mirror_dir: None,
             backup_mirror_last_ok: None,
+            cli_hidden_projects: Vec::new(),
         }
     }
+}
+
+/// The project ids of `ids` that are in `existing`, in increasing order,
+/// each once (how `cli_hidden_projects` is stored).
+pub fn hidden_projects_among(ids: &[i64], existing: &[i64]) -> Vec<i64> {
+    let mut out: Vec<i64> = ids
+        .iter()
+        .copied()
+        .filter(|id| existing.contains(id))
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
 }
 
 #[cfg(test)]
@@ -140,6 +157,14 @@ mod tests {
         assert_eq!(s.zoom, 100);
         assert_eq!(s.backup_mirror_dir, None);
         assert_eq!(s.backup_mirror_last_ok, None);
+        assert!(s.cli_hidden_projects.is_empty());
+    }
+
+    #[test]
+    fn hidden_projects_are_existing_ids_in_order_once() {
+        assert_eq!(hidden_projects_among(&[], &[1, 2]), Vec::<i64>::new());
+        assert_eq!(hidden_projects_among(&[3, 1, 3, 9], &[1, 2, 3]), vec![1, 3]);
+        assert_eq!(hidden_projects_among(&[2], &[]), Vec::<i64>::new());
     }
 
     #[test]

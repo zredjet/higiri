@@ -99,6 +99,8 @@ impl SearchResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Candidate {
     pub id: i64,
+    /// Its project (higiri-cli leaves out the projects it does not show).
+    pub project_id: i64,
     pub title: String,
     pub updated_at: DateTime<Utc>,
 }
@@ -439,6 +441,7 @@ mod tests {
     fn candidate(id: i64, title: &str, updated_day: u32) -> Candidate {
         Candidate {
             id,
+            project_id: 1,
             title: title.into(),
             updated_at: ts(2026, 11, updated_day, 0, 0),
         }

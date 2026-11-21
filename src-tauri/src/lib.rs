@@ -1,5 +1,6 @@
 pub mod autostart;
 pub mod backup;
+pub mod cli;
 pub mod commands;
 pub mod domain;
 pub mod json_data;

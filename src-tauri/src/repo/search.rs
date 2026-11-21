@@ -31,8 +31,9 @@ pub async fn candidates(conn: &mut SqliteConnection, words: &[String]) -> Result
         return Ok(Vec::new());
     }
     // Every word is bound as a parameter; only fixed SQL text is pushed.
-    let mut query =
-        QueryBuilder::<Sqlite>::new("SELECT t.id, t.title, t.updated_at FROM todos t WHERE ");
+    let mut query = QueryBuilder::<Sqlite>::new(
+        "SELECT t.id, t.project_id, t.title, t.updated_at FROM todos t WHERE ",
+    );
     for (i, word) in words.iter().enumerate() {
         if i > 0 {
             query.push(" AND ");
@@ -53,13 +54,14 @@ pub async fn candidates(conn: &mut SqliteConnection, words: &[String]) -> Result
         query.push(" ESCAPE '\\'))");
     }
     query
-        .build_query_as::<(i64, String, String)>()
+        .build_query_as::<(i64, i64, String, String)>()
         .fetch_all(&mut *conn)
         .await?
         .into_iter()
-        .map(|(id, title, updated_at)| {
+        .map(|(id, project_id, title, updated_at)| {
             Ok(Candidate {
                 id,
+                project_id,
                 title,
                 updated_at: read_ts("todos.updated_at", updated_at)?,
             })

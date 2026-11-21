@@ -111,6 +111,7 @@ export function settingsInputOf(s: Settings): SettingsInput {
     report_template: s.report_template,
     weekly_report_template: s.weekly_report_template,
     zoom: s.zoom,
+    cli_hidden_projects: s.cli_hidden_projects,
   };
 }
 

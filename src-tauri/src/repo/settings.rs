@@ -20,6 +20,7 @@
 //! | `zoom` | `70`, `80`, `90`, `100`, `110`, `125` or `150` |
 //! | `backup_mirror_dir` | an absolute folder (`"/Volumes/USB/higiri"`) or `null` |
 //! | `backup_mirror_last_ok` | `"YYYY-MM-DD"` or `null` |
+//! | `cli_hidden_projects` | `[3, 7]`: project ids, increasing, each once |
 //!
 //! Missing keys, unknown keys and unreadable values fall back to the defaults
 //! so that a bad row never prevents the app from starting (a `zoom` that is
@@ -61,10 +62,12 @@ pub const WEEKLY_REPORT_TEMPLATE: &str = "weekly_report_template";
 pub const ZOOM: &str = "zoom";
 pub const BACKUP_MIRROR_DIR: &str = "backup_mirror_dir";
 pub const BACKUP_MIRROR_LAST_OK: &str = "backup_mirror_last_ok";
+pub const CLI_HIDDEN_PROJECTS: &str = "cli_hidden_projects";
 
 /// Keys a restore (and the JSON import) leaves as they are on this PC:
 /// `autostart`, `zoom` and `backup_mirror_dir` belong to the PC (the screen
 /// and the folders differ from PC to PC), the others are written by the app.
+/// Not `cli_hidden_projects`: its ids go with the projects of the file.
 pub const KEPT_ON_REPLACE: [&str; 7] = [
     AUTOSTART,
     LAST_NOTIFIED_AT,
@@ -132,6 +135,15 @@ fn read_mirror_dir(value: &str) -> Option<String> {
         .filter(|dir| std::path::Path::new(dir).is_absolute())
 }
 
+/// Stored project ids, in increasing order and each once, or none unless
+/// it is a list of integers.
+fn read_ids(value: &str) -> Vec<i64> {
+    let mut ids = serde_json::from_str::<Vec<i64>>(value).unwrap_or_default();
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
 /// A stored UTC timestamp (or null), or the fallback when unreadable.
 fn read_timestamp(value: &str, fallback: Option<DateTime<Utc>>) -> Option<DateTime<Utc>> {
     match serde_json::from_str::<Option<String>>(value) {
@@ -172,6 +184,7 @@ pub async fn load(conn: &mut SqliteConnection) -> Result<Settings> {
             BACKUP_MIRROR_LAST_OK => {
                 s.backup_mirror_last_ok = read(&value, s.backup_mirror_last_ok)
             }
+            CLI_HIDDEN_PROJECTS => s.cli_hidden_projects = read_ids(&value),
             _ => {}
         }
     }
@@ -221,7 +234,14 @@ pub async fn save_user_settings(conn: &mut SqliteConnection, s: &Settings) -> Re
     put(conn, REPORT_TEMPLATE, &s.report_template).await?;
     put(conn, WEEKLY_REPORT_TEMPLATE, &s.weekly_report_template).await?;
     put(conn, ZOOM, &s.zoom).await?;
+    set_cli_hidden_projects(conn, &s.cli_hidden_projects).await?;
     Ok(())
+}
+
+/// The projects higiri-cli does not show (stored as given: the caller
+/// keeps them in order, each once).
+pub async fn set_cli_hidden_projects(conn: &mut SqliteConnection, ids: &[i64]) -> Result<()> {
+    put(conn, CLI_HIDDEN_PROJECTS, &ids).await
 }
 
 /// The day the startup reminder was last acknowledged.
@@ -339,6 +359,7 @@ mod tests {
             zoom: 125,
             backup_mirror_dir: Some(MIRROR.into()),
             backup_mirror_last_ok: Some(d("2026-11-18")),
+            cli_hidden_projects: vec![2, 5],
         };
         save(&mut c, &s).await.unwrap();
         assert_eq!(load(&mut c).await.unwrap(), s);
@@ -384,6 +405,7 @@ mod tests {
                 ("autostart".to_owned(), "true".to_owned()),
                 ("backup_mirror_dir".to_owned(), "null".to_owned()),
                 ("backup_mirror_last_ok".to_owned(), "null".to_owned()),
+                ("cli_hidden_projects".to_owned(), "[2,5]".to_owned()),
                 ("close_to_tray".to_owned(), "false".to_owned()),
                 (
                     "custom_holidays".to_owned(),
@@ -444,6 +466,43 @@ mod tests {
             .unwrap();
             assert_eq!(load(&mut c).await.unwrap().zoom, zoom, "{stored}");
         }
+    }
+
+    #[tokio::test]
+    async fn cli_hidden_projects_are_ids_in_order_once() {
+        let (_pool, mut c) = conn().await;
+        // No row: every project is shown.
+        assert!(load(&mut c).await.unwrap().cli_hidden_projects.is_empty());
+        for (stored, ids) in [
+            ("[]", vec![]),
+            ("[3]", vec![3]),
+            ("[7,3]", vec![3, 7]),
+            ("[3,3,1]", vec![1, 3]),
+            // Unreadable: none hidden.
+            ("null", vec![]),
+            ("3", vec![]),
+            (r#"["3"]"#, vec![]),
+            ("[3.5]", vec![]),
+            ("[1,null]", vec![]),
+            (r#"{"3":true}"#, vec![]),
+            ("[", vec![]),
+        ] {
+            sqlx::query(
+                "INSERT INTO settings (key, value) VALUES ('cli_hidden_projects', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            )
+            .bind(stored)
+            .execute(&mut *c)
+            .await
+            .unwrap();
+            assert_eq!(
+                load(&mut c).await.unwrap().cli_hidden_projects,
+                ids,
+                "{stored}"
+            );
+        }
+        // Not kept on a restore or an import: the ids go with the file's projects.
+        assert!(!KEPT_ON_REPLACE.contains(&CLI_HIDDEN_PROJECTS));
     }
 
     #[tokio::test]

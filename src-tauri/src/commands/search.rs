@@ -24,12 +24,25 @@ pub async fn search_todos(pool: State<'_, SqlitePool>, text: String) -> CmdResul
 }
 
 pub async fn search(pool: &SqlitePool, text: &str, today: NaiveDate) -> CmdResult<SearchResult> {
+    search_without_projects(pool, text, today, &[]).await
+}
+
+/// [`search`] as if the projects `hidden` were not there: their TODOs are
+/// left out before the hits are counted, ordered and cut to 100
+/// (higiri-cli's `search`, v0.5.0).
+pub async fn search_without_projects(
+    pool: &SqlitePool,
+    text: &str,
+    today: NaiveDate,
+    hidden: &[i64],
+) -> CmdResult<SearchResult> {
     let terms = split_terms(text);
     if terms.is_empty() {
         return Ok(SearchResult::empty());
     }
     let mut conn = pool.acquire().await?;
-    let candidates = repo::search::candidates(&mut conn, &terms).await?;
+    let mut candidates = repo::search::candidates(&mut conn, &terms).await?;
+    candidates.retain(|c| !hidden.contains(&c.project_id));
     let total = candidates.len() as i64;
     let ids = rank(candidates, &terms, MAX_HITS);
 

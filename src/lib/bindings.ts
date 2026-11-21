@@ -817,6 +817,11 @@ export type Settings = {
 	 *  not by update_settings).
 	 */
 	backup_mirror_last_ok: string | null,
+	/**
+	 *  Projects whose TODOs higiri-cli does not show (v0.5.0): their ids, in
+	 *  increasing order, each once. Empty: the CLI shows every project.
+	 */
+	cli_hidden_projects: number[],
 };
 
 /**
@@ -845,6 +850,11 @@ export type SettingsInput = {
 	weekly_report_template: WeeklyReportTemplate,
 	/**  表示倍率 in percent: one of `ZOOM_LEVELS` (v0.4.0). */
 	zoom: number,
+	/**
+	 *  Projects higiri-cli does not show (v0.5.0). Saved without the ids of
+	 *  projects that no longer exist, in increasing order, each once.
+	 */
+	cli_hidden_projects: number[],
 };
 
 /**  What the startup reminder dialog shows. */

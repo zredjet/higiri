@@ -21,7 +21,7 @@
 //! trying it in the app); otherwise it is written to a temporary folder.
 
 use std::cell::Cell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use chrono::{Days, NaiveDate, TimeZone, Utc};
@@ -375,6 +375,92 @@ fn fields_of(t: &Todo) -> todos::TodoFields {
 
 /// Label of the commands the first screen calls (see `measure`).
 const FIRST_SCREEN: &str = "first screen (4 commands)";
+
+/// `higiri-cli <args>` on the database `db` (v0.5.0): from opening it to
+/// the JSON (the process start is not in it). Returns the JSON's length.
+async fn cli(db: &Path, data_dir: &Path, args: &[&str], today: NaiveDate) -> usize {
+    use clap::Parser;
+    let parsed = crate::cli::args::Cli::try_parse_from(
+        std::iter::once("higiri-cli").chain(args.iter().copied()),
+    )
+    .unwrap();
+    crate::cli::run_on(&parsed.command, db, data_dir, today)
+        .await
+        .unwrap()
+        .len()
+}
+
+/// The median time of higiri-cli's read sub-commands (0.5 s each at most),
+/// then of `today` and `search` with one project hidden from the CLI.
+async fn measure_cli(
+    pool: &SqlitePool,
+    db: &Path,
+    data_dir: &Path,
+    today: NaiveDate,
+) -> Vec<(&'static str, Duration)> {
+    let runs = 7;
+    // A parent with children, work logs and dependencies.
+    let (shown,): (i64,) = sqlx::query_as(
+        "SELECT t.parent_id FROM todos t
+         WHERE t.parent_id IS NOT NULL
+           AND EXISTS (SELECT 1 FROM work_logs w WHERE w.todo_id = t.parent_id)
+         ORDER BY t.parent_id LIMIT 1",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let show = shown.to_string();
+    let cases: [(&'static str, Vec<&str>); 7] = [
+        ("cli today", vec!["today"]),
+        ("cli list (50 of all)", vec!["list"]),
+        (
+            "cli list (filtered, 1 project)",
+            vec![
+                "list",
+                "--project",
+                "3",
+                "--status",
+                "todo,doing",
+                "--sort",
+                "due_date",
+            ],
+        ),
+        ("cli show (parent, 5 logs)", vec!["show", &show]),
+        ("cli search (every TODO)", vec!["search", "作業"]),
+        ("cli search (no hit)", vec!["search", "該当なし"]),
+        ("cli projects --archived", vec!["projects", "--archived"]),
+    ];
+    let mut times = Vec::new();
+    for (label, args) in &cases {
+        times.push((
+            *label,
+            median(runs, || cli(db, data_dir, args, today)).await,
+        ));
+    }
+    // One project hidden: its TODOs are read to hide the links to them.
+    let base = settings::get(pool).await.unwrap();
+    settings::update(
+        pool,
+        settings::SettingsInput {
+            cli_hidden_projects: vec![2],
+            ..settings::SettingsInput::from(&base)
+        },
+    )
+    .await
+    .unwrap();
+    times.push((
+        "cli today (1 project hidden)",
+        median(runs, || cli(db, data_dir, &["today"], today)).await,
+    ));
+    times.push((
+        "cli search (1 project hidden)",
+        median(runs, || cli(db, data_dir, &["search", "作業"], today)).await,
+    ));
+    settings::update(pool, settings::SettingsInput::from(&base))
+        .await
+        .unwrap();
+    times
+}
 
 /// The median time of each measured command.
 async fn measure(pool: &SqlitePool, today: NaiveDate) -> Vec<(&'static str, Duration)> {
@@ -906,6 +992,8 @@ async fn perf_5000_todos_20000_logs() {
     .unwrap();
     let business = measure(&pool, today).await;
 
+    let cli_business = measure_cli(&pool, &path, tmp.path(), today).await;
+
     println!(
         "{:<30} {:>11} {:>11}",
         "command (ms)", "calendar", "business"
@@ -916,6 +1004,14 @@ async fn perf_5000_todos_20000_logs() {
     settings::update(&pool, settings::SettingsInput::from(&Settings::default()))
         .await
         .unwrap();
+    let cli_calendar = measure_cli(&pool, &path, tmp.path(), today).await;
+    for ((name, c), (_, b)) in cli_calendar.iter().zip(&cli_business) {
+        println!("{name:<30} {} {}", ms(*c), ms(*b));
+        assert!(
+            *c < Duration::from_millis(500) && *b < Duration::from_millis(500),
+            "{name}: 0.5 s at most"
+        );
+    }
 
     let all = todos::TodoQuery {
         project_id: None,

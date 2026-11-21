@@ -39,14 +39,29 @@ impl RepoError {
     /// True when the database rejected the write because of a CHECK,
     /// NOT NULL, FOREIGN KEY or UNIQUE constraint.
     pub fn is_constraint_violation(&self) -> bool {
+        // SQLITE_CONSTRAINT.
+        self.primary_code() == Some(19)
+    }
+
+    /// True when the database stayed locked (SQLITE_BUSY) after the busy
+    /// timeout, or a write could not start on an old snapshot.
+    pub fn is_busy(&self) -> bool {
+        self.primary_code() == Some(5)
+    }
+
+    /// True when the file is not an SQLite database (SQLITE_NOTADB).
+    pub fn is_not_a_database(&self) -> bool {
+        self.primary_code() == Some(26)
+    }
+
+    /// SQLite's primary result code, for errors from the database.
+    fn primary_code(&self) -> Option<i32> {
         match self {
-            RepoError::Sqlx(sqlx::Error::Database(e)) => {
-                // SQLite primary result code 19 = SQLITE_CONSTRAINT.
-                e.code()
-                    .and_then(|c| c.parse::<i32>().ok())
-                    .is_some_and(|c| c & 0xff == 19)
-            }
-            _ => false,
+            RepoError::Sqlx(sqlx::Error::Database(e)) => e
+                .code()
+                .and_then(|c| c.parse::<i32>().ok())
+                .map(|c| c & 0xff),
+            _ => None,
         }
     }
 }

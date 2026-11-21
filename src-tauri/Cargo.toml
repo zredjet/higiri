@@ -4,6 +4,8 @@ version = "0.4.0"
 description = "Higiri: project-based TODO manager"
 authors = []
 edition = "2024"
+# Two executables (v0.5.0): `cargo run` and `tauri dev` start the app.
+default-run = "higiri"
 
 [lib]
 # The `_lib` suffix keeps the lib name distinct from the bin name (needed on Windows).
@@ -34,11 +36,16 @@ log = "0.4.35"
 # OS notifications (v1.1). Used from Rust only; the screens get no permission.
 tauri-plugin-notification = "2.8.1"
 # The resident timer (tokio::time::sleep, tokio::sync::Notify, select!); Tauri's own runtime is tokio.
-tokio = { version = "1.54.1", features = ["sync", "time", "macros"] }
+# rt: higiri-cli runs on a runtime of its own (v0.5.0).
+tokio = { version = "1.54.1", features = ["sync", "time", "macros", "rt"] }
 # Tauri 2 has no stable tauri-specta yet: keep these three pinned as one compatible set.
 specta = { version = "=2.0.0-rc.28", features = ["derive", "chrono"] }
 specta-typescript = "=0.0.15"
 tauri-specta = { version = "=2.0.0-rc.29", features = ["derive", "typescript"] }
+# higiri-cli (v0.5.0): its arguments and help, and the app data folder found
+# as Tauri finds it (the same dirs as Tauri's).
+clap = { version = "4.6.9", features = ["derive"] }
+dirs = "7.0.0"
 
 [dev-dependencies]
 tokio = { version = "1.54.1", features = ["macros", "rt"] }

@@ -807,6 +807,8 @@ mod tests {
                 notify_times: vec!["08:30".into()],
                 autostart: true,
                 zoom: 150,
+                // 社内ツール整備 of the sample (v0.5.0).
+                cli_hidden_projects: vec![2],
                 ..SettingsInput::from(&Settings::default())
             },
         )
@@ -1140,6 +1142,9 @@ mod tests {
                 .await
                 .unwrap();
             // tray_hint_shown stays unset here, though the file has true.
+            repo_settings::set_cli_hidden_projects(&mut c, &[1, 3])
+                .await
+                .unwrap();
         }
         let before = dump(&dst).await.1;
 
@@ -1160,6 +1165,8 @@ mod tests {
         // The user settings came from the file.
         assert_eq!(read.theme, Theme::Dark);
         assert_eq!(read.notify_times, ["08:30"]);
+        // So did the projects hidden from the CLI, with the file's projects.
+        assert_eq!(read.cli_hidden_projects, vec![2]);
     }
 
     #[tokio::test]

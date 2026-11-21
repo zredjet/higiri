@@ -145,9 +145,19 @@ pub async fn archive(
     Ok(repo::projects::set_archived(&mut conn, id, at, now).await?)
 }
 
+/// Deletes the project and, in the same transaction, takes its id out of
+/// `cli_hidden_projects` (v0.5.0): ids are used again (the next project gets
+/// the id of the newest one deleted), and a new project starts shown.
 pub async fn delete(pool: &SqlitePool, id: i64) -> CmdResult<()> {
-    let mut conn = pool.acquire().await?;
-    Ok(repo::projects::delete(&mut conn, id).await?)
+    let mut tx = pool.begin().await?;
+    repo::projects::delete(&mut tx, id).await?;
+    let hidden = repo::settings::load(&mut tx).await?.cli_hidden_projects;
+    if hidden.contains(&id) {
+        let kept: Vec<i64> = hidden.into_iter().filter(|&h| h != id).collect();
+        repo::settings::set_cli_hidden_projects(&mut tx, &kept).await?;
+    }
+    tx.commit().await?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -216,6 +226,53 @@ mod tests {
         assert_eq!(
             delete(&pool, a.id).await.unwrap_err().kind,
             ErrorKind::NotFound
+        );
+    }
+
+    #[tokio::test]
+    async fn deleting_a_project_shows_the_next_one_with_its_id_in_the_cli() {
+        use crate::commands::settings::{self, SettingsInput};
+        use crate::domain::settings::Settings;
+
+        let pool = db::open_in_memory().await.unwrap();
+        let now = ts(2026, 11, 19, 0, 0);
+        let a = create(&pool, input("A", None), now).await.unwrap();
+        let b = create(&pool, input("B", None), now).await.unwrap();
+        let c = create(&pool, input("C", None), now).await.unwrap();
+        settings::update(
+            &pool,
+            SettingsInput {
+                cli_hidden_projects: vec![c.id, a.id],
+                ..SettingsInput::from(&Settings::default())
+            },
+        )
+        .await
+        .unwrap();
+
+        // Archiving and restoring keep the setting.
+        archive(&pool, c.id, true, now).await.unwrap();
+        archive(&pool, c.id, false, now).await.unwrap();
+        let hidden = settings::get(&pool).await.unwrap().cli_hidden_projects;
+        assert_eq!(hidden, vec![a.id, c.id]);
+
+        // The newest project's id comes back for the next one, which is shown.
+        delete(&pool, c.id).await.unwrap();
+        assert_eq!(
+            settings::get(&pool).await.unwrap().cli_hidden_projects,
+            vec![a.id]
+        );
+        let d = create(&pool, input("D", None), now).await.unwrap();
+        assert_eq!(d.id, c.id);
+        assert_eq!(
+            settings::get(&pool).await.unwrap().cli_hidden_projects,
+            vec![a.id]
+        );
+
+        // Deleting a shown project leaves the setting as it is.
+        delete(&pool, b.id).await.unwrap();
+        assert_eq!(
+            settings::get(&pool).await.unwrap().cli_hidden_projects,
+            vec![a.id]
         );
     }
 }

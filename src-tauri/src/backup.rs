@@ -832,6 +832,9 @@ mod tests {
             repo_settings::set_backup_mirror(&mut c, Some(&mirror_then), Some(d("2026-11-17")))
                 .await
                 .unwrap();
+            repo_settings::set_cli_hidden_projects(&mut c, &[3])
+                .await
+                .unwrap();
         }
         run_daily(&pool, tmp.path(), d("2026-11-18")).await.unwrap();
 
@@ -862,6 +865,9 @@ mod tests {
             repo_settings::set_backup_mirror(&mut c, Some(&mirror_now), Some(d("2026-11-19")))
                 .await
                 .unwrap();
+            repo_settings::set_cli_hidden_projects(&mut c, &[1, 5])
+                .await
+                .unwrap();
         }
         let before = cmd::get(&pool).await.unwrap();
 
@@ -877,6 +883,8 @@ mod tests {
         // Restored from the backup.
         assert_eq!(after.theme, Theme::Dark);
         assert_eq!(after.notify_times, ["08:00"]);
+        // With the backup's projects (v0.5.0).
+        assert_eq!(after.cli_hidden_projects, vec![3]);
         // Kept as they were.
         assert!(after.autostart);
         assert_eq!(after.zoom, 125);

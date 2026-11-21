@@ -562,6 +562,31 @@ v0.5.0 は `docs/implementation-plan-v0.5.0.md` のフェーズ31〜36で作る�
 - 画面で確認のダイアログを挟む操作(先行TODOが終わっていないTODOを作業中にする、開いている子のある親を閉じる)は、CLI では付け足しの引数がなければ `needs_confirmation` で断る。
 - 日限注意の区分と日数の文は Rust が作って出力に入れる。Claude Code に数え直させない。
 - アプリのウィンドウが前面に来たら(`focus`)一覧を取り直す(TanStack Query の `focusManager`)。CLI の変更を画面に出すため。
+- CLI の土台と読み取り(フェーズ32)
+  - 画面のコマンドは足していない(48個のまま)。`bindings.ts` は `Settings` と `SettingsInput` の `cli_hidden_projects` だけが変わった。
+  - 作ったもの(フェーズ32)
+    - `Cargo.toml`: 実行ファイルが2つになったので `default-run = "higiri"`(ないと `cargo run` と `tauri dev` が、どちらを動かすか決められずに止まる)。clap 4.6.9(derive)、dirs 7.0.0(Tauri と同じ版。データフォルダを Tauri の `app_data_dir` と同じ方法で求める)を足し、tokio に `rt` を足した。
+    - `src-tauri/src/bin/higiri-cli.rs`: `higiri_lib::cli::main` を呼ぶだけ。コンソールのある普通の実行ファイル。macOS の `tauri build --bundles app` は、`Higiri.app/Contents/MacOS/` に `higiri-cli` も入れて一緒に署名する(フェーズ32で確かめた)。
+    - `repo/db.rs`: `open_existing`(作らず、マイグレーションを当てずに開く。WAL・外部キー・5秒の待ち時間はアプリと同じ)、`applied_migration`(`_sqlx_migrations` の成功した最新の番号。表がなければ `None`)、`latest_migration`(`MIGRATOR` の最新)。断る理由は `OpenError`(`Missing`: ファイルがない・フォルダ・SQLite でない・`_sqlx_migrations` がない、`Older`、`Newer`、`Busy`: 5秒待ってもロックが取れない)。断ったときは接続を閉じ、何も書かない(表と版が変わらないこと、ファイルを作らないことをテストで確かめている)。`RepoError::is_busy`、`is_not_a_database` を足した。
+    - 「Higiri がデータを書き換えている最中です。…」は、今は DB を開いて版を読むところでだけ出る(WAL では読むだけの処理はほぼ待たされない)。内側の関数の途中で待ちきれなかったときは、`AppError` の `internal` になるので、CLI の `internal` の文が出る。
+    - `cli/mod.rs`: `main`(clap → データフォルダ → tokio の current_thread → `run`)、`run(command, data_dir, today)`(中は `run_on`。perf はファイル名の違う DB に `run_on` を使う)、`data_folder(dev)`(`dirs::data_dir()` の下の `com.redjet.higiri`、`--dev` でその下の `dev`。`IDENTIFIER` と `--version` の版が `tauri.conf.json` と同じことをテストで確かめる)。時計を読むのは `main` だけ(`commands::clock::today`)。出力は構造体をそのまま `serde_json::to_string` で1行にする(キーは構造体の順。`serde_json::Value` を通すとキーが名前の順に並べ替えられるため)。`Reply` が書く先と終了コード(標準出力と0、標準エラー出力と1)。clap の誤りは clap の文と2、`--help` と `--version` は標準出力と0。
+    - `cli/args.rs`: clap の定義。説明は日本語で、`-h`/`--help` と `-V`/`--version` の説明も日本語にした(clap の既定の「Print help」を出さないよう、`disable_help_flag` と `disable_version_flag` で自前の引数にした)。`help` のサブコマンドは出さない。`--dev` はサブコマンドの前にも後にも書ける(`global`)。値の名前は DB と同じ(`--status todo,doing`、`--priority high|medium|low`、`--due attention|until_today|within_week|no_due`、`--sort manual|due_date|priority`)で、説明に日本語の名前を添える(`choices`)。`--limit` は1以上(初めは50)、`show --logs` は0以上(初めは5)。
+    - `cli/error.rs`: `CliError { kind, message }`。画面の `AppError` は種類と文をそのまま渡し、`internal` だけは CLI の文(「データの読み書きに失敗しました。もう一度実行してください。続くときは、Higiri を再起動してから実行してください。」)にする(画面の文は「アプリを再起動してから、もう一度操作してください」のため)。DB を断ったときの種類は、ない → `not_found`、古い・新しい → `validation`、待ちきれない → `internal`。
+    - `cli/output.rs`: 出力の形。`CliTodo` は設計書の表の順。`updated_at` は DB と同じ形(ミリ秒つき、`Z`)。`warnings` の順は一覧の警告と同じ。`repeat` は `TodoItem.repeat` のまま(`rule` は保存してある形)。`blocked_by` と `show` の先行・後続は `Linked`(出さないプロジェクトなら `{"hidden":true}`)。設計書にない細部は次のように決めた。
+      - `today`: `{ today, day_count, day_count_label, soon_days, attention: { total, counts: { overdue, due_today, due_soon, follow_up, late_start }, todos }, today_work, waiting, projects: [{ id, name, progress_done, progress_total, attention_count }], backup_mirror_alert: { last_ok, days } か null }`。
+      - `list`: `{ todos, total }`。並びは画面の一覧の木の順。つなぎの行(条件に合う子のために薄く出す親)は出さず、子の `parent` で分かるようにした。`--limit` と `total` は条件に合うTODOで数える。
+      - `show`: `CliTodo` に `memo_md`、`work_logs`(`{ log_date, minutes, body_md }`、新しい順)、`work_logs_total`、`child_todos`(`{ id, title, status, status_label, due_date }`、一覧の順。`CliTodo` の `children`(件数)と名前が重なるので `child_todos` にした)、`depends_on`、`dependents`(`{ id, title, status, status_label }` か `{ hidden: true }`、結んだ順)を足す。
+      - `search`: `{ hits: [{ todo, matched }], total }`。`matched` は `title`、`memo`、`waiting_on`、`close_reason`、`work_log` の順に1回ずつ。
+      - `projects`: `{ projects: [{ id, name, description, archived, progress_done, progress_total, attention_count }], hidden_projects }`。`progress_total` は中止を除く(画面の進捗と同じ)。
+    - `cli/read.rs`: 5つのサブコマンド。中身は画面の内側の関数(`dashboard::without_projects`、`todos::list`、`todos::get`、`work_logs::timeline`、`dependencies::list`、`search::search_without_projects`、`projects::list`、`settings::get`)を呼ぶだけで、`cli/` に SQL はない。
+      - プロジェクトの指し方(`read::project`): 数字で、そのidのプロジェクトがあればそれ。なければ名前がちょうど同じもの(前後の空白は除く。アーカイブしたものも)。見つからなければ `not_found`(「プロジェクト「…」が見つかりません。higiri-cli projects で名前かidを確かめてください。」)、2つ以上なら `validation`(「「…」という名前のプロジェクトが2つ以上あります。higiri-cli projects でidを確かめて、idで指してください。」)、出さないプロジェクトなら `hidden`。
+      - `show` で見つからないTODOは「TODO(id …)が見つかりません。削除された可能性があります。higiri-cli list か search でidを確かめてください。」。子の一覧は、そのプロジェクトの `list_todos` から親が同じものを取る。
+      - 出さないプロジェクト(`read::hidden`): settings の `cli_hidden_projects` と、そのプロジェクトのTODOの id(プロジェクトごとの `list_todos`。アーカイブしたものも)。`today` は `commands/dashboard.rs` の `without_projects`(プロジェクトとTODOを除いてから `dashboard::build`)、`search` は `commands/search.rs` の `search_without_projects`(候補を除いてから数え、並べて100件に切る。そのため `Candidate.project_id` を足した)。画面の `get_dashboard` と `search_todos` は、除くものなしで同じ関数を通る。`list` は画面の一覧の結果から除く(親子は同じプロジェクトの中なので、除いてから作ったときと並びも件数も同じ)。
+    - `domain/report.rs`: `urgency_text(todo, assessment)`。日報の日限注意の行の括弧の中を、既定のテンプレートの項目(日数あり、待ちの印あり)で、要確認と着手遅れも含めて作る。日報の出力は変えていない(フィクスチャのテストはそのまま通り、`urgency_text` の文が日報の行と同じことも暦日・営業日でテストしている)。
+    - settings の `cli_hidden_projects`: `domain/settings.rs` の `Settings.cli_hidden_projects` と `hidden_projects_among`(あるidだけ、小さい順、重複なし)。`repo::settings` は整数の配列として読めなければ `[]`、読めたら並べて重複を除く(`read_ids`)。`save_user_settings` が書き、1キーだけ書くのは `set_cli_hidden_projects`。`update_settings`(`commands/settings.rs` の `update`)は、ないプロジェクトのidを除いて保存する(アーカイブしたプロジェクトは残す)。`commands::projects::delete` は同じトランザクションでそのidを外す。`KEPT_ON_REPLACE` には入れない(復元と取り込みでファイルの値に入れ替わることを `backup.rs` と `json_data.rs` のテストで確かめている)。
+    - 画面: `queries.ts` の `settingsInputOf` に `cli_hidden_projects` を足した(足さないと `update_settings` の入力が足りず、設定を保存できないため)。設定画面のカードはフェーズ34。
+    - テスト: `cli/tests.rs`(サンプルデータを作業用のフォルダの DB に入れて `run` を呼び、ダッシュボード・日報・一覧・検索と比べる)、`src-tauri/tests/cli.rs`(実行ファイルを動かし、書く先と終了コードを確かめる。DB を開くものは macOS だけで、`HOME` を作業用のフォルダにする。Windows は環境変数でデータフォルダを変えられないので、データを読まない `--help` などだけ)。
+    - perf(`perf.rs` の `measure_cli`): `today`、`list`(全体の50件、絞り込み)、`show`(子と作業ログのある親)、`search`(全件に当たる語、0件)、`projects --archived`、1つのプロジェクトを出さないときの `today` と `search`。どれかが0.5秒を超えたら失敗にする。
 
 ## 品質の決めごと
 
@@ -594,7 +619,7 @@ v0.5.0 は `docs/implementation-plan-v0.5.0.md` のフェーズ31〜36で作る�
 | Rust の書式の確認(直すときは `cargo fmt --manifest-path src-tauri/Cargo.toml`) | `npm run fmt:rust` |
 | Rust の lint(警告はエラー扱い) | `npm run lint:rust` |
 | まとめて確認(型チェック、Rust の書式、Vitest、cargo test、clippy) | `npm run check` |
-| 性能の確認(TODO 5,000件・作業ログ 20,000件でコマンドの時間を測る。最適化ビルド。検索、営業日の設定、TODO の保存(`get_todo` と `update_todo`)、テンプレート、繰り返し、依存関係、後続TODOのずらしの確認、一括変更の確認と保存、週報、起動の Rust 側、毎日のバックアップと複製先への複製、JSON の書き出しと取り込みも測る。計測のデータには子TODO・繰り返し・依存関係も入る) | `npm run test:perf` |
+| 性能の確認(TODO 5,000件・作業ログ 20,000件でコマンドの時間を測る。最適化ビルド。検索、営業日の設定、TODO の保存(`get_todo` と `update_todo`)、テンプレート、繰り返し、依存関係、後続TODOのずらしの確認、一括変更の確認と保存、週報、起動の Rust 側、毎日のバックアップと複製先への複製、JSON の書き出しと取り込み、higiri-cli の読むサブコマンドも測る。計測のデータには子TODO・繰り返し・依存関係も入る) | `npm run test:perf` |
 | アプリアイコンを原画から作り直す | `npm run icons` |
 | 配布物のビルド(実行ファイルの ZIP を `release/` に作る) | `npm run build` |
 

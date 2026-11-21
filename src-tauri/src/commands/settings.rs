@@ -16,7 +16,7 @@ use crate::domain::notify::{self, TimesError};
 use crate::domain::report_template::{HEADING_MAX, Kind, TITLE_MAX, TemplateError};
 use crate::domain::settings::{
     CustomHoliday, DayCount, ReminderFrequency, ReportTemplate, Settings, Theme,
-    WeeklyReportTemplate, is_zoom_level,
+    WeeklyReportTemplate, hidden_projects_among, is_zoom_level,
 };
 use crate::{autostart, repo, resident};
 
@@ -47,6 +47,9 @@ pub struct SettingsInput {
     pub weekly_report_template: WeeklyReportTemplate,
     /// 表示倍率 in percent: one of `ZOOM_LEVELS` (v0.4.0).
     pub zoom: u32,
+    /// Projects higiri-cli does not show (v0.5.0). Saved without the ids of
+    /// projects that no longer exist, in increasing order, each once.
+    pub cli_hidden_projects: Vec<i64>,
 }
 
 impl From<&Settings> for SettingsInput {
@@ -65,6 +68,7 @@ impl From<&Settings> for SettingsInput {
             report_template: s.report_template.clone(),
             weekly_report_template: s.weekly_report_template.clone(),
             zoom: s.zoom,
+            cli_hidden_projects: s.cli_hidden_projects.clone(),
         }
     }
 }
@@ -146,6 +150,12 @@ pub async fn update(pool: &SqlitePool, input: SettingsInput) -> CmdResult<Settin
     }
     let mut tx = pool.begin().await?;
     let current = repo::settings::load(&mut tx).await?;
+    // A project deleted while the settings screen was open is not refused.
+    let projects: Vec<i64> = repo::projects::list(&mut tx, true)
+        .await?
+        .into_iter()
+        .map(|p| p.id)
+        .collect();
     let next = Settings {
         reminder_frequency: input.reminder_frequency,
         soon_days: input.soon_days,
@@ -160,6 +170,7 @@ pub async fn update(pool: &SqlitePool, input: SettingsInput) -> CmdResult<Settin
         report_template,
         weekly_report_template,
         zoom: input.zoom,
+        cli_hidden_projects: hidden_projects_among(&input.cli_hidden_projects, &projects),
         ..current
     };
     repo::settings::save_user_settings(&mut tx, &next).await?;
@@ -638,6 +649,67 @@ mod tests {
         }
         // The refused values left the last saved one.
         assert_eq!(get(&pool).await.unwrap().zoom, 150);
+    }
+
+    #[tokio::test]
+    async fn cli_hidden_projects_are_saved_without_missing_projects() {
+        use crate::commands::projects::{self, ProjectInput};
+
+        let pool = db::open_in_memory().await.unwrap();
+        let mut ids = Vec::new();
+        for name in ["A", "B", "C"] {
+            let p = projects::create(
+                &pool,
+                ProjectInput {
+                    name: name.into(),
+                    color: None,
+                    description: String::new(),
+                },
+                ts(2026, 11, 1, 0, 0),
+            )
+            .await
+            .unwrap();
+            ids.push(p.id);
+        }
+        let (a, c) = (ids[0], ids[2]);
+        projects::archive(&pool, c, true, ts(2026, 11, 2, 0, 0))
+            .await
+            .unwrap();
+        // Out of order, twice, and an id with no project (deleted meanwhile):
+        // saved in order, once, without the missing one. Archived ones stay.
+        let s = update(
+            &pool,
+            SettingsInput {
+                cli_hidden_projects: vec![c, 99, a, c],
+                ..SettingsInput::from(&Settings::default())
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(s.cli_hidden_projects, vec![a, c]);
+        assert_eq!(get(&pool).await.unwrap().cli_hidden_projects, vec![a, c]);
+        // Other settings saved later keep them.
+        let s = update(
+            &pool,
+            SettingsInput {
+                theme: Theme::Dark,
+                ..SettingsInput::from(&s)
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(s.cli_hidden_projects, vec![a, c]);
+        // An empty list shows every project again.
+        let s = update(
+            &pool,
+            SettingsInput {
+                cli_hidden_projects: vec![],
+                ..SettingsInput::from(&s)
+            },
+        )
+        .await
+        .unwrap();
+        assert!(s.cli_hidden_projects.is_empty());
     }
 
     #[tokio::test]

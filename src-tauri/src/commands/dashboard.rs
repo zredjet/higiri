@@ -46,9 +46,18 @@ pub async fn ack_reminder(pool: State<'_, SqlitePool>) -> CmdResult<()> {
     ack(&pool, clock::today()).await
 }
 
-async fn active(conn: &mut SqliteConnection) -> CmdResult<(Vec<Project>, Vec<Todo>, Links)> {
-    let projects = repo::projects::list(conn, false).await?;
-    let todos = repo::todos::list(conn, &TodoFilter::default()).await?;
+/// The active projects and their TODOs, without the projects `hidden`
+/// (higiri-cli leaves out the projects it does not show, v0.5.0).
+async fn active(
+    conn: &mut SqliteConnection,
+    hidden: &[i64],
+) -> CmdResult<(Vec<Project>, Vec<Todo>, Links)> {
+    let mut projects = repo::projects::list(conn, false).await?;
+    let mut todos = repo::todos::list(conn, &TodoFilter::default()).await?;
+    if !hidden.is_empty() {
+        projects.retain(|p| !hidden.contains(&p.id));
+        todos.retain(|t| !hidden.contains(&t.project_id));
+    }
     let links = all_links(conn).await?;
     Ok((projects, todos, links))
 }
@@ -56,7 +65,7 @@ async fn active(conn: &mut SqliteConnection) -> CmdResult<(Vec<Project>, Vec<Tod
 /// The dashboard without the backup mirror's notice (the resident timer's
 /// counts).
 pub async fn get(pool: &SqlitePool, today: NaiveDate) -> CmdResult<Dashboard> {
-    Ok(load(pool, today).await?.0)
+    Ok(load(pool, today, &[]).await?.0)
 }
 
 /// The dashboard as the screen shows it, with the backup mirror's notice
@@ -66,15 +75,30 @@ pub async fn with_backup_alert(
     data_dir: &Path,
     today: NaiveDate,
 ) -> CmdResult<Dashboard> {
-    let (mut dash, settings) = load(pool, today).await?;
+    without_projects(pool, data_dir, today, &[]).await
+}
+
+/// [`with_backup_alert`] as if the projects `hidden` were not there: their
+/// TODOs are left out before anything is counted (higiri-cli's `today`).
+pub async fn without_projects(
+    pool: &SqlitePool,
+    data_dir: &Path,
+    today: NaiveDate,
+    hidden: &[i64],
+) -> CmdResult<Dashboard> {
+    let (mut dash, settings) = load(pool, today, hidden).await?;
     dash.backup_mirror_alert = mirror_alert(data_dir, &settings);
     Ok(dash)
 }
 
-async fn load(pool: &SqlitePool, today: NaiveDate) -> CmdResult<(Dashboard, Settings)> {
+async fn load(
+    pool: &SqlitePool,
+    today: NaiveDate,
+    hidden: &[i64],
+) -> CmdResult<(Dashboard, Settings)> {
     let mut conn = pool.acquire().await?;
     let settings = repo::settings::load(&mut conn).await?;
-    let (projects, todos, links) = active(&mut conn).await?;
+    let (projects, todos, links) = active(&mut conn, hidden).await?;
     let dash = dashboard::build(
         projects,
         &todos,
@@ -101,7 +125,7 @@ pub async fn reminder(pool: &SqlitePool, today: NaiveDate) -> CmdResult<Option<S
     if !dashboard::reminder_allowed(&settings, today) {
         return Ok(None);
     }
-    let (projects, todos, links) = active(&mut conn).await?;
+    let (projects, todos, links) = active(&mut conn, &[]).await?;
     let dash = dashboard::build(
         projects,
         &todos,
