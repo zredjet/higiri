@@ -384,7 +384,8 @@ async fn cli(db: &Path, data_dir: &Path, args: &[&str], today: NaiveDate) -> usi
         std::iter::once("higiri-cli").chain(args.iter().copied()),
     )
     .unwrap();
-    crate::cli::run_on(&parsed.command, db, data_dir, today)
+    let now = Utc.from_utc_datetime(&today.and_hms_opt(1, 30, 0).unwrap());
+    crate::cli::run_on(&parsed.command, db, data_dir, today, now)
         .await
         .unwrap()
         .len()
@@ -459,6 +460,115 @@ async fn measure_cli(
     settings::update(pool, settings::SettingsInput::from(&base))
         .await
         .unwrap();
+    times
+}
+
+/// The median time of higiri-cli's write sub-commands (0.5 s each at
+/// most), on a copy of the database in a folder of its own (the counts
+/// checked later stay). Today's daily backup is already there, as after the
+/// first write or launch of the day; the first write's backup is timed once.
+async fn measure_cli_writes(
+    pool: &SqlitePool,
+    tmp: &Path,
+    today: NaiveDate,
+) -> Vec<(&'static str, Duration)> {
+    let runs = 7;
+    let dir = tmp.join("cli-writes");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join(db::DB_FILE_NAME);
+    sqlx::query("VACUUM INTO ?1")
+        .bind(file.display().to_string())
+        .execute(pool)
+        .await
+        .unwrap();
+    let copied = db::open(&file).await.unwrap();
+    // An open TODO of its own: no parent, children, repetition or TODO to
+    // finish first (no confirmation).
+    let (plain,): (i64,) = sqlx::query_as(
+        "SELECT t.id FROM todos t
+         WHERE t.status = 'todo' AND t.parent_id IS NULL
+           AND NOT EXISTS (SELECT 1 FROM todos c WHERE c.parent_id = t.id)
+           AND NOT EXISTS (SELECT 1 FROM todo_repeats r WHERE r.todo_id = t.id)
+           AND NOT EXISTS (SELECT 1 FROM todo_dependencies d WHERE d.todo_id = t.id)
+         ORDER BY t.id LIMIT 1",
+    )
+    .fetch_one(&copied)
+    .await
+    .unwrap();
+    // Open parents with open children, one for each run.
+    let parents: Vec<(i64,)> = sqlx::query_as(
+        "SELECT p.id FROM todos p
+         WHERE p.status NOT IN ('done', 'cancelled') AND p.parent_id IS NULL
+           AND EXISTS (SELECT 1 FROM todos c
+                       WHERE c.parent_id = p.id AND c.status NOT IN ('done', 'cancelled'))
+         ORDER BY p.id LIMIT ?1",
+    )
+    .bind(runs as i64 + 1)
+    .fetch_all(&copied)
+    .await
+    .unwrap();
+    copied.close().await;
+    assert_eq!(parents.len(), runs + 1);
+    let (file, dir) = (&file, &dir);
+    let plain = plain.to_string();
+    let plain = plain.as_str();
+
+    // The first write of the day takes the daily backup first.
+    let first_log = ["log", plain, "--body", "計測の作業ログ"];
+    let t = Instant::now();
+    cli(file, dir, &first_log, today).await;
+    let first = t.elapsed();
+    assert!(
+        crate::backup::dir(dir)
+            .join(format!("todo-{today}.db"))
+            .is_file()
+    );
+    let mut times = vec![("cli log (taking the backup)", first)];
+
+    let add = [
+        "add",
+        "--project",
+        "3",
+        "--title",
+        "計測で足すTODO",
+        "--due",
+        "2026-11-30",
+    ];
+    times.push((
+        "cli add",
+        median(runs, || cli(file, dir, &add, today)).await,
+    ));
+    let doing = Cell::new(false);
+    times.push((
+        "cli status (todo ↔ doing)",
+        median(runs, || {
+            doing.set(!doing.get());
+            let to = if doing.get() { "doing" } else { "todo" };
+            async move { cli(file, dir, &["status", plain, to], today).await }
+        })
+        .await,
+    ));
+    let next = Cell::new(0);
+    let parent_ids: Vec<String> = parents.iter().map(|(id,)| id.to_string()).collect();
+    times.push((
+        "cli status (with children)",
+        median(runs, || {
+            let id = parent_ids[next.get()].as_str();
+            next.set(next.get() + 1);
+            async move { cli(file, dir, &["status", id, "done", "--with-children"], today).await }
+        })
+        .await,
+    ));
+    let log = ["log", plain, "--body", "計測の作業ログ", "--minutes", "30"];
+    times.push((
+        "cli log",
+        median(runs, || cli(file, dir, &log, today)).await,
+    ));
+    let memo = ["append-memo", plain, "--body", "計測で書き足す"];
+    times.push((
+        "cli append-memo",
+        median(runs, || cli(file, dir, &memo, today)).await,
+    ));
     times
 }
 
@@ -1011,6 +1121,10 @@ async fn perf_5000_todos_20000_logs() {
             *c < Duration::from_millis(500) && *b < Duration::from_millis(500),
             "{name}: 0.5 s at most"
         );
+    }
+    for (name, t) in measure_cli_writes(&pool, tmp.path(), today).await {
+        println!("{name:<30} {}", ms(t));
+        assert!(t < Duration::from_millis(500), "{name}: 0.5 s at most");
     }
 
     let all = todos::TodoQuery {

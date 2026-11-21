@@ -86,6 +86,49 @@ impl CliError {
         ))
     }
 
+    /// Going 作業中 while TODOs to finish first are unfinished: `names` are
+    /// theirs (those of projects the CLI does not show are not named).
+    pub fn blocked(names: &[String]) -> CliError {
+        CliError::new(
+            CliErrorKind::NeedsConfirmation,
+            format!(
+                "次の{}件の先行TODOが、まだ完了も中止もしていません({})。このまま作業中にするときは --despite-blocked を付けてください。",
+                names.len(),
+                names.join("、")
+            ),
+        )
+    }
+
+    /// Closing a parent whose children `names` are open: they would be
+    /// closed with it, to `to` (「完了」「中止」).
+    pub fn open_children(names: &[String], to: &str) -> CliError {
+        CliError::new(
+            CliErrorKind::NeedsConfirmation,
+            format!(
+                "開いている子TODOが{}件あります({})。子TODOも一緒に{to}にするときは --with-children を付けてください。",
+                names.len(),
+                names.join("、")
+            ),
+        )
+    }
+
+    /// Today's daily backup could not be taken, so nothing was written.
+    pub fn no_backup() -> CliError {
+        CliError::new(
+            CliErrorKind::Internal,
+            "バックアップを作れなかったため、書き込みをやめました。Higiri を起動して、バックアップが作られるか確かめてください。",
+        )
+    }
+
+    /// The database stayed locked: the app is writing (a restore, a JSON
+    /// import).
+    pub fn busy() -> CliError {
+        CliError::new(
+            CliErrorKind::Internal,
+            "Higiri がデータを書き換えている最中です。少し待ってから、もう一度実行してください。",
+        )
+    }
+
     /// The data folder could not be found (no home folder).
     pub fn no_data_folder() -> CliError {
         CliError::new(
@@ -104,8 +147,12 @@ impl CliError {
 
 impl From<AppError> for CliError {
     /// The screens' errors keep their text, except the unexpected ones,
-    /// whose text speaks of restarting the app.
+    /// whose text speaks of restarting the app, and the one of a write that
+    /// waited too long for the lock, which speaks of the screens.
     fn from(e: AppError) -> CliError {
+        if e == AppError::busy() {
+            return CliError::busy();
+        }
         match e.kind {
             ErrorKind::Validation => CliError::validation(e.message),
             ErrorKind::NotFound => CliError::not_found(e.message),
@@ -126,10 +173,7 @@ impl From<OpenError> for CliError {
             OpenError::Newer => CliError::validation(
                 "higiri-cli が Higiri より古い版です。Higiri と同じ ZIP に入っている higiri-cli を使ってください。",
             ),
-            OpenError::Busy => CliError::new(
-                CliErrorKind::Internal,
-                "Higiri がデータを書き換えている最中です。少し待ってから、もう一度実行してください。",
-            ),
+            OpenError::Busy => CliError::busy(),
             OpenError::Failed(_) => CliError::internal(),
         }
     }
@@ -161,6 +205,12 @@ mod tests {
         let e: CliError = AppError::internal().into();
         assert_eq!(e, CliError::internal());
         assert!(!e.message.contains("アプリを再起動"));
+        let e: CliError = AppError::busy().into();
+        assert_eq!(e, CliError::busy());
+        assert_eq!(
+            e.message,
+            "Higiri がデータを書き換えている最中です。少し待ってから、もう一度実行してください。"
+        );
     }
 
     #[test]

@@ -32,6 +32,7 @@ use crate::domain::model::{Priority, Status};
 use crate::domain::repeat::{DayOfWeek, RepeatRule};
 use crate::domain::status::{StatusChange, StatusFields, transition};
 use crate::domain::template::{TemplateBody, TemplateChild};
+use crate::repo::db;
 use crate::repo::projects::NewProject;
 use crate::repo::templates::TemplateFields;
 use crate::repo::todos::NewTodo;
@@ -326,7 +327,7 @@ fn mock(s: &str) -> NaiveDate {
 /// Inserts the sample data when the database has no project yet.
 /// Returns whether anything was inserted.
 pub async fn seed_if_empty(pool: &SqlitePool, today: NaiveDate) -> Result<bool, RepoError> {
-    let mut tx = pool.begin().await?;
+    let mut tx = db::begin_write(pool).await?;
     if !repo::projects::list(&mut tx, true).await?.is_empty() {
         return Ok(false);
     }

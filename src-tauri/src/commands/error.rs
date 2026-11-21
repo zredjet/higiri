@@ -43,6 +43,15 @@ impl AppError {
                     .into(),
         }
     }
+
+    /// Another connection (higiri-cli, or the app while restoring) kept the
+    /// write lock for longer than the busy timeout (v0.5.0).
+    pub fn busy() -> AppError {
+        AppError {
+            kind: ErrorKind::Internal,
+            message: "ほかの操作がデータを書き換えている最中のため、保存できませんでした。少し待ってから、もう一度操作してください。".into(),
+        }
+    }
 }
 
 impl From<RepoError> for AppError {
@@ -51,6 +60,10 @@ impl From<RepoError> for AppError {
             return AppError::validation(
                 "入力した内容を保存できませんでした。日付の前後と、必須の項目を確かめてください。",
             );
+        }
+        if e.is_busy() {
+            log::warn!("database busy: {e}");
+            return AppError::busy();
         }
         match e {
             RepoError::NotFound { entity, .. } => AppError {
@@ -108,6 +121,45 @@ mod tests {
         }
         .into();
         assert_eq!(e, AppError::internal());
+    }
+
+    #[tokio::test]
+    async fn a_write_still_locked_after_the_wait_says_so() {
+        use std::time::Duration;
+
+        use crate::commands::projects::{self, ProjectInput};
+        use crate::domain::testing::ts;
+        use crate::repo::db;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(db::DB_FILE_NAME);
+        let other = db::open(&path).await.unwrap();
+        let input = || ProjectInput {
+            name: "基幹システム更改".into(),
+            color: None,
+            description: String::new(),
+        };
+        let project = projects::create(&other, input(), ts(2026, 11, 19, 1, 0))
+            .await
+            .unwrap();
+        // The screens' pool waits less here than the app's 5 seconds.
+        let short = db::open_existing_waiting(&path, Duration::from_millis(100))
+            .await
+            .unwrap();
+        let held = db::begin_write(&other).await.unwrap();
+        let e = projects::update(&short, project.id, input(), ts(2026, 11, 19, 1, 30))
+            .await
+            .unwrap_err();
+        assert_eq!(e, AppError::busy());
+        assert_eq!(e.kind, ErrorKind::Internal);
+        assert_eq!(
+            e.message,
+            "ほかの操作がデータを書き換えている最中のため、保存できませんでした。少し待ってから、もう一度操作してください。"
+        );
+        held.rollback().await.unwrap();
+        projects::update(&short, project.id, input(), ts(2026, 11, 19, 1, 30))
+            .await
+            .unwrap();
     }
 
     #[test]

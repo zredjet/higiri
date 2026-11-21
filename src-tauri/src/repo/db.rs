@@ -3,9 +3,9 @@
 use std::path::Path;
 use std::time::Duration;
 
-use sqlx::SqlitePool;
 use sqlx::migrate::Migrator;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
+use sqlx::{Connection, Sqlite, SqliteConnection, SqlitePool, Transaction};
 
 use super::Result;
 
@@ -34,6 +34,25 @@ pub async fn open(path: &Path) -> Result<SqlitePool> {
     MIGRATOR.run(&pool).await?;
     Ok(pool)
 }
+
+/// Starts a transaction that writes (v0.5.0). `BEGIN IMMEDIATE` takes the
+/// write lock at once, waiting for it up to the busy timeout (5 seconds)
+/// while another connection (the app, higiri-cli) writes. A plain `BEGIN`
+/// would read first, and SQLite does not wait to turn a read into a write:
+/// it fails at once with SQLITE_BUSY, or SQLITE_BUSY_SNAPSHOT when the other
+/// write ended after the read. Still locked after the wait: SQLITE_BUSY
+/// ([`super::RepoError::is_busy`]). Transactions that only read keep
+/// `begin()`; a single statement outside a transaction waits by itself.
+pub async fn begin_write(pool: &SqlitePool) -> sqlx::Result<Transaction<'static, Sqlite>> {
+    pool.begin_with(BEGIN_WRITE).await
+}
+
+/// [`begin_write`] on a connection at hand (one with a database attached).
+pub async fn begin_write_on(conn: &mut SqliteConnection) -> sqlx::Result<Transaction<'_, Sqlite>> {
+    conn.begin_with(BEGIN_WRITE).await
+}
+
+const BEGIN_WRITE: &str = "BEGIN IMMEDIATE";
 
 /// Why [`open_existing`] refused a database (nothing was read or written).
 #[derive(Debug, thiserror::Error)]
@@ -87,7 +106,8 @@ pub async fn open_existing(path: &Path) -> std::result::Result<SqlitePool, OpenE
     open_existing_waiting(path, BUSY_TIMEOUT).await
 }
 
-async fn open_existing_waiting(
+/// [`open_existing`] with another busy timeout (tests wait less).
+pub(crate) async fn open_existing_waiting(
     path: &Path,
     busy_timeout: Duration,
 ) -> std::result::Result<SqlitePool, OpenError> {
@@ -513,6 +533,84 @@ mod tests {
         assert!(start.elapsed() >= Duration::from_millis(200));
         held.rollback().await.unwrap();
         holder.close().await;
+    }
+
+    async fn theme(conn: &mut SqliteConnection) -> Option<String> {
+        sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'theme'")
+            .fetch_optional(conn)
+            .await
+            .unwrap()
+            .map(|(v,)| v)
+    }
+
+    #[tokio::test]
+    async fn a_write_waits_while_another_connection_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(DB_FILE_NAME);
+        let pool = open(&path).await.unwrap();
+        let other = open(&path).await.unwrap();
+
+        // A plain BEGIN reads first, then cannot wait to write.
+        let mut held = begin_write(&other).await.unwrap();
+        let mut plain = pool.begin().await.unwrap();
+        assert_eq!(theme(&mut plain).await, None);
+        let start = std::time::Instant::now();
+        let e = sqlx::query("INSERT INTO settings (key, value) VALUES ('zoom', '100')")
+            .execute(&mut *plain)
+            .await
+            .unwrap_err();
+        assert!(super::super::RepoError::from(e).is_busy());
+        assert!(start.elapsed() < Duration::from_millis(500));
+        plain.rollback().await.unwrap();
+
+        // BEGIN IMMEDIATE waits until the other write ends, then reads it.
+        sqlx::query("INSERT INTO settings (key, value) VALUES ('theme', '\"dark\"')")
+            .execute(&mut *held)
+            .await
+            .unwrap();
+        let ends = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            held.commit().await.unwrap();
+        });
+        let start = std::time::Instant::now();
+        let mut tx = begin_write(&pool).await.unwrap();
+        assert!(start.elapsed() >= Duration::from_millis(250));
+        assert_eq!(theme(&mut tx).await.as_deref(), Some("\"dark\""));
+        sqlx::query("UPDATE settings SET value = '\"light\"' WHERE key = 'theme'")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        ends.await.unwrap();
+
+        // On a connection at hand too.
+        let mut conn = pool.acquire().await.unwrap();
+        let mut tx = begin_write_on(&mut conn).await.unwrap();
+        assert_eq!(theme(&mut tx).await.as_deref(), Some("\"light\""));
+        tx.rollback().await.unwrap();
+        drop(conn);
+        pool.close().await;
+        other.close().await;
+    }
+
+    #[tokio::test]
+    async fn a_write_still_locked_after_the_wait_is_busy() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(DB_FILE_NAME);
+        let other = open(&path).await.unwrap();
+        let short = open_existing_waiting(&path, Duration::from_millis(100))
+            .await
+            .unwrap();
+        let held = begin_write(&other).await.unwrap();
+        let start = std::time::Instant::now();
+        let e = begin_write(&short).await.unwrap_err();
+        assert!(start.elapsed() >= Duration::from_millis(100));
+        assert!(super::super::RepoError::from(e).is_busy());
+        held.rollback().await.unwrap();
+        // Free again.
+        begin_write(&short).await.unwrap().rollback().await.unwrap();
+        short.close().await;
+        other.close().await;
     }
 
     #[tokio::test]

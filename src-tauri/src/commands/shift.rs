@@ -23,6 +23,7 @@ use super::validate;
 use crate::domain::model::Todo;
 use crate::domain::shift::{Shift, dependent_shifts, reachable};
 use crate::repo;
+use crate::repo::db;
 
 /// A 後続TODO to move with the dragged one (the confirmation's list).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
@@ -168,7 +169,7 @@ pub async fn shift(
     today: NaiveDate,
     now: DateTime<Utc>,
 ) -> CmdResult<Vec<i64>> {
-    let mut tx = pool.begin().await?;
+    let mut tx = db::begin_write(pool).await?;
     let plan = plan(&mut tx, todo_id, start, end).await?;
     save_planned(&mut tx, &plan.dragged, Some(start), Some(end), today, now).await?;
     let mut moved = Vec::with_capacity(plan.shifts.len() + 1);

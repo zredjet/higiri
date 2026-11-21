@@ -27,8 +27,8 @@ use std::time::SystemTime;
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use serde::Serialize;
+use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
-use sqlx::{Connection, SqlitePool};
 
 use crate::domain::date::{format_date, parse_date};
 use crate::repo::db;
@@ -593,7 +593,7 @@ pub async fn copy_rows(pool: &SqlitePool, work: &Path) -> Result<()> {
         .execute(&mut *conn)
         .await?;
     let copied = async {
-        let mut tx = conn.begin().await?;
+        let mut tx = db::begin_write_on(&mut conn).await?;
         // Checked at COMMIT instead of row by row (todos refer to todos).
         sqlx::query("PRAGMA defer_foreign_keys = ON")
             .execute(&mut *tx)

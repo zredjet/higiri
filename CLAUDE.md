@@ -91,6 +91,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
 - `settings` は1キー1行で、値は JSON。キーは `reminder_frequency`(`"every_launch"` / `"once_per_day"`)、`soon_days`(数値)、`follow_up_days`(数値)、`last_reminded_on`(`"YYYY-MM-DD"` か `null`)、`theme`(`"light"` / `"dark"` / `"system"`)。読めない値は既定値として扱う。v1.1 で足したキーは「v1.1 の決めごと」に、v0.3.0 で足したキー(`weekly_report_template`)は「v0.3.0 の決めごと」に、v0.4.0 で足したキー(`zoom` など)は「v0.4.0 の決めごと」に、v0.5.0 で足すキー(`cli_hidden_projects`)は「v0.5.0 の決めごと」にある。
 - JSON の書き出し(フェーズ15)の表は、`projects`、`todos`、`work_logs`、`todo_events`、`reports`、`todo_templates`、`todo_repeats`、`todo_dependencies` の順(`json_data.rs` の `TABLES`)。`todo_events.note`、`todo_templates.body`、`todo_repeats.rule` と settings の値は、保存してある JSON の文をそのまま JSON の値として埋め込む。`schema_version` は v0.3.0 で2になった。取り込みでは、`schema_version` が1のファイル(v0.2.0 までの書き出し)は v0.3.0 の3つの表のキーがなくてよく(空として扱う)、2以上でどれかがなければ `Malformed`。
 - 接続のたびに外部キー制約を有効にし、WALモードにする。
+- 書き込みのあるトランザクションは `repo::db::begin_write`(手元の接続では `begin_write_on`)で始める(`BEGIN IMMEDIATE`。v0.5.0)。BEGIN の時点で書き込みの鍵を取りに行き、5秒(`BUSY_TIMEOUT`)まで待つ。`pool.begin()`(DEFERRED)で始めて読んでから書くと、ほかの接続(CLI、アプリ)が書いている最中は待たずに SQLITE_BUSY、読んだあとにほかの接続が書き終えていれば SQLITE_BUSY_SNAPSHOT で、すぐに失敗するため。読むだけのトランザクション(JSON の書き出しなど)は `begin()` のまま、1文だけの自動コミットの書き込みはもとから待つので変えない。5秒待っても取れなければ、`From<RepoError> for AppError` が `AppError::busy()`(kind は internal、文は「ほかの操作がデータを書き換えている最中のため、保存できませんでした。少し待ってから、もう一度操作してください。」)にし、CLI はそれを「Higiri がデータを書き換えている最中です。少し待ってから、もう一度実行してください。」にする。
 - 適用済みのマイグレーションファイルは書き換えない。変更は新しいファイルを足す。
 - DBへの接続なしで `cargo build` が通る構成にする(`query!` 系マクロを使うなら `cargo sqlx prepare` の成果物をコミットする)。
 - バックアップは `VACUUM INTO` で作る。WALモードのDBファイルを単純コピーしない。
@@ -587,6 +588,26 @@ v0.5.0 は `docs/implementation-plan-v0.5.0.md` のフェーズ31〜36で作る�
     - 画面: `queries.ts` の `settingsInputOf` に `cli_hidden_projects` を足した(足さないと `update_settings` の入力が足りず、設定を保存できないため)。設定画面のカードはフェーズ34。
     - テスト: `cli/tests.rs`(サンプルデータを作業用のフォルダの DB に入れて `run` を呼び、ダッシュボード・日報・一覧・検索と比べる)、`src-tauri/tests/cli.rs`(実行ファイルを動かし、書く先と終了コードを確かめる。DB を開くものは macOS だけで、`HOME` を作業用のフォルダにする。Windows は環境変数でデータフォルダを変えられないので、データを読まない `--help` などだけ)。
     - perf(`perf.rs` の `measure_cli`): `today`、`list`(全体の50件、絞り込み)、`show`(子と作業ログのある親)、`search`(全件に当たる語、0件)、`projects --archived`、1つのプロジェクトを出さないときの `today` と `search`。どれかが0.5秒を超えたら失敗にする。
+- CLI の書き込み(フェーズ33)
+  - 画面のコマンドは足していない(48個のまま)。`bindings.ts` と `capabilities/default.json` は変わっていない。
+  - 作ったもの(フェーズ33)
+    - `cli/args.rs`: `add`、`update`、`status`、`log`、`append-memo`。日付の引数は `parse_date`(`YYYY-MM-DD` だけ。違えば clap の誤りで終了コード2)。`update` は項目を1つも指さないと clap の誤り(`ArgGroup`)で、`--due` と `--no-due` のような組は一緒に使えない。`status` の `--waiting-on` は waiting に、`--reason` は cancelled にするとき clap が求める(`required_if_eq`)。タイトル・本文・相手・理由は `-` で始まる値も受け取る(`allow_hyphen_values`。Markdown の箇条書きを渡すため)。`--minutes` は負の数も受け取り、範囲は画面と同じ検査が断る。
+    - `cli/write.rs`: 5つのサブコマンド。どれも、出さないプロジェクトを断る → 画面が確認のダイアログを挟む操作を断る → その日の毎日のバックアップがなければ作る(`backup::run_daily`。作れなければ `no_backup` で断り、何も書かない) → 書く、の順。`hidden` と `needs_confirmation` で断ったときはバックアップを作らない。
+      - `--body -` は `main` が標準入力から読む(`read_body`。UTF-8 だけで、読めなければ `validation`。先頭の BOM は除く)。`log` と `append-memo` の本文の CRLF は LF にする。
+      - `add`: `commands::todos::create`(`template_id` と `memo_md` は `null`)。プロジェクトは `read::project`、`--parent` は `read::shown_todo` で先に確かめる(ない親は `todo_not_found`、出さないプロジェクトの親は `hidden_todo`)。孫・別のプロジェクト・アーカイブしたプロジェクトは `create` が画面の文で断る。
+      - `update`: 書く直前に `todos::get` で今のTODOを読み、指した項目だけを重ねて `commands::todos::update` に送る(画面の `useUpdateTodo` と同じ)。`--follow-up` は、待ちのTODOでなければ「確認日(--follow-up)は、待ちのTODOだけに入れられます。…」で断る(`update_todo` は待ちでないTODOの確認日を黙って捨てるため)。
+      - `status`: `commands::todos::change_status_impl`(画面の `change_status` そのもの。`change_one` は `pub(super)` のまま)。`--waiting-on` と `--follow-up` は waiting、`--reason` は cancelled のときだけ使え、ほかでは `validation` で断る。確認日を省いたら `TodoItem.follow_up_default`。確認が要るかは、その遷移が許されるとき(`next_statuses` にあるとき)だけ見る。許されない遷移は、確認を挟まずに画面の文で断る。`--despite-blocked` の文の括弧の中は、終わっていない先行TODOの名前(子は「親 / 子」)を結んだ順に「、」でつなぐ。出さないプロジェクトの先行TODOは、名前の代わりに「CLIに出さないプロジェクトのTODO」と書く(件数には数える)。`--with-children` の文の子は一覧の順で、「子TODOも一緒に完了にするときは」の「完了」は行き先(中止なら「中止」)。
+      - `status` の出力は `{ todo, closed_children, next_round, repeat_ended }`。変える前と後に、そのプロジェクトの `list_todos`(アーカイブしたものも)を読み比べる。`closed_children` は、変える前に開いていて後で閉じている子(`{ id, title }`、一覧の順)。`next_round` は、変える前の一覧になく、周期を持つTODO(`{ id, due_date }`。周期は次の回へ移るため)。`repeat_ended` は、変える前に周期があり、変えたあとのTODOに周期がなく、次の回もないとき。いつも `true` か `false` を出す(キーの有無を見分けなくてよいように)。
+      - `log`: `commands::work_logs::save`(`id` は `null`、`--date` を省くと今日)。出力は `{ id, todo_id, log_date, minutes, body_md }`。
+      - `append-memo`: 本文の前後の空白を除いて空なら、バックアップを作る前に「書き足す本文を入力してください。」で断る。書く直前に今のTODOを読み、`appended(今のメモ, 本文)`(メモの末尾の空白と改行を除き、空行を1つ挟む。メモが空なら本文だけ)をメモにして `commands::todos::update` に送る(ほかの項目は今の値のまま。変更履歴は増えない)。出力は `CliTodo` に `memo_md` を足した形(`show` と同じく平らにする)。
+      - `add` と `update` の出力は `CliTodo`。書いている間にTODOが消されたときの NotFound は `todo_not_found` の文にする。
+    - `cli/error.rs`: `blocked`、`open_children`(どちらも `needs_confirmation`)、`no_backup`、`busy`(`internal`)。`From<AppError>` は、`AppError::busy()` を `busy` にする(見分けは `AppError::busy()` と比べる)。CLI でやり直しはしない。
+    - 書き込みの鍵(オーケストレーターが決定): 書くトランザクションを `BEGIN IMMEDIATE` で始めるようにした(上の「データの決めごと」)。替えたのは `commands/` の `todos.rs`(`create`、`update`、`change_status_impl`、`set_parent`)、`work_logs.rs`(`save`)、`repeats.rs`(`set`)、`dependencies.rs`(`add`、`remove`)、`templates.rs`(`save`、`rename`)、`projects.rs`(`update`、`delete`)、`settings.rs`(`update`)、`shift.rs`(`shift`)、`bulk.rs`(`apply`)、`backup.rs` の `copy_rows`(復元と JSON の取り込みの入れ替え。`ATTACH` のあとなので `begin_write_on`)、`json_data.rs` の作業用の DB への取り込み(ほかの接続はないが、書くトランザクションなので同じにした)、`sample.rs` の `seed_if_empty`。`json_data.rs` の書き出し(読むだけ)と、テストの中のトランザクションは `begin()` のまま。`repo/` の中で始めているトランザクションは、テストのほかにはない。
+    - `cli/read.rs`: `shown_todo`(ないTODOは `todo_not_found`、出さないプロジェクトのTODOは `hidden_todo`)と `not_found`。`show` もこれを使う。
+    - `run` と `run_on` は `now` も受け取る。時計を読むのは `main` だけのまま。
+    - テスト(鍵): `repo/db.rs`(`BEGIN` で読んでから書くとすぐ SQLITE_BUSY になること、`begin_write` がほかの接続の書き込みが終わるまで待ち、その結果を読むこと、待ち時間を過ぎると busy になること)、`commands/error.rs`(画面の内側の関数が `AppError::busy()` を返すこと)、`cli/tests/writes.rs`(アプリが鍵を少し持っている間の CLI の書き込みと、その逆の画面の保存が通ること、待ち時間を短くした CLI の接続で5つの書くサブコマンドが `busy` の文で断り、何も変えないこと)。待ち時間を短くした接続は `repo::db::open_existing_waiting`(`pub(crate)`)で作る。
+    - テスト: `cli/tests/writes.rs`。同じサンプルを2つ作り、片方に CLI、もう片方に画面の内側の関数で同じ変更をして、TODO とすべてのタイムラインが同じになることを確かめる(作成、項目の変更、ステータスの遷移、子を閉じる、繰り返しの次の回、作業ログ)。断ったときは、TODO とタイムラインが変わらないことも確かめる。`src-tauri/tests/cli.rs` は macOS だけで、標準入力から本文を読む `log`、その日のバックアップ、`needs_confirmation` を標準エラー出力と終了コード1で出すことを確かめる(ライブラリの配布用のビルドにはサンプルデータがないので、データは画面のコマンドの内側の関数で作る)。
+    - perf(`perf.rs` の `measure_cli_writes`): `VACUUM INTO` で作った DB の写しを別のフォルダに置き(あとの件数の確かめを変えないため)、その日の最初の書き込み(バックアップを作る)を1回、続けて、バックアップがあるときの `add`、`status`(未着手と作業中を行き来する、子のある親を `--with-children` で完了にする)、`log`、`append-memo` を測る。どれかが0.5秒を超えたら失敗にする。
 
 ## 品質の決めごと
 

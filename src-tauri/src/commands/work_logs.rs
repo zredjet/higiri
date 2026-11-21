@@ -14,6 +14,7 @@ use crate::domain::events::TodoEvent;
 use crate::domain::model::WorkLog;
 use crate::domain::timeline::describe;
 use crate::repo;
+use crate::repo::db;
 use crate::repo::work_logs::{NewWorkLog, WorkLogEdit};
 
 /// Upper bound for 作業時間 (minutes in a day).
@@ -113,7 +114,7 @@ pub async fn save(
         validate::in_range(m, 0, MAX_MINUTES, "作業時間", "分")?;
     }
 
-    let mut tx = pool.begin().await?;
+    let mut tx = db::begin_write(pool).await?;
     repo::todos::get(&mut tx, input.todo_id).await?;
     let saved = match input.id {
         None => {

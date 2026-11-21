@@ -1,11 +1,14 @@
 //! higiri-cli (v0.5.0): Higiri's TODOs as JSON, for Claude Code and the
-//! like. The executable is `src/bin/higiri-cli.rs`.
+//! like: read them, add them and change them (phase 33). The executable is
+//! `src/bin/higiri-cli.rs`.
 //!
 //! - The database is the app's (`todo.db` in the app data folder, `dev/`
 //!   with `--dev`), opened without creating it or applying migrations: its
 //!   version must be this build's ([`crate::repo::db::open_existing`]).
 //! - Everything goes through the inner functions of the screens' commands;
 //!   there is no SQL here. The clock is read here, with `commands::clock`.
+//! - Before a write, today's daily backup is taken unless it is there
+//!   (`write`). The read sub-commands take none.
 //! - Success: one JSON object on standard output, exit code 0. Refusal or
 //!   failure: `{"error":{"kind","message"}}` on standard error, exit code 1.
 //!   Wrong arguments: clap's message, exit code 2.
@@ -14,12 +17,13 @@ pub mod args;
 pub mod error;
 pub mod output;
 pub mod read;
+pub mod write;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
 use clap::Parser;
 use serde::Serialize;
 
@@ -41,7 +45,7 @@ pub fn data_folder(dev: bool) -> Option<PathBuf> {
 }
 
 pub fn main() -> ExitCode {
-    let cli = match Cli::try_parse() {
+    let mut cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(e) => {
             // Help and version go to standard output with 0; errors to
@@ -50,13 +54,17 @@ pub fn main() -> ExitCode {
             return ExitCode::from(u8::try_from(e.exit_code()).unwrap_or(2));
         }
     };
-    let result = match data_folder(cli.dev) {
-        None => Err(CliError::no_data_folder()),
-        Some(dir) => match tokio::runtime::Builder::new_current_thread()
+    let result = match (
+        write::read_body(&mut cli.command, &mut std::io::stdin().lock()),
+        data_folder(cli.dev),
+    ) {
+        (Err(e), _) => Err(e),
+        (Ok(()), None) => Err(CliError::no_data_folder()),
+        (Ok(()), Some(dir)) => match tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
         {
-            Ok(runtime) => runtime.block_on(run(&cli.command, &dir, clock::today())),
+            Ok(runtime) => runtime.block_on(run(&cli.command, &dir, clock::today(), clock::now())),
             Err(_) => Err(CliError::internal()),
         },
     };
@@ -94,11 +102,24 @@ impl Reply {
     }
 }
 
-/// Runs `command` on the database in `data_dir` as of `today`: the JSON for
-/// standard output (keys in the order of the forms in `output`), or the
-/// error for standard error.
-pub async fn run(command: &Command, data_dir: &Path, today: NaiveDate) -> Result<String, CliError> {
-    run_on(command, &data_dir.join(db::DB_FILE_NAME), data_dir, today).await
+/// Runs `command` on the database in `data_dir` as of `today` and `now`:
+/// the JSON for standard output (keys in the order of the forms in
+/// `output`), or the error for standard error. A `--body -` is already read
+/// ([`write::read_body`]).
+pub async fn run(
+    command: &Command,
+    data_dir: &Path,
+    today: NaiveDate,
+    now: DateTime<Utc>,
+) -> Result<String, CliError> {
+    run_on(
+        command,
+        &data_dir.join(db::DB_FILE_NAME),
+        data_dir,
+        today,
+        now,
+    )
+    .await
 }
 
 /// [`run`] on the database file `db` (the performance check's may have
@@ -108,9 +129,10 @@ pub(crate) async fn run_on(
     db: &Path,
     data_dir: &Path,
     today: NaiveDate,
+    now: DateTime<Utc>,
 ) -> Result<String, CliError> {
     let pool = db::open_existing(db).await?;
-    let out = dispatch(&pool, command, data_dir, today).await;
+    let out = dispatch(&pool, command, data_dir, today, now).await;
     pool.close().await;
     out
 }
@@ -120,6 +142,7 @@ async fn dispatch(
     command: &Command,
     data_dir: &Path,
     today: NaiveDate,
+    now: DateTime<Utc>,
 ) -> Result<String, CliError> {
     match command {
         Command::Today => json(read::today_summary(pool, data_dir, today).await?),
@@ -127,6 +150,13 @@ async fn dispatch(
         Command::Show(args) => json(read::show(pool, args, today).await?),
         Command::Search(args) => json(read::search_todos(pool, &args.words, today).await?),
         Command::Projects(args) => json(read::project_list(pool, args.archived, today).await?),
+        Command::Add(args) => json(write::add(pool, data_dir, args, today, now).await?),
+        Command::Update(args) => json(write::update(pool, data_dir, args, today, now).await?),
+        Command::Status(args) => json(write::status(pool, data_dir, args, today, now).await?),
+        Command::Log(args) => json(write::log(pool, data_dir, args, today, now).await?),
+        Command::AppendMemo(args) => {
+            json(write::append_memo(pool, data_dir, args, today, now).await?)
+        }
     }
 }
 

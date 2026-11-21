@@ -18,6 +18,7 @@ use super::todos::{item, items};
 use crate::domain::dependency::check_new;
 use crate::domain::views::TodoItem;
 use crate::repo;
+use crate::repo::db;
 
 /// The TODOs around one in the detail panel, each in the order the
 /// dependencies were added.
@@ -70,7 +71,7 @@ pub async fn add(
     today: NaiveDate,
     now: DateTime<Utc>,
 ) -> CmdResult<TodoItem> {
-    let mut tx = pool.begin().await?;
+    let mut tx = db::begin_write(pool).await?;
     let todo = repo::todos::get(&mut tx, todo_id).await?;
     let first = repo::todos::get(&mut tx, depends_on_id).await?;
     let existing = repo::dependencies::list(&mut tx).await?;
@@ -89,7 +90,7 @@ pub async fn remove(
     today: NaiveDate,
     now: DateTime<Utc>,
 ) -> CmdResult<TodoItem> {
-    let mut tx = pool.begin().await?;
+    let mut tx = db::begin_write(pool).await?;
     repo::todos::get(&mut tx, todo_id).await?;
     repo::dependencies::delete(&mut tx, todo_id, depends_on_id).await?;
     let saved = repo::todos::touch(&mut tx, todo_id, now).await?;

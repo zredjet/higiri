@@ -23,6 +23,7 @@ use crate::domain::subtodo::{Family, ParentError, check_new_child, check_parent}
 use crate::domain::urgency::Rules;
 use crate::domain::views::{Links, StatusCounts, TodoItem, TodoList, TodoListRow, todo_item};
 use crate::repo;
+use crate::repo::db;
 use crate::repo::todos::{NewTodo, TodoFilter};
 
 #[derive(Debug, Clone, Default, Deserialize, specta::Type)]
@@ -300,7 +301,7 @@ pub async fn create(
         ));
     }
 
-    let mut tx = pool.begin().await?;
+    let mut tx = db::begin_write(pool).await?;
     let project = repo::projects::get(&mut tx, input.project_id).await?;
     if project.archived_at.is_some() {
         return Err(AppError::validation(
@@ -383,7 +384,7 @@ pub async fn update(
     validate::period(fields.planned_start, fields.planned_end, "予定")?;
     validate::period(fields.actual_start, fields.actual_end, "実績")?;
 
-    let mut tx = pool.begin().await?;
+    let mut tx = db::begin_write(pool).await?;
     let before = repo::todos::get(&mut tx, id).await?;
     // The next round is counted from the 日限 (T-12).
     if before.due_date.is_some()
@@ -473,7 +474,7 @@ pub async fn change_status_impl(
     today: NaiveDate,
     now: DateTime<Utc>,
 ) -> CmdResult<TodoItem> {
-    let mut tx = pool.begin().await?;
+    let mut tx = db::begin_write(pool).await?;
     let before = repo::todos::get(&mut tx, id).await?;
     let saved = change_one(&mut tx, &before, change, today, now).await?;
     let out = item(&mut tx, saved, today).await?;
@@ -550,7 +551,7 @@ pub async fn set_parent(
     today: NaiveDate,
     now: DateTime<Utc>,
 ) -> CmdResult<TodoItem> {
-    let mut tx = pool.begin().await?;
+    let mut tx = db::begin_write(pool).await?;
     let todo = repo::todos::get(&mut tx, id).await?;
     if let Some(parent_id) = parent_id {
         let parent = repo::todos::get(&mut tx, parent_id).await?;

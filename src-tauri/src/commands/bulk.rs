@@ -25,6 +25,7 @@ use crate::domain::model::{Status, Todo};
 use crate::domain::repeat::RepeatsByTodo;
 use crate::domain::urgency::Rules;
 use crate::repo;
+use crate::repo::db;
 
 /// A selected TODO named in the confirmation (left out, or waiting).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
@@ -259,7 +260,7 @@ pub async fn apply(
     today: NaiveDate,
     now: DateTime<Utc>,
 ) -> CmdResult<BulkResult> {
-    let mut tx = pool.begin().await?;
+    let mut tx = db::begin_write(pool).await?;
     let p = planned(&mut tx, ids, change, today).await?;
     let by_id: HashMap<i64, &Todo> = p.selected.iter().map(|t| (t.id, t)).collect();
     if let Some(status) = p.change.status_change() {

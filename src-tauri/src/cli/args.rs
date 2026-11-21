@@ -1,13 +1,15 @@
 //! The arguments of higiri-cli (clap). The help is Japanese; clap's own
 //! words (「Usage:」 and the like) stay English.
 
+use chrono::NaiveDate;
 use clap::builder::{PossibleValue, PossibleValuesParser, TypedValueParser};
-use clap::{ArgAction, Args, Parser, Subcommand};
+use clap::{ArgAction, ArgGroup, Args, Parser, Subcommand};
 
+use crate::domain::date::parse_date;
 use crate::domain::listing::{DueFilter, TodoSort};
 use crate::domain::model::{Priority, Status};
 
-/// Higiri(TODO管理アプリ)のTODOを読みます。出力はJSONです。
+/// Higiri(TODO管理アプリ)のTODOを読み書きします。出力はJSONです。
 #[derive(Debug, Parser)]
 #[command(
     name = "higiri-cli",
@@ -45,6 +47,16 @@ pub enum Command {
     Search(SearchArgs),
     /// プロジェクトの一覧を出します。
     Projects(ProjectsArgs),
+    /// TODOを足します(ステータスは未着手)。作ったTODOを出します。
+    Add(AddArgs),
+    /// TODOのタイトル、優先度、日限、予定期間、確認日を変えます。指した項目だけが変わります。メモは変えません(書き足すときは append-memo)。
+    Update(UpdateArgs),
+    /// TODOのステータスを変えます。
+    Status(StatusArgs),
+    /// TODOに作業ログを足します。
+    Log(LogArgs),
+    /// TODOのメモの末尾に書き足します。メモの書き換えと削除はできません。
+    AppendMemo(AppendMemoArgs),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
@@ -97,6 +109,177 @@ pub struct ProjectsArgs {
     /// アーカイブしたプロジェクトも出します。
     #[arg(long)]
     pub archived: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct AddArgs {
+    /// プロジェクトのidか名前(名前はちょうど同じもの)。
+    #[arg(long, value_name = "IDか名前")]
+    pub project: String,
+
+    /// タイトル。
+    #[arg(long, allow_hyphen_values = true, value_name = "タイトル")]
+    pub title: String,
+
+    /// 子TODOにするときの、親のTODOのid(同じプロジェクトの、親のないTODO)。
+    #[arg(long, value_name = "ID")]
+    pub parent: Option<i64>,
+
+    /// 優先度(初めは中)。
+    #[arg(long, value_parser = choices(&PRIORITIES), value_name = "優先度")]
+    pub priority: Option<Priority>,
+
+    /// 日限(YYYY-MM-DD)。
+    #[arg(long, value_parser = date, value_name = "日付")]
+    pub due: Option<NaiveDate>,
+
+    /// 予定開始日(YYYY-MM-DD)。
+    #[arg(long, value_parser = date, value_name = "日付")]
+    pub start: Option<NaiveDate>,
+
+    /// 予定終了日(YYYY-MM-DD)。
+    #[arg(long, value_parser = date, value_name = "日付")]
+    pub end: Option<NaiveDate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+#[command(group(
+    ArgGroup::new("fields")
+        .required(true)
+        .multiple(true)
+        .args(["title", "priority", "due", "no_due", "start", "no_start", "end", "no_end", "follow_up"])
+))]
+pub struct UpdateArgs {
+    /// TODOのid。
+    #[arg(value_name = "ID")]
+    pub id: i64,
+
+    /// タイトル。
+    #[arg(long, allow_hyphen_values = true, value_name = "タイトル")]
+    pub title: Option<String>,
+
+    /// 優先度。
+    #[arg(long, value_parser = choices(&PRIORITIES), value_name = "優先度")]
+    pub priority: Option<Priority>,
+
+    /// 日限(YYYY-MM-DD)。
+    #[arg(long, value_parser = date, value_name = "日付", conflicts_with = "no_due")]
+    pub due: Option<NaiveDate>,
+
+    /// 日限を空にします。
+    #[arg(long)]
+    pub no_due: bool,
+
+    /// 予定開始日(YYYY-MM-DD)。
+    #[arg(long, value_parser = date, value_name = "日付", conflicts_with = "no_start")]
+    pub start: Option<NaiveDate>,
+
+    /// 予定開始日を空にします。
+    #[arg(long)]
+    pub no_start: bool,
+
+    /// 予定終了日(YYYY-MM-DD)。
+    #[arg(long, value_parser = date, value_name = "日付", conflicts_with = "no_end")]
+    pub end: Option<NaiveDate>,
+
+    /// 予定終了日を空にします。
+    #[arg(long)]
+    pub no_end: bool,
+
+    /// 確認日(YYYY-MM-DD)。待ちのTODOだけに入れられます。
+    #[arg(long, value_parser = date, value_name = "日付")]
+    pub follow_up: Option<NaiveDate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct StatusArgs {
+    /// TODOのid。
+    #[arg(value_name = "ID")]
+    pub id: i64,
+
+    /// 新しいステータス。
+    #[arg(value_parser = choices(&STATUSES), value_name = "ステータス")]
+    pub status: Status,
+
+    /// 待っている相手。waiting にするときに要ります。
+    #[arg(
+        long,
+        allow_hyphen_values = true,
+        required_if_eq("status", "waiting"),
+        value_name = "相手"
+    )]
+    pub waiting_on: Option<String>,
+
+    /// 確認日(YYYY-MM-DD)。waiting にするときに使います。省くと、アプリの「待ちにする」と同じ初期値になります。
+    #[arg(long, value_parser = date, value_name = "日付")]
+    pub follow_up: Option<NaiveDate>,
+
+    /// 中止の理由。cancelled にするときに要ります。
+    #[arg(
+        long,
+        allow_hyphen_values = true,
+        required_if_eq("status", "cancelled"),
+        value_name = "理由"
+    )]
+    pub reason: Option<String>,
+
+    /// 先行TODOが終わっていなくても、作業中にします。
+    #[arg(long)]
+    pub despite_blocked: bool,
+
+    /// 開いている子TODOも一緒に、完了か中止にします。
+    #[arg(long)]
+    pub with_children: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct LogArgs {
+    /// TODOのid。
+    #[arg(value_name = "ID")]
+    pub id: i64,
+
+    /// 本文(Markdown)。- なら標準入力から読みます(UTF-8)。
+    #[arg(long, allow_hyphen_values = true, value_name = "本文")]
+    pub body: String,
+
+    /// 作業した日(YYYY-MM-DD。初めは今日)。
+    #[arg(long, value_parser = date, value_name = "日付")]
+    pub date: Option<NaiveDate>,
+
+    /// 作業時間(分)。
+    #[arg(long, allow_negative_numbers = true, value_name = "分")]
+    pub minutes: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct AppendMemoArgs {
+    /// TODOのid。
+    #[arg(value_name = "ID")]
+    pub id: i64,
+
+    /// 書き足す本文(Markdown)。- なら標準入力から読みます(UTF-8)。
+    #[arg(long, allow_hyphen_values = true, value_name = "本文")]
+    pub body: String,
+}
+
+/// `--body -`: the text is read from standard input.
+pub const FROM_STDIN: &str = "-";
+
+impl Command {
+    /// The `--body` of `log` and `append-memo`.
+    pub fn body_mut(&mut self) -> Option<&mut String> {
+        match self {
+            Command::Log(a) => Some(&mut a.body),
+            Command::AppendMemo(a) => Some(&mut a.body),
+            _ => None,
+        }
+    }
+}
+
+/// A date argument: `YYYY-MM-DD`, as stored.
+fn date(s: &str) -> Result<NaiveDate, String> {
+    parse_date(s)
+        .ok_or_else(|| "日付は 2026-11-19 のように YYYY-MM-DD で書いてください。".to_owned())
 }
 
 /// A value the CLI names, with its help text.
@@ -242,6 +425,115 @@ mod tests {
     }
 
     #[test]
+    fn the_write_sub_commands() {
+        let date = |s| parse_date(s).unwrap();
+        assert_eq!(
+            parse(&[
+                "add",
+                "--project",
+                "3",
+                "--title",
+                "- 箇条書きのような題",
+                "--parent",
+                "12",
+                "--priority",
+                "low",
+                "--due",
+                "2026-11-30",
+                "--start",
+                "2026-11-20",
+                "--end",
+                "2026-11-27",
+            ])
+            .unwrap()
+            .command,
+            Command::Add(AddArgs {
+                project: "3".into(),
+                title: "- 箇条書きのような題".into(),
+                parent: Some(12),
+                priority: Some(Priority::Low),
+                due: Some(date("2026-11-30")),
+                start: Some(date("2026-11-20")),
+                end: Some(date("2026-11-27")),
+            })
+        );
+        assert_eq!(
+            parse(&[
+                "update",
+                "5",
+                "--no-due",
+                "--start",
+                "2026-11-20",
+                "--no-end"
+            ])
+            .unwrap()
+            .command,
+            Command::Update(UpdateArgs {
+                id: 5,
+                title: None,
+                priority: None,
+                due: None,
+                no_due: true,
+                start: Some(date("2026-11-20")),
+                no_start: false,
+                end: None,
+                no_end: true,
+                follow_up: None,
+            })
+        );
+        assert_eq!(
+            parse(&["status", "5", "waiting", "--waiting-on", "認証担当"])
+                .unwrap()
+                .command,
+            Command::Status(StatusArgs {
+                id: 5,
+                status: Status::Waiting,
+                waiting_on: Some("認証担当".into()),
+                follow_up: None,
+                reason: None,
+                despite_blocked: false,
+                with_children: false,
+            })
+        );
+        let Command::Status(closing) = parse(&[
+            "status",
+            "5",
+            "cancelled",
+            "--reason",
+            "不要",
+            "--with-children",
+        ])
+        .unwrap()
+        .command
+        else {
+            panic!("status");
+        };
+        assert_eq!(closing.reason.as_deref(), Some("不要"));
+        assert!(closing.with_children);
+        assert_eq!(
+            parse(&["log", "5", "--body", "- 作業した", "--minutes", "-5"])
+                .unwrap()
+                .command,
+            Command::Log(LogArgs {
+                id: 5,
+                body: "- 作業した".into(),
+                date: None,
+                minutes: Some(-5),
+            })
+        );
+        let mut memo = parse(&["append-memo", "5", "--body", "-"]).unwrap().command;
+        assert_eq!(
+            memo,
+            Command::AppendMemo(AppendMemoArgs {
+                id: 5,
+                body: FROM_STDIN.into(),
+            })
+        );
+        assert_eq!(memo.body_mut().map(|b| b.as_str()), Some("-"));
+        assert_eq!(parse(&["today"]).unwrap().command.body_mut(), None);
+    }
+
+    #[test]
     fn wrong_arguments_are_clap_errors() {
         for args in [
             &[][..],
@@ -253,6 +545,40 @@ mod tests {
             &["show", "x"],
             &["search"],
             &["today", "extra"],
+            // Writes.
+            &["add", "--title", "題"],
+            &["add", "--project", "1"],
+            &[
+                "add",
+                "--project",
+                "1",
+                "--title",
+                "題",
+                "--due",
+                "2026/11/30",
+            ],
+            &[
+                "add",
+                "--project",
+                "1",
+                "--title",
+                "題",
+                "--due",
+                "2026-11-31",
+            ],
+            &["update", "5"],
+            &["update", "5", "--due", "2026-11-30", "--no-due"],
+            &["update", "5", "--start", "2026-11-30", "--no-start"],
+            &["update", "5", "--memo", "x"],
+            &["status", "5"],
+            &["status", "5", "finished"],
+            &["status", "5", "waiting"],
+            &["status", "5", "cancelled"],
+            &["log", "5"],
+            &["log", "5", "--body", "x", "--minutes", "1.5"],
+            &["log", "5", "--body", "x", "--date", "11/19"],
+            &["append-memo", "5"],
+            &["append-memo", "--body", "x"],
         ] {
             let e = parse(args).unwrap_err();
             assert_eq!(e.exit_code(), 2, "{args:?}: {e}");
@@ -278,6 +604,18 @@ mod tests {
         );
         assert!(text.contains("未着手"), "{text}");
         assert!(!text.contains("Print help"), "{text}");
+
+        let help = parse(&["status", "--help"]).unwrap_err();
+        let text = help.render().to_string();
+        assert!(text.contains("--despite-blocked"), "{text}");
+        assert!(text.contains("--with-children"), "{text}");
+        let e = parse(&["update", "5", "--due", "2026-13-01"]).unwrap_err();
+        assert!(
+            e.render()
+                .to_string()
+                .contains("YYYY-MM-DD で書いてください"),
+            "{e}"
+        );
 
         let version = parse(&["--version"]).unwrap_err();
         assert_eq!(version.kind(), ErrorKind::DisplayVersion);

@@ -1,7 +1,7 @@
 //! The higiri-cli executable itself: where it writes and its exit codes.
 //!
 //! Only `--help`, `--version` and wrong arguments run everywhere (they read
-//! no data). The runs that open a database need a home folder of their own,
+//! no data; on Windows, no test may read or write the user's data). The runs that open a database need a home folder of their own,
 //! so they are on macOS only (`HOME` decides the app data folder there): on
 //! Windows the folder is the user's, whatever the environment says.
 
@@ -104,5 +104,100 @@ mod with_a_home_of_its_own {
         // Without --dev: the release build's data, which is not there.
         let out = run(home.path(), &["projects"]);
         assert_eq!(out.status.code(), Some(1));
+    }
+
+    #[test]
+    fn writes_read_a_body_from_stdin_and_take_the_days_backup() {
+        use std::io::Write;
+        use std::process::Stdio;
+
+        let home = tempfile::tempdir().unwrap();
+        let dev = home
+            .path()
+            .join("Library/Application Support/com.redjet.higiri/dev");
+        std::fs::create_dir_all(&dev).unwrap();
+        let today = higiri_lib::commands::clock::today();
+        let now = higiri_lib::commands::clock::now();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        // A TODO waiting for another one (the sample data is not in release
+        // builds of the library).
+        let later = runtime.block_on(async {
+            use higiri_lib::commands::{dependencies, projects, todos};
+            let pool = higiri_lib::repo::db::open(&dev.join("todo.db"))
+                .await
+                .unwrap();
+            let project = projects::create(
+                &pool,
+                projects::ProjectInput {
+                    name: "試す".into(),
+                    color: None,
+                    description: String::new(),
+                },
+                now,
+            )
+            .await
+            .unwrap();
+            let mut made = Vec::new();
+            for title in ["先に終わらせる", "あとで始める"] {
+                let input = todos::NewTodoInput {
+                    project_id: project.id,
+                    parent_id: None,
+                    template_id: None,
+                    title: title.into(),
+                    priority: None,
+                    due_date: None,
+                    planned_start: None,
+                    planned_end: None,
+                    memo_md: None,
+                };
+                made.push(
+                    todos::create(&pool, input, today, now)
+                        .await
+                        .unwrap()
+                        .todo
+                        .id,
+                );
+            }
+            dependencies::add(&pool, made[1], made[0], today, now)
+                .await
+                .unwrap();
+            pool.close().await;
+            made[1]
+        });
+        let id = later.to_string();
+
+        let mut child = cli(&["--dev", "log", &id, "--body", "-"])
+            .env("HOME", home.path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all("## 今日\n\n- 範囲の案を作った\n".as_bytes())
+            .unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+        assert!(out.stderr.is_empty());
+        let log: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(log["body_md"], "## 今日\n\n- 範囲の案を作った");
+        assert_eq!(log["log_date"], today.to_string());
+        assert!(dev.join(format!("backups/todo-{today}.db")).is_file());
+
+        // What the screen asks first: on standard error, with 1.
+        let out = run(home.path(), &["--dev", "status", &id, "doing"]);
+        assert_eq!(out.status.code(), Some(1));
+        assert!(out.stdout.is_empty());
+        assert!(
+            text(&out.stderr).starts_with("{\"error\":{\"kind\":\"needs_confirmation\""),
+            "{}",
+            text(&out.stderr)
+        );
     }
 }

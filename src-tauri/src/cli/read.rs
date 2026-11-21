@@ -16,13 +16,13 @@ use super::output::{
     self, Attention, ChildOut, CliTodo, Hidden, Progress, ProjectOut, ProjectsOut, SearchHitOut,
     SearchOut, ShowOut, Today, TodoListOut, WorkLogOut,
 };
-use crate::commands::error::ErrorKind;
+use crate::commands::error::{AppError, ErrorKind};
 use crate::commands::todos::TodoQuery;
 use crate::commands::work_logs::TimelineEntry;
 use crate::commands::{dashboard, dependencies, projects, search, settings, todos, work_logs};
 use crate::domain::calendar::DayCount;
 use crate::domain::search::{MatchField, SearchHit};
-use crate::domain::views::ProjectSummary;
+use crate::domain::views::{ProjectSummary, TodoItem};
 
 /// The projects the CLI does not show and their TODOs.
 pub async fn hidden(pool: &SqlitePool, today: NaiveDate) -> Result<Hidden, CliError> {
@@ -84,6 +84,30 @@ pub async fn project(
         return Err(CliError::hidden_project());
     }
     Ok(found)
+}
+
+/// The TODO `id`, unless it is not there or in a project the CLI does not
+/// show.
+pub async fn shown_todo(
+    pool: &SqlitePool,
+    id: i64,
+    today: NaiveDate,
+    hidden: &Hidden,
+) -> Result<TodoItem, CliError> {
+    let item = todos::get(pool, id, today).await.map_err(not_found(id))?;
+    if hidden.project(item.todo.project_id) {
+        return Err(CliError::hidden_todo());
+    }
+    Ok(item)
+}
+
+/// The screens' 「TODOが見つかりません。…画面を開き直してください。」 as the
+/// CLI says it, for the TODO `id`.
+pub fn not_found(id: i64) -> impl Fn(AppError) -> CliError {
+    move |e| match e.kind {
+        ErrorKind::NotFound => CliError::todo_not_found(id),
+        _ => e.into(),
+    }
 }
 
 pub async fn today_summary(
@@ -153,16 +177,8 @@ pub async fn show(
     args: &ShowArgs,
     today: NaiveDate,
 ) -> Result<ShowOut, CliError> {
-    let item = todos::get(pool, args.id, today)
-        .await
-        .map_err(|e| match e.kind {
-            ErrorKind::NotFound => CliError::todo_not_found(args.id),
-            _ => e.into(),
-        })?;
     let hidden = hidden(pool, today).await?;
-    if hidden.project(item.todo.project_id) {
-        return Err(CliError::hidden_todo());
-    }
+    let item = shown_todo(pool, args.id, today, &hidden).await?;
     let logs: Vec<_> = work_logs::timeline(pool, args.id)
         .await?
         .into_iter()

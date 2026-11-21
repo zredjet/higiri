@@ -9,6 +9,7 @@ use tauri::State;
 use super::clock;
 use super::error::{AppError, CmdResult};
 use crate::domain::template::{TemplateBody, TemplateSummary, checked_name};
+use crate::repo::db;
 use crate::repo::templates::TemplateFields;
 use crate::repo::{self, RepoError};
 
@@ -89,7 +90,7 @@ pub async fn save(
     now: DateTime<Utc>,
 ) -> CmdResult<TemplateSummary> {
     let name = name(name_input)?;
-    let mut tx = pool.begin().await?;
+    let mut tx = db::begin_write(pool).await?;
     let todo = repo::todos::get(&mut tx, todo_id).await?;
     if todo.parent_id.is_some() {
         return Err(AppError::validation(
@@ -128,7 +129,7 @@ pub async fn rename(
     now: DateTime<Utc>,
 ) -> CmdResult<TemplateSummary> {
     let name = name(name_input)?;
-    let mut tx = pool.begin().await?;
+    let mut tx = db::begin_write(pool).await?;
     let template = repo::templates::get(&mut tx, id).await?;
     if template.name == name {
         return Ok(template.summary());

@@ -57,7 +57,7 @@ use sqlx::{
 
 use crate::backup::{self, BackupError};
 use crate::domain::date::format_timestamp;
-use crate::repo::db::MIGRATOR;
+use crate::repo::db::{self, MIGRATOR};
 use crate::repo::todos::TodoFilter;
 use crate::repo::{self, RepoError};
 
@@ -699,7 +699,7 @@ async fn fill_work(work: &Path, schema: i64, doc: &Document) -> Result<(), Impor
         // The file's schema first, so its rows fit; newer migrations after.
         MIGRATOR.run_to(schema, &pool).await?;
         let mut conn = pool.acquire().await.map_err(db_error)?;
-        let mut tx = conn.begin().await.map_err(db_error)?;
+        let mut tx = db::begin_write_on(&mut conn).await.map_err(db_error)?;
         // Checked at COMMIT (todos refer to todos).
         sqlx::query("PRAGMA defer_foreign_keys = ON")
             .execute(&mut *tx)

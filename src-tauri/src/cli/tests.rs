@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
 use clap::Parser;
 use serde_json::{Value, json};
 use sqlx::SqlitePool;
@@ -25,6 +25,11 @@ use crate::repo::db;
 
 fn today() -> NaiveDate {
     d("2026-11-19")
+}
+
+/// 10:30 in Japan on the mock's day.
+fn now() -> DateTime<Utc> {
+    ts(2026, 11, 19, 1, 30)
 }
 
 /// The sample data in a work folder, as the app leaves it.
@@ -50,7 +55,7 @@ impl Sample {
     async fn cli(&self, args: &[&str]) -> Result<Value, CliError> {
         let cli =
             Cli::try_parse_from(std::iter::once("higiri-cli").chain(args.iter().copied())).unwrap();
-        let out = run(&cli.command, &self.dir, today()).await?;
+        let out = run(&cli.command, &self.dir, today(), now()).await?;
         assert!(!out.contains('\n'), "one line: {out}");
         Ok(serde_json::from_str(&out).unwrap())
     }
@@ -177,7 +182,9 @@ fn the_data_folder_is_the_apps() {
 async fn no_database_is_refused_and_nothing_is_made() {
     let tmp = tempfile::tempdir().unwrap();
     let cli = Cli::try_parse_from(["higiri-cli", "today"]).unwrap();
-    let e = run(&cli.command, tmp.path(), today()).await.unwrap_err();
+    let e = run(&cli.command, tmp.path(), today(), now())
+        .await
+        .unwrap_err();
     assert_eq!(e.kind, CliErrorKind::NotFound);
     assert_eq!(
         e.message,
@@ -186,7 +193,7 @@ async fn no_database_is_refused_and_nothing_is_made() {
     assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 0);
     // A folder that is not there is not made either.
     let missing = tmp.path().join("missing");
-    assert!(run(&cli.command, &missing, today()).await.is_err());
+    assert!(run(&cli.command, &missing, today(), now()).await.is_err());
     assert!(!missing.exists());
 }
 
@@ -204,7 +211,9 @@ async fn a_database_of_another_version_is_refused() {
     let tmp = tempfile::tempdir().unwrap();
     db::migrated_to(&tmp.path().join(db::DB_FILE_NAME), 1).await;
     let cli = Cli::try_parse_from(["higiri-cli", "projects"]).unwrap();
-    let e = run(&cli.command, tmp.path(), today()).await.unwrap_err();
+    let e = run(&cli.command, tmp.path(), today(), now())
+        .await
+        .unwrap_err();
     assert_eq!(e.kind, CliErrorKind::Validation);
     assert!(e.message.starts_with("Higiri のデータが古い版のままです。"));
 }
@@ -392,6 +401,7 @@ async fn the_todo_form_has_the_screens_judgement() {
             .command,
         &s.dir,
         today(),
+        now(),
     )
     .await
     .unwrap();
@@ -943,3 +953,5 @@ async fn hidden_projects_are_nowhere() {
     assert_eq!(s.ok(&["projects"]).await["hidden_projects"], 0);
     assert_eq!(s.ok(&["today"]).await["attention"]["total"], 5);
 }
+
+mod writes;

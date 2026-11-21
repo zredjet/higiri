@@ -391,3 +391,42 @@ pub fn linked(item: &TodoItem, hidden: &Hidden) -> Linked<LinkedTodo> {
         status_label: item.todo.status.label(),
     })
 }
+
+// ---- writes (v0.5.0 phase 33) ---------------------------------------------------
+
+/// The next round made when a repeating TODO closed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct NextRound {
+    pub id: i64,
+    pub due_date: Option<NaiveDate>,
+}
+
+/// `status`: the TODO and what changed with it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StatusOut {
+    pub todo: CliTodo,
+    /// The open children closed with it, in the list's order.
+    pub closed_children: Vec<TodoRef>,
+    /// The next round, when it repeats and closed.
+    pub next_round: Option<NextRound>,
+    /// It repeated, closed, and no next round was made (past the end date).
+    pub repeat_ended: bool,
+}
+
+/// `log`: the work log added.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorkLogAdded {
+    pub id: i64,
+    pub todo_id: i64,
+    pub log_date: NaiveDate,
+    pub minutes: Option<i64>,
+    pub body_md: String,
+}
+
+/// `append-memo`: the TODO form with the memo as it is now.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MemoOut {
+    #[serde(flatten)]
+    pub todo: CliTodo,
+    pub memo_md: String,
+}

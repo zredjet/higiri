@@ -18,6 +18,7 @@ use crate::domain::settings::{
     CustomHoliday, DayCount, ReminderFrequency, ReportTemplate, Settings, Theme,
     WeeklyReportTemplate, hidden_projects_among, is_zoom_level,
 };
+use crate::repo::db;
 use crate::{autostart, repo, resident};
 
 /// Days accepted for 「間近」とみなす日数 and 確認日の初期値.
@@ -148,7 +149,7 @@ pub async fn update(pool: &SqlitePool, input: SettingsInput) -> CmdResult<Settin
     if !is_zoom_level(input.zoom) {
         return Err(AppError::validation("表示倍率は一覧から選んでください。"));
     }
-    let mut tx = pool.begin().await?;
+    let mut tx = db::begin_write(pool).await?;
     let current = repo::settings::load(&mut tx).await?;
     // A project deleted while the settings screen was open is not refused.
     let projects: Vec<i64> = repo::projects::list(&mut tx, true)

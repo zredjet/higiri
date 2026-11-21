@@ -13,6 +13,7 @@ use crate::domain::model::Project;
 use crate::domain::urgency::Rules;
 use crate::domain::views::{ProjectSummary, project_summaries};
 use crate::repo;
+use crate::repo::db;
 use crate::repo::projects::{NewProject, ProjectEdit};
 use crate::repo::todos::TodoFilter;
 
@@ -122,7 +123,7 @@ pub async fn update(
 ) -> CmdResult<Project> {
     let name = validate::required_text(&input.name, "プロジェクト名")?;
     let color = input.color.as_deref().map(validate::color).transpose()?;
-    let mut tx = pool.begin().await?;
+    let mut tx = db::begin_write(pool).await?;
     let current = repo::projects::get(&mut tx, id).await?;
     let edit = ProjectEdit {
         name,
@@ -149,7 +150,7 @@ pub async fn archive(
 /// `cli_hidden_projects` (v0.5.0): ids are used again (the next project gets
 /// the id of the newest one deleted), and a new project starts shown.
 pub async fn delete(pool: &SqlitePool, id: i64) -> CmdResult<()> {
-    let mut tx = pool.begin().await?;
+    let mut tx = db::begin_write(pool).await?;
     repo::projects::delete(&mut tx, id).await?;
     let hidden = repo::settings::load(&mut tx).await?.cli_hidden_projects;
     if hidden.contains(&id) {

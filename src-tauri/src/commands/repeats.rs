@@ -23,6 +23,7 @@ use crate::domain::repeat::{RepeatRule, RoundDates, check_target, copied_childre
 use crate::domain::urgency::Rules;
 use crate::domain::views::TodoItem;
 use crate::repo;
+use crate::repo::db;
 use crate::repo::todos::NewTodo;
 
 /// The repetition set on a TODO.
@@ -53,7 +54,7 @@ pub async fn set(
     today: NaiveDate,
     now: DateTime<Utc>,
 ) -> CmdResult<TodoItem> {
-    let mut tx = pool.begin().await?;
+    let mut tx = db::begin_write(pool).await?;
     let todo = repo::todos::get(&mut tx, id).await?;
     let current = repo::repeats::get(&mut tx, id).await?;
     let saved = match (repeat, current) {
