@@ -108,6 +108,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
 - 画面の切り替えはルーティングのライブラリを使わず、`src/app/routes.ts` の `Route` を状態で持つ。サイドナビの id と画面は `routes.ts` で対応させる。
 - データの取得と更新は TanStack Query。フックは `src/lib/queries.ts` にまとめ、更新したら影響する一覧(プロジェクトと TODO は両方)を取り直す。
   - `main.tsx` の `QueryClient` の既定は、queries と mutations の両方が `retry: false` と `networkMode: "always"`。コマンドは外部と通信しないので、PC がオフラインになっても読み込みと保存を止めない(既定の `"online"` のままだと、ウィンドウの `offline` イベントで止まる)。
+  - ウィンドウが前面に来たとき(`visibilitychange` に加えて `focus`)にも、開いている画面の一覧を取り直す(`main.tsx` が呼ぶ `src/lib/front.ts` の `refetchOnFront`。v0.5.0。higiri-cli で変えた内容を画面に出すため)。日報の画面の文書(`useReportSource`)は取り直さない。
   - TODO の書き込み(`update_todo` と `change_status`)は、mutation の `scope`(`TODO_WRITES`)で1本の列に並べ、始めた順に1つずつ動かす。
   - `update_todo` はすべての項目を受け取るので、`useUpdateTodo` は `{ id, change }` を受け取り、送る直前に `get_todo` で今の TODO を読んで `change(今の todo)` の結果を送る。呼び出し側は `{ ...fieldsOf(current), 変える項目 }` のように自分が変える項目だけを重ねる(ガントのドラッグ、詳細パネル、ダッシュボードの日付の変更)。ほかの保存が入れたばかりの値を古い値で上書きしないため。
   - 設定の保存(`useUpdateSettings`)も同じ考え方で、`scope`(`SETTINGS_WRITES`)で1本の列に並べ、送る直前に `get_settings` で今の設定を読み、呼び出し側が渡した変える項目だけを重ねて `update_settings` に送る。変える項目は `Partial<SettingsInput>` か、今の設定を受け取る関数(`SettingsChange`)。`SettingsInput` を設定から作るのは `queries.ts` の `settingsInputOf`。見出しの欄を離れたときの保存と、その直後にほかのカードで押したスイッチの保存が、互いに古い値で上書きしないため(フェーズ14)。
@@ -125,7 +126,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
 - ガント: 行データ(予定・実績・待ちの区間、区分)は `get_gantt`(`domain/gantt.rs`)。待ちの区間は変更履歴から「待ちに入った日〜抜けた前日」(待ち中は今日まで)。日付から座標への変換、目盛り、表示期間、見えている行だけを描く処理は `src/features/gantt/geometry.ts`(Vitest でモックの座標と照合)。表示する日数は画面の幅に収まる分で、初期表示は今日が左から3分の1。日限のひし形はモックどおり超過(朱)と本日(琥珀)だけ色を付ける。予定のバーはドラッグで動かせる(v1.1 のフェーズ13)。
 - TODO 一覧は200件を超えると、画面の近くの行だけを描く(`src/features/todos/virtualRows.ts` と `useVirtualRows.ts`)。行の高さは描いたあとに測り、それまでは見積もりを使う。Aizome の Table には見えている行だけを渡し、上下の行の分の高さは外側の要素の CSS(`tbody::before` / `::after`)で取る。Table の DOM は変えない。
 - キーボードショートカット: Ctrl+N(新規TODO)、Ctrl+F(検索ダイアログ、v1.1)、Ctrl+1〜4(ダッシュボード、TODO、ガント、日報)は `src/app/shortcuts.ts`。macOS は Command。ダイアログやメニューが開いているときは効かない(Ctrl+F は、そのときも `preventDefault` だけはして WebView の検索バーを出さない)。「TODOを追加」と検索のダイアログは App が持ち、画面のボタン(サイドナビ)とショートカットで同じものを開く。Esc、Ctrl+Enter、Ctrl+E は詳細パネルとエディタ側にある。画面の文にショートカットを書くときは `src/lib/keys.ts` の `shortcutText` で作る(macOS では「Command+E」と出す。エディタの `Mod-` のキーは macOS では Command だけが効くため)。
-- 動作ログは log プラグイン(OS のログフォルダの `higiri.log`、開発ビルドは `higiri-dev.log`。1 MB で切り替えて5個残す)。起動、バックアップ、復元、JSON の書き出しと取り込み、通知と自動起動の結果、想定外のエラーだけを書き、TODO の中身は書かない。起動のたびに、画面の読み込みが始まってからダッシュボードを出すまでの時間も書く(`App.tsx` の「dashboard shown … ms after the page started loading」)。画面側は `src/lib/log.ts` の `logUnexpected` を使う(`errorMessage` が AppError 以外のエラーを渡す)。
+- 動作ログは log プラグイン(OS のログフォルダの `higiri.log`、開発ビルドは `higiri-dev.log`。1 MB で切り替えて5個残す)。起動、バックアップ、復元、JSON の書き出しと取り込み、通知と自動起動の結果、想定外のエラーだけを書き、TODO の中身は書かない。起動のたびに、画面の読み込みが始まってからダッシュボードを出すまでの時間も書く(`App.tsx` の「dashboard shown … ms after the page started loading」)。画面側は `src/lib/log.ts` の `logUnexpected` を使う(`errorMessage` が AppError 以外のエラーを渡す)。higiri-cli(v0.5.0)は動作ログを書かない(log プラグインは Tauri の中でしか動かない。CLI が書く前に作るその日のバックアップも書かない)。
 - 多重起動の防止(single-instance)は配布版だけで有効にする。開発ビルドは別のDBを使うので、インストールした版と同時に動かせるようにしている。2つ目の起動は既存のウィンドウを前面に出す(`--autostart` つきなら出さない)。ウィンドウの位置・大きさ・最大化は window-state で次回に戻す。
 - 権限(`capabilities/default.json`)は、アプリのコマンドと、opener の http/https、clipboard-manager の `allow-write-text`、log の `allow-log` だけ。`core:default` は付けない(画面は Tauri のウィンドウ・イベント・パスの API を使わない)。notification と autostart のプラグインは Rust からだけ使い、画面側には権限を付けない。notification プラグインは画面に `window.Notification` の差し替えを入れ、Windows 以外では読み込み時に `is_permission_granted` を呼ぶが、権限がないので断られる(画面はこれを使わない)。
 - 日報: 節の組み立ては `domain/report.rs`。過去の日は、本日の作業と本日完了・中止をその日の記録から、待ち・明日の予定・日限注意を今の TODO の状態から対象日を今日として作る(待ちは、対象日より後に待ちに入ったものを除く)。中身のない節は「- なし」。節の並び・見出し・出す節・添える項目は日報テンプレート(v1.1 のフェーズ14)で変えられ、所感・連絡事項はいつも最後で、その見出しより後ろが再生成しても残る(見出しの探し方は下の「v1.1 の決めごと」のフェーズ14)。既定のテンプレートでの、設計書の出力例との完全一致を `commands/reports.rs` のテスト(`tests/fixtures/daily_report_2026-11-19.md`)で確かめている。週報(v0.3.0)は `domain/weekly_report.rs` で、下の「v0.3.0 の決めごと」のフェーズ23にある。
@@ -643,8 +644,8 @@ v0.5.0 は `docs/implementation-plan-v0.5.0.md` のフェーズ31〜36で作る�
 
 ## 進め方
 
-- `docs/implementation-plan.md`(MVP、フェーズ0〜8)、`docs/implementation-plan-v1.1.md`(v1.1、フェーズ10〜16)、`docs/implementation-plan-v0.3.0.md`(v0.3.0、フェーズ17〜24)、`docs/implementation-plan-v0.4.0.md`(v0.4.0、フェーズ25〜30)のフェーズ順に進め、フェーズの終わりにテスト結果と、利用者に画面で確認してほしい操作の一覧を報告して止まる。
-- v1.1、v0.3.0、v0.4.0 はオーケストレーター方式で進める。フェーズごとにサブセッションが作業してコミットし、オーケストレーターが差分を確かめてから利用者に報告する(`implementation-plan-v1.1.md`、`implementation-plan-v0.3.0.md`、`implementation-plan-v0.4.0.md` の「進め方」)。
+- `docs/implementation-plan.md`(MVP、フェーズ0〜8)、`docs/implementation-plan-v1.1.md`(v1.1、フェーズ10〜16)、`docs/implementation-plan-v0.3.0.md`(v0.3.0、フェーズ17〜24)、`docs/implementation-plan-v0.4.0.md`(v0.4.0、フェーズ25〜30)、`docs/implementation-plan-v0.5.0.md`(v0.5.0、フェーズ31〜36)のフェーズ順に進め、フェーズの終わりにテスト結果と、利用者に画面で確認してほしい操作の一覧を報告して止まる。
+- v1.1、v0.3.0、v0.4.0、v0.5.0 はオーケストレーター方式で進める。フェーズごとにサブセッションが作業してコミットし、オーケストレーターが差分を確かめてから利用者に報告する(`implementation-plan-v1.1.md`、`implementation-plan-v0.3.0.md`、`implementation-plan-v0.4.0.md`、`implementation-plan-v0.5.0.md` の「進め方」)。
 - 設計書と違う実装にしたいとき、設計書に書いていないことを決める必要があるときは、理由と選択肢を添えて先に相談する。
 - 利用者への報告とUIの文言は日本語。コード内の識別子は英語。
 
@@ -663,7 +664,8 @@ v0.5.0 は `docs/implementation-plan-v0.5.0.md` のフェーズ31〜36で作る�
 | Rust の書式の確認(直すときは `cargo fmt --manifest-path src-tauri/Cargo.toml`) | `npm run fmt:rust` |
 | Rust の lint(警告はエラー扱い) | `npm run lint:rust` |
 | まとめて確認(型チェック、Rust の書式、Vitest、cargo test、clippy) | `npm run check` |
-| 性能の確認(TODO 5,000件・作業ログ 20,000件でコマンドの時間を測る。最適化ビルド。検索、営業日の設定、TODO の保存(`get_todo` と `update_todo`)、テンプレート、繰り返し、依存関係、後続TODOのずらしの確認、一括変更の確認と保存、週報、起動の Rust 側、毎日のバックアップと複製先への複製、JSON の書き出しと取り込み、higiri-cli の読むサブコマンドも測る。計測のデータには子TODO・繰り返し・依存関係も入る) | `npm run test:perf` |
+| 性能の確認(TODO 5,000件・作業ログ 20,000件でコマンドの時間を測る。最適化ビルド。検索、営業日の設定、TODO の保存(`get_todo` と `update_todo`)、テンプレート、繰り返し、依存関係、後続TODOのずらしの確認、一括変更の確認と保存、週報、起動の Rust 側、毎日のバックアップと複製先への複製、JSON の書き出しと取り込み、higiri-cli の読むサブコマンドと書くサブコマンド(その日のバックアップを作る最初の書き込みも)も測る。計測のデータには子TODO・繰り返し・依存関係も入る。`HIGIRI_PERF_DB` に場所を渡すと、作った DB を残す) | `npm run test:perf` |
+| higiri-cli を手元で試す(開発用の DB に当てる) | `cargo run --manifest-path src-tauri/Cargo.toml --bin higiri-cli -- --dev today` |
 | アプリアイコンを原画から作り直す | `npm run icons` |
 | 配布物のビルド(実行ファイルの ZIP を `release/` に作る) | `npm run build` |
 

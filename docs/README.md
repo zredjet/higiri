@@ -16,7 +16,7 @@
 | `diagrams/status-transitions.png` | ステータスの遷移図(設計書の図) |
 | `diagrams/screens.png` | 画面のつながり(設計書の図) |
 | `ui-mock/` | 6画面のモック。`README.md` に読み方、`screenshots/` に画面キャプチャ、`.dc.html` にソース |
-| `readme/` | リポジトリの `README.md` に載せる画面の画像(v0.3.0 の版を、サンプルデータで動かして撮ったもの)。モックではなく実際のアプリの画面 |
+| `readme/` | リポジトリの `README.md` に載せる画面の画像(v0.4.0 の版を、サンプルデータで動かして撮ったもの)。モックではなく実際のアプリの画面 |
 | `aizome/README.md` | デザインシステム Aizome の方針(色、文字、余白、文言) |
 | `aizome/tokens.css` | Aizome のトークン(CSS変数)。ライトとダーク |
 | `aizome/components/bundle.css` | Aizome の14部品のスタイル |

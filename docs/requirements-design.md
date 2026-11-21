@@ -1631,7 +1631,7 @@ v0.5.0の相談(2026-11-21)で、案のまま認めた所と、選び直した�
 | サブコマンド | 中身 |
 | --- | --- |
 | `today` | 今日のまとめ。今日の日付、日数の数え方、日限注意の区分ごとの件数と一覧、今日の作業、待ち、プロジェクトの進捗、バックアップの複製の知らせ。中身と並びはダッシュボードと同じ(`get_dashboard` の中を使う) |
-| `list` | TODOの一覧。`--project`、`--status`(`todo,doing` のように並べる)、`--priority`、`--due`(`attention`、`until_today`、`within_week`、`no_due`)、`--sort`、`--limit`(初めは50。`total` に全体の件数)。絞り込みと並べ替えは画面の一覧と同じ(`list_todos` の中を使う)。アーカイブしたプロジェクトのTODOは、`--project` で指したときだけ出す |
+| `list` | TODOの一覧。`--project`、`--status`(`todo,doing` のように並べる)、`--priority`、`--due`(`attention`、`until_today`、`within_week`、`no_due`)、`--sort`、`--limit`(初めは50。`total` に全体の件数)。絞り込みと並べ替えは画面の一覧と同じ(`list_todos` の中を使う。並びは木の順)。つなぎの行(条件に合う子のために薄く出す親)は出さず、子の `parent` で分かるようにする。`--limit` と `total` は条件に合うTODOで数える。アーカイブしたプロジェクトのTODOは、`--project` で指したときだけ出す |
 | `show <id>` | 1件。TODOの形に、`memo_md`、作業ログの新しい5件(`--logs N` で変える。`log_date`、`minutes`、`body_md`)、子TODO(id、タイトル、ステータス、日限)、先行TODOと後続TODO(id、タイトル、ステータス)を足す |
 | `search <語…>` | 全文検索。当たったTODO(TODOの形)と、当たった場所の名前(`title`、`memo`、`waiting_on`、`close_reason`、`work_log`)。並びと最大100件は画面の検索と同じ。前後の文は出さない(メモと作業ログの本文を出さないため) |
 | `projects` | 稼働中のプロジェクト(id、名前、説明、完了数/総数、日限注意の件数)。`--archived` で、アーカイブしたものも出す。CLIに出さないプロジェクトは並べず、`hidden_projects` にその数だけを入れる |
@@ -1657,7 +1657,8 @@ v0.5.0の相談(2026-11-21)で、案のまま認めた所と、選び直した�
 
 - `add` は `commands::todos::create`(`template_id` と `memo_md` は空)。検査とエラーの文は画面と同じ。
 - `update` は、今のTODOを読み、指した項目だけを重ねて `commands::todos::update` に送る(画面の `useUpdateTodo` と同じ考え方。ほかの項目を古い値で上書きしない)。繰り返しのあるTODOの日限を空にするなど、画面で断られる入力は同じ文で断る。
-- `status` は `change_status` と同じ内側の処理(`commands::todos::change_one`)。`closed_children`(一緒に閉じた子の `{ id, title }`)と `next_round`(作った次の回の `{ id, due_date }`)は、変える前と後を読み比べて作る。繰り返しがあって次の回を作らなかったとき(終わりの日を過ぎた)は、`repeat_ended: true` を添える。
+- `status` は `change_status` と同じ内側の処理(`commands::todos::change_status_impl`)。`closed_children`(一緒に閉じた子の `{ id, title }`)と `next_round`(作った次の回の `{ id, due_date }`。作らなければ `null`)は、変える前と後を読み比べて作る。`repeat_ended` は、繰り返しがあって次の回を作らなかったとき(終わりの日を過ぎた)に `true`、それ以外は `false`(キーの有無を見分けなくてよいように、いつも出す。フェーズ33)。
+- `status` の `--waiting-on` と `--follow-up` は待ちにするときだけ、`--reason` は中止にするときだけ使える。ほかのステータスで付けたら `validation` で断る。許されない遷移(完了から未着手など)は、確認を挟まずに画面と同じ文で断る。
 - `log` は `commands::work_logs::save`(`id` は `null`)。本文の検査(空は断る)と作業時間の範囲は画面と同じ。
 - `append-memo` は、今のTODOを読み、メモだけを書き足したものにして `commands::todos::update` に送る(ほかの項目は今の値のまま)。本文が空(空白だけ)なら断る(「書き足す本文を入力してください。」)。メモの変更は、今までどおり変更履歴に残さない(`updated_at` は変わる)。
 - 書く前に、その日の毎日のバックアップがなければ作る。作れなかったときは書かずに断る(「バックアップを作れなかったため、書き込みをやめました。Higiri を起動して、バックアップが作られるか確かめてください。」)。
@@ -1669,6 +1670,8 @@ v0.5.0の相談(2026-11-21)で、案のまま認めた所と、選び直した�
 | 作業中にする | 先行TODOが終わっていない(`blocked_by` がある。閉じたTODOの再開では出ない) | `--despite-blocked` | 「次の2件の先行TODOが、まだ完了も中止もしていません(要件の確定、…)。このまま作業中にするときは --despite-blocked を付けてください。」 |
 | 完了・中止にする | 開いている子TODOがある | `--with-children` | 「開いている子TODOが2件あります(…)。子TODOも一緒に完了にするときは --with-children を付けてください。」 |
 
+- `--despite-blocked` の文の括弧の中は、終わっていない先行TODOの名前(子は「親 / 子」)を結んだ順に「、」でつなぐ。CLIに出さないプロジェクトの先行TODOは、名前の代わりに「CLIに出さないプロジェクトのTODO」と書く(件数には数える)。`--with-children` の文の子は一覧の順で、「完了にするときは」の「完了」は行き先(中止なら「中止」)。
+- `hidden` と `needs_confirmation` で断ったときは、その日のバックアップも作らない(フェーズ33)。
 - 繰り返しの次の回は、確認なしに作る(画面も、作ってから知らせる)。出力の `next_round` で伝える。
 
 ### CLIに出さないプロジェクト
