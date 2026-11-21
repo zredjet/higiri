@@ -1,6 +1,8 @@
-import { Badge, Icon, Table, type TableColumn } from "../../components/aizome";
+import type { MouseEvent } from "react";
+import { Badge, Checkbox, Icon, Table, type TableColumn } from "../../components/aizome";
 import type { TodoListRow } from "../../lib/bindings";
 import { formatDate } from "../../lib/date";
+import { SELECT_ALL_LABEL, selectLabel } from "./bulkText";
 import { BLOCKED_LABEL, blockedMarkTitle } from "./dependencyText";
 import { REPEAT_LABEL, repeatMarkTitle } from "./repeatText";
 import {
@@ -13,7 +15,8 @@ import {
   subLine,
   warningTexts,
 } from "./todoText";
-import { foldRows, parentsWithChildRows, type TreeInfo } from "./tree";
+import { listTreeInfo } from "./selection";
+import { foldRows, parentsWithChildRows } from "./tree";
 import { useFolded } from "./useFolded";
 import { useVirtualRows } from "./useVirtualRows";
 
@@ -24,9 +27,27 @@ interface TodoTableProps {
   selectedId: number | null;
   onOpen: (id: number) => void;
   emptyText: string;
+  /** 一括変更 (T-14): the checkboxes. */
+  selection: TableSelection;
 }
 
-const treeInfo = (r: TodoListRow): TreeInfo => ({ id: r.item.todo.id, parentId: r.item.todo.parent_id, child: r.child });
+/** The checkboxes' state and what they do (TodosPage keeps the selection). */
+export interface TableSelection {
+  selected: ReadonlySet<number>;
+  header: "all" | "some" | "none";
+  /** A row's checkbox clicked (with Shift: the rows between too). */
+  onToggle: (id: number, shift: boolean) => void;
+  /** The header's checkbox clicked. */
+  onToggleAll: () => void;
+}
+
+/** Keeps a click on a checkbox (or right next to it) from opening the detail panel, and Shift from selecting text. */
+const keepToCheckbox = {
+  onClick: (e: MouseEvent) => e.stopPropagation(),
+  onMouseDown: (e: MouseEvent) => {
+    if (e.shiftKey) e.preventDefault();
+  },
+};
 
 /**
  * The TODO list (docs/ui-mock/Todos.dc.html), plus 優先度 and the warnings.
@@ -35,13 +56,41 @@ const treeInfo = (r: TodoListRow): TreeInfo => ({ id: r.item.todo.id, parentId: 
  * A repeating TODO has the repeat mark next to its title (T-12), and one
  * waiting for unfinished TODOs the link mark (T-11).
  * Long lists draw only the rows near the screen (useVirtualRows).
+ * The first column selects TODOs for 一括変更 (T-14); a bridge row has no
+ * checkbox. Clicking a checkbox does not open the detail panel.
  */
-export function TodoTable({ rows, showProject, selectedId, onOpen, emptyText }: TodoTableProps) {
+export function TodoTable({ rows, showProject, selectedId, onOpen, emptyText, selection }: TodoTableProps) {
   const { folded, toggle } = useFolded();
-  const parents = parentsWithChildRows(rows, treeInfo);
-  const drawn = foldRows(rows, folded, treeInfo);
+  const parents = parentsWithChildRows(rows, listTreeInfo);
+  const drawn = foldRows(rows, folded, listTreeInfo);
   const { window: shown, wrapperProps } = useVirtualRows(drawn.map((r) => r.item.todo.id));
   const columns: TableColumn<TodoListRow>[] = [
+    {
+      key: "select",
+      header: (
+        <span className="todo-select" {...keepToCheckbox}>
+          <Checkbox
+            aria-label={SELECT_ALL_LABEL}
+            checked={selection.header === "all"}
+            indeterminate={selection.header === "some"}
+            disabled={drawn.every((r) => r.bridge)}
+            onChange={selection.onToggleAll}
+          />
+        </span>
+      ),
+      width: 48,
+      render: ({ item: { todo }, bridge }) =>
+        bridge ? null : (
+          <span className="todo-select" {...keepToCheckbox}>
+            <Checkbox
+              aria-label={selectLabel(todo.title)}
+              checked={selection.selected.has(todo.id)}
+              onChange={() => undefined}
+              onClick={(e) => selection.onToggle(todo.id, e.shiftKey)}
+            />
+          </span>
+        ),
+    },
     {
       key: "title",
       header: "TODO",

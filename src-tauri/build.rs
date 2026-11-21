@@ -25,6 +25,8 @@ const APP_COMMANDS: &[&str] = &[
     "list_dependencies",
     "preview_dependent_shift",
     "shift_with_dependents",
+    "preview_bulk_change",
+    "apply_bulk_change",
     "list_timeline",
     "save_work_log",
     "delete_work_log",

@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   commands,
+  type BulkChange,
   type GanttQuery,
   type NewTodoInput,
   type ProjectInput,
@@ -338,6 +339,36 @@ export function useShiftWithDependents() {
     scope: TODO_WRITES,
     mutationFn: ({ todoId, start, end }: { todoId: number; start: string; end: string }) =>
       commands.shiftWithDependents(todoId, start, end),
+    onSuccess: () => changed(),
+  });
+}
+
+// ---- 一括変更 (T-14) ------------------------------------------------------------------
+
+/**
+ * What a bulk change would do to the selected TODOs (`change: null`: the
+ * input is not typed yet, nothing is asked). Under "todos": a TODO changed
+ * meanwhile shows. The previous result stays while the next one loads.
+ */
+export function usePreviewBulkChange(ids: number[], change: BulkChange | null) {
+  return useQuery({
+    queryKey: ["todos", "bulk-preview", ids, change] as const,
+    queryFn: () => commands.previewBulkChange(ids, change as BulkChange),
+    enabled: change !== null && ids.length > 0,
+    placeholderData: (previous) => previous,
+  });
+}
+
+/**
+ * Gives the change to the selected TODOs, worked out again by Rust, in one
+ * transaction. In the TODO_WRITES line. Resolves after the lists are fetched
+ * again.
+ */
+export function useApplyBulkChange() {
+  const changed = useTodoChanged();
+  return useMutation({
+    scope: TODO_WRITES,
+    mutationFn: ({ ids, change }: { ids: number[]; change: BulkChange }) => commands.applyBulkChange(ids, change),
     onSuccess: () => changed(),
   });
 }

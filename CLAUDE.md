@@ -511,6 +511,28 @@ v0.4.0 は `docs/implementation-plan-v0.4.0.md` のフェーズ25〜30で作る�
       - フック(`queries.ts`): `usePreviewDependentShift`(読むだけだが、先に始めた保存(詳細パネルの入力、前のドラッグ)のあとのデータで計算するよう、`TODO_WRITES` の列に並べる mutation にした)、`useShiftWithDependents`(`TODO_WRITES`。プロジェクトと TODO の一覧を取り直す)。開いている詳細パネルのTODOが動いた後続なら、手で変えていない予定の欄が新しい値を取る(今の `mergeDraft`。.app で確かめた)。
     - サンプル(`sample.rs`): 依存を1本足して4本(結合テスト計画の作成の先行TODOに性能試験の環境準備。予定開始 11/20 が先行の予定終了 11/20 と同じなので警告なし)。API設計書のレビュー対応 → 性能試験の環境準備 → 結合テスト計画の作成 で後続の後続を試せる(`sample_pushes_later_todos_of_later_todos`)。日限注意の区分は変わらないので、日報のフィクスチャとダッシュボードの日限注意は変わらない。
     - perf(`perf.rs`): 後続をたどったTODOがいちばん多いTODOで、予定終了を1年後へ動かしたときの `preview_dependent_shift`(後続の後続も動くことを確かめる)。
+- 一括変更(フェーズ29)
+  - コマンドは `preview_bulk_change(ids, change)` と `apply_bulk_change(ids, change)` を足して48個。`ids` は一覧の選択(一覧の順)。一覧にもうない id(消された TODO)は黙って除く。
+  - 作ったもの(フェーズ29)
+    - `domain/bulk.rs`
+      - `BulkChange`(`kind` で分ける。`set_due { date }`(`date` は `null` を受け取って「日限を入力してください。」で断る)、`shift_due { days }`、`shift_planned { days }`、`priority { priority }`、`status { status, reason }`)。`checked` が入力を検査する(`BulkInputError` の文をそのまま入力の下に出す。日数は「ずらす日数を、0以外の整数で入力してください。」「ずらす日数は-365〜365の範囲で入力してください。」、待ちは「「待ち」には一括で変えられません。…」、中止の理由がなければ「中止の理由を入力してください。」)。理由は前後の空白を除き、中止でなければ捨てる。
+      - `BULK_STATUSES`(未着手・作業中・保留・完了・中止。tauri-specta の `constant` で `bindings.ts` に出す。画面の選択肢はこれから作る)、`SHIFT_DAYS_MAX`(365)。
+      - `plan(change, selected, BulkContext { children, repeats, dependencies }, today, rules)` → `BulkPlan { targets, edits, skipped, blocked, closing_children, next_rounds }`。除く理由は `SkipReason`(文は設計書の表のとおり。ステータスは `transition` の文、閉じられない子は「子TODO「…」を完了にできません。」に遷移の文)。
+      - 日限・予定・優先度は1件ずつ(`edits` が保存する値)。閉じたTODOの日付は変えない。予定期間は片方だけならある方だけ。日数は暦日(`repeat::shift`)。優先度は閉じたTODOも変える。
+      - ステータスは1件ずつ `transition` で確かめる(時刻は `closed_at` にしか使わないので、日付の0時を仮に渡す)。閉じるときは、選んだTODOの開いている子もすべて `transition` に通し、1件でも断られたら親を除く。通った親の開いている子(選んでいてもいなくても)は `closing_children` に入り、選んだ子でも `targets` と `skipped` に入れない。閉じている子は親と一緒に閉じないので、選んでいれば自分の遷移で判定する(「すでに「完了」です。」などで除く。オーケストレーターへの報告で設計書の読み方として挙げた)。`targets` は親(`parent_id` のないもの)を先に並べる。
+      - `blocked`: 作業中にするとき、`targets` のうち `Dependencies::blocked_by` があるもの(閉じたTODOの再開では空。詳細パネルと同じ)。`next_rounds`: 閉じるとき、周期があって `next_round_due` が決まるもの。
+    - `commands/todos.rs`: `change_status_impl` の中身を `change_one(conn, before, change, today, now)`(遷移・記録・子を閉じる・次の回)に分けた。一括変更もこれを使う。
+    - `commands/bulk.rs`: 中の `planned` が、入力の検査、選んだTODO(`list_by_ids`)、閉じるときは子(`list_children`)と周期(`repeats::list` を選んだ id に絞る)、作業中にするときは先行TODO(`prerequisites(Some(ids))`)、settings を読んで `plan` を呼ぶ。`preview` は名前(`BulkTodo { id, title, parent_title, project_id, project_name }`)を付けて `BulkPreview { targets, skipped: [BulkSkipped { todo, reason }], blocked: [BulkBlocked { todo, blocked_by }], closing_children, next_rounds }` を返し、何も書かない。`apply` は1トランザクションで `planned` をやり直し、日限・予定・優先度は `save_fields`(変更履歴は `update_todo` と同じく日限・予定期間の1行。優先度は残さない)、ステータスは `change_one` を `targets` の順に呼ぶ。戻り値は `BulkResult { changed(書いたTODOの id。一緒に閉じた子は入れない), skipped }`。途中の失敗は全体を断り、文の頭に「「…」を完了にできません。」(日付と優先度は「「…」の日限を変えられません。」など)を付ける。確認のあとにほかで変わったTODOは、保存の時点の計算で除く(失敗にしない)。
+    - 画面
+      - `src/features/todos/selection.ts`: `Selection { ids, anchor }`、`selectableIds(rows, folded)`(`tree.ts` の `foldRows` のあと、つなぎの行を除く。見えている行だけを描く処理とは関係なく全部)、`selectedIn`(一覧の順)、`clicked`(Shift なら前に押した行からその行までを、押した行の新しい状態にする。前に押した行が一覧にないときは1件だけ)、`headerState`、`allToggled`、`pruned`(一覧に出なくなったものを外す。折りたたんで隠れた子も外す)。Vitest あり。
+      - `src/features/todos/useSelection.ts`: 選択の置き場(`useFolded` と同じ作り。アプリを開いている間だけ覚える)。`TodosPage.tsx` が一覧を受け取るたびに `pruned` で絞る。
+      - `TodoTable.tsx`: 左端にチェックボックスの列(見出しは「すべて選ぶ」、行は「「…」を選ぶ」。Aizome の `Checkbox` をセルの中の `.todo-select` に置く)。つなぎの行には置かない。`.todo-select` はセルの余白まで押せる範囲を広げ、クリックを行に伝えない(詳細パネルを開かない)。Shift を押したままの mousedown は既定の動き(文字の選択)を止める。
+      - 操作の帯(`BulkBar.tsx`): 1件以上選ぶと一覧の上に出す。「3件を選択中」と4つのボタン、「選択を外す」。長い一覧をスクロールしても画面の上端に残る(`position: sticky`。`.app__main` の上の余白の分だけ上に寄せる)。幅が狭いと折り返す(150%・幅1280で2行)。重ねて出す詳細パネルより下。
+      - ダイアログ(`BulkDialog.tsx`、幅 `md`): 帯のボタンで、詳細パネルの保存待ちの入力を保存してから開く。日限は「変え方」(日付で決める / N日ずらす)と `DateField` か「ずらす日数」の欄、予定は「ずらす日数」、優先度とステータスは選択(初めは「選んでください」。ステータスの選択肢は `BULK_STATUSES`)。中止を選ぶと「中止の理由」の欄(説明「選んだTODOのすべてに、同じ理由を入れます。」)。入力が決まっていない間(空の欄、「-」だけ、未選択)は確認を引かず、ボタンは押せない。理由の欄のエラーは、欄に打ったあとだけ出す。確認の欄は入力を変えるたびに `usePreviewBulkChange`(`useQuery`。キーは `["todos", "bulk-preview", ids, change]`)で引き直す。並びは「3件を変えます。」(0件なら「変えられるTODOはありません。」)、子を閉じる知らせ、次の回の知らせ、先行TODOの知らせと一覧(「先行TODO:名前(プロジェクト名)、…」)、除くものの一覧(名前と理由。全体のTODOではプロジェクト名も)。一覧は背の低いウィンドウで先に縮む(`max(88px, min(240px, 100vh - 520px))`)。ボタンは「キャンセル」と「3件を変える」。保存する前にも `saveOpenDrafts`。保存したらダイアログを閉じ、一覧の上に「3件の日限を変えました。」「3件の予定をずらしました。」「3件の優先度を変えました。」「3件のステータスを変えました。」に、除いたものがあれば「変えられない2件は除きました。」を続けた `Alert`(×で閉じる。次のダイアログを開くと消える)。選択は残す。
+      - 文言と日数の読み取り(`daysOf`。全角の数字とマイナス、長音記号の「ー」も読む。空と「-」だけは `null`、整数でなければ 0 を送って Rust の文を出す)は `bulkText.ts`。Vitest あり。
+      - フックは `queries.ts` の `usePreviewBulkChange` と `useApplyBulkChange`(`TODO_WRITES` の列。プロジェクトと TODO の一覧を取り直す)。
+    - 確かめたこと: サンプルデータの .app で、日限をずらす(完了のTODOが理由つきで除かれる)、先行TODOが終わっていないTODOを作業中にする確認、社内ツール整備の全件を完了(子2件も一緒に完了、繰り返しの次の回1件、すでに完了の2件を除く)、Shift での範囲の選択(キーボードの Shift+スペース)、150%・幅1280の帯とダイアログ。
+    - perf(`perf.rs`): 先頭の1,000件(`BULK`。全部のステータス、親と子、繰り返しを含む)で `preview_bulk_change`(日限をずらす・完了・作業中)、日限を+7日して−7日に戻す `apply_bulk_change`、未着手・作業中の1,000件を保留にして戻す `apply_bulk_change`。足した変更履歴は計測のあとに消す(あとの JSON の計測を変えないため)。開いている1,000件を完了にする保存は、`VACUUM INTO` で作った写しの DB で1回だけ測る。
 
 ## 品質の決めごと
 
@@ -543,7 +565,7 @@ v0.4.0 は `docs/implementation-plan-v0.4.0.md` のフェーズ25〜30で作る�
 | Rust の書式の確認(直すときは `cargo fmt --manifest-path src-tauri/Cargo.toml`) | `npm run fmt:rust` |
 | Rust の lint(警告はエラー扱い) | `npm run lint:rust` |
 | まとめて確認(型チェック、Rust の書式、Vitest、cargo test、clippy) | `npm run check` |
-| 性能の確認(TODO 5,000件・作業ログ 20,000件でコマンドの時間を測る。最適化ビルド。検索、営業日の設定、TODO の保存(`get_todo` と `update_todo`)、テンプレート、繰り返し、依存関係、後続TODOのずらしの確認、週報、起動の Rust 側、JSON の書き出しと取り込みも測る。計測のデータには子TODO・繰り返し・依存関係も入る) | `npm run test:perf` |
+| 性能の確認(TODO 5,000件・作業ログ 20,000件でコマンドの時間を測る。最適化ビルド。検索、営業日の設定、TODO の保存(`get_todo` と `update_todo`)、テンプレート、繰り返し、依存関係、後続TODOのずらしの確認、一括変更の確認と保存、週報、起動の Rust 側、JSON の書き出しと取り込みも測る。計測のデータには子TODO・繰り返し・依存関係も入る) | `npm run test:perf` |
 | アプリアイコンを原画から作り直す | `npm run icons` |
 | 配布物のビルド(実行ファイルの ZIP を `release/` に作る) | `npm run build` |
 

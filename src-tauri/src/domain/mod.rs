@@ -4,6 +4,7 @@
 //! and `now` (UTC timestamp) are always passed in by the caller (`commands/`).
 
 pub mod backup_mirror;
+pub mod bulk;
 pub mod calendar;
 pub mod dashboard;
 pub mod date;

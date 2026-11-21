@@ -1,14 +1,21 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, Button, Tabs } from "../../components/aizome";
 import { PageHeader } from "../../components/PageHeader";
 import type { ProjectSummary, Status, TodoQuery } from "../../lib/bindings";
 import { errorMessage } from "../../lib/errors";
 import { useProjects, useTodoList } from "../../lib/queries";
 import { projectStatsText } from "../projects/projectText";
+import { BulkBar } from "./BulkBar";
+import { BulkDialog } from "./BulkDialog";
+import { bulkDoneText, type BulkKind } from "./bulkText";
+import { saveOpenDrafts } from "./detail/useTodoDraft";
 import { QuickAdd } from "./QuickAdd";
+import { allToggled, clicked, headerState, NO_SELECTION, pruned, selectableIds, selectedIn } from "./selection";
 import { DEFAULT_FILTERS, TodoFilters, type FilterState } from "./TodoFilters";
 import { TodoTable } from "./TodoTable";
 import { STATUSES, STATUS_LABEL } from "./todoText";
+import { useFolded } from "./useFolded";
+import { useSelection } from "./useSelection";
 
 interface TodosPageProps {
   /** null: all active projects. */
@@ -41,6 +48,18 @@ function TodosView({ projectId, selectedTodoId, onOpenTodo, onEditProject, onAdd
     sort: filters.sort,
   };
   const list = useTodoList(query);
+
+  // 一括変更 (T-14): the selection holds only TODOs this list shows.
+  const { folded } = useFolded();
+  const { selection, setSelection } = useSelection();
+  const [bulk, setBulk] = useState<BulkKind | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const rows = list.data?.rows;
+  const selectable = rows ? selectableIds(rows, folded) : null;
+  useEffect(() => {
+    if (rows) setSelection((s) => pruned(s, selectableIds(rows, folded)));
+  }, [rows, folded, setSelection]);
+  const selected = selectable ? selectedIn(selection, selectable) : [];
 
   const summary = projectId === null ? null : projects.data?.find((p) => p.project.id === projectId);
   if (projectId !== null && !summary) return null;
@@ -78,13 +97,47 @@ function TodosView({ projectId, selectedTodoId, onOpenTodo, onEditProject, onAdd
       <TodoFilters value={filters} onChange={setFilters} />
       {projectId !== null ? <QuickAdd projectId={projectId} /> : null}
       {list.error ? <Alert tone="danger">{errorMessage(list.error)}</Alert> : null}
-      {list.data ? (
+      {notice ? (
+        <Alert tone="success" onClose={() => setNotice(null)}>
+          {notice}
+        </Alert>
+      ) : null}
+      {selected.length > 0 ? (
+        <BulkBar
+          count={selected.length}
+          // The detail panel's typed edits are saved first: the confirmation sees them.
+          onChange={(kind) => {
+            setNotice(null);
+            void saveOpenDrafts().then(() => setBulk(kind));
+          }}
+          onClear={() => setSelection(NO_SELECTION)}
+        />
+      ) : null}
+      {list.data && selectable ? (
         <TodoTable
           rows={list.data.rows}
           showProject={projectId === null}
           selectedId={selectedTodoId}
           onOpen={onOpenTodo}
           emptyText={emptyText}
+          selection={{
+            selected: selection.ids,
+            header: headerState(selection, selectable),
+            onToggle: (id, shift) => setSelection((s) => clicked(s, selectable, id, shift)),
+            onToggleAll: () => setSelection((s) => allToggled(s, selectable)),
+          }}
+        />
+      ) : null}
+      {bulk ? (
+        <BulkDialog
+          kind={bulk}
+          ids={selected}
+          showProject={projectId === null}
+          onClose={() => setBulk(null)}
+          onDone={(change, result) => {
+            setBulk(null);
+            setNotice(bulkDoneText(change, result));
+          }}
         />
       ) : null}
     </>

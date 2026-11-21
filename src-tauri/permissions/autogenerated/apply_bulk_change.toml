@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-apply-bulk-change"
+description = "Enables the apply_bulk_change command without any pre-configured scope."
+commands.allow = ["apply_bulk_change"]
+
+[[permission]]
+identifier = "deny-apply-bulk-change"
+description = "Denies the apply_bulk_change command without any pre-configured scope."
+commands.deny = ["apply_bulk_change"]

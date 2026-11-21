@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-preview-bulk-change"
+description = "Enables the preview_bulk_change command without any pre-configured scope."
+commands.allow = ["preview_bulk_change"]
+
+[[permission]]
+identifier = "deny-preview-bulk-change"
+description = "Denies the preview_bulk_change command without any pre-configured scope."
+commands.deny = ["preview_bulk_change"]

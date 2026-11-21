@@ -475,19 +475,34 @@ pub async fn change_status_impl(
 ) -> CmdResult<TodoItem> {
     let mut tx = pool.begin().await?;
     let before = repo::todos::get(&mut tx, id).await?;
-    let t = transition(&StatusFields::of(&before), change, today, now)?;
-    let saved = repo::todos::write_status(&mut tx, id, &t.fields, now).await?;
-    repo::events::insert(&mut tx, id, &t.event).await?;
-    if saved.status.is_closed() {
-        // As they were before closing: the next round copies the children
-        // closed with the parent, not those already 中止 (T-12).
-        let children = repo::todos::list_children(&mut tx, &[id]).await?;
-        close_children(&mut tx, &children, change, today, now).await?;
-        repeats::next_round(&mut tx, &saved, &children, today, now).await?;
-    }
+    let saved = change_one(&mut tx, &before, change, today, now).await?;
     let out = item(&mut tx, saved, today).await?;
     tx.commit().await?;
     Ok(out)
+}
+
+/// What `change_status` does to the TODO `before`, inside the caller's
+/// transaction (the bulk change runs it for each TODO, T-14): the
+/// transition, its record, and when it closes, its open children and the
+/// next round.
+pub(super) async fn change_one(
+    conn: &mut SqliteConnection,
+    before: &Todo,
+    change: &StatusChange,
+    today: NaiveDate,
+    now: DateTime<Utc>,
+) -> CmdResult<Todo> {
+    let t = transition(&StatusFields::of(before), change, today, now)?;
+    let saved = repo::todos::write_status(conn, before.id, &t.fields, now).await?;
+    repo::events::insert(conn, before.id, &t.event).await?;
+    if saved.status.is_closed() {
+        // As they were before closing: the next round copies the children
+        // closed with the parent, not those already 中止 (T-12).
+        let children = repo::todos::list_children(conn, &[before.id]).await?;
+        close_children(conn, &children, change, today, now).await?;
+        repeats::next_round(conn, &saved, &children, today, now).await?;
+    }
+    Ok(saved)
 }
 
 /// Closing a parent closes its open children the same way (S-1): each one

@@ -41,6 +41,8 @@
     "allow-list-dependencies",
     "allow-preview-dependent-shift",
     "allow-shift-with-dependents",
+    "allow-preview-bulk-change",
+    "allow-apply-bulk-change",
     "allow-list-timeline",
     "allow-save-work-log",
     "allow-delete-work-log",

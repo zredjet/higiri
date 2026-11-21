@@ -80,6 +80,17 @@ export const commands = {
 	 *  ids of the TODOs moved, the dragged one first.
 	 */
 	shiftWithDependents: (todoId: number, plannedStart: string, plannedEnd: string, options?: InvokeOptions) => __TAURI_INVOKE<number[]>("shift_with_dependents", { todoId, plannedStart, plannedEnd }, options),
+	/**
+	 *  What `change` would do to the TODOs `ids` (the list's selection, in its
+	 *  order). Nothing is written. A wrong input (0 days, no reason for 中止) is
+	 *  an error.
+	 */
+	previewBulkChange: (ids: number[], change: BulkChange, options?: InvokeOptions) => __TAURI_INVOKE<BulkPreview>("preview_bulk_change", { ids, change }, options),
+	/**
+	 *  Gives `change` to the TODOs `ids`, worked out again now, in one
+	 *  transaction. What cannot take it is left out (`skipped`).
+	 */
+	applyBulkChange: (ids: number[], change: BulkChange, options?: InvokeOptions) => __TAURI_INVOKE<BulkResult>("apply_bulk_change", { ids, change }, options),
 	/**  Work logs and recorded changes of one TODO, newest first. */
 	listTimeline: (todoId: number, options?: InvokeOptions) => __TAURI_INVOKE<TimelineEntry[]>("list_timeline", { todoId }, options),
 	/**  Adds (`id = null`) or updates a work log. */
@@ -173,6 +184,8 @@ export const commands = {
 };
 
 /* Constants */
+export const BULK_STATUSES = ["todo","doing","hold","done","cancelled"] as const;
+
 export const DEFAULT_REPORT_TEMPLATE = {"sections":[{"enabled":true,"heading":"本日の作業","kind":"work","options":{"due_date":true,"project_headings":true,"status":true,"work_time":true}},{"enabled":true,"heading":"本日完了・中止","kind":"closed","options":{"close_reason":true}},{"enabled":true,"heading":"待ち","kind":"waiting","options":{"follow_up_date":true,"waiting_days":true,"waiting_on":true}},{"enabled":true,"heading":"明日の予定","kind":"tomorrow","options":{"planned_period":true}},{"enabled":true,"heading":"日限注意","kind":"attention","options":{"days":true,"follow_up_and_late_start":false,"waiting_mark":true}},{"enabled":true,"heading":"所感・連絡事項","kind":"note","options":{}}],"title":"日報 {日付}({曜日})"} as const;
 
 export const DEFAULT_WEEKLY_REPORT_TEMPLATE = {"sections":[{"enabled":true,"heading":"今週の作業","kind":"work","options":{"due_date":true,"log_body":false,"project_headings":true,"status":true,"total_time":true,"work_days":true,"work_time":true}},{"enabled":true,"heading":"今週完了・中止","kind":"closed","options":{"close_reason":true,"closed_date":true}},{"enabled":true,"heading":"待ち","kind":"waiting","options":{"follow_up_date":true,"waiting_days":true,"waiting_on":true}},{"enabled":true,"heading":"来週の予定","kind":"next_week","options":{"due_date":true,"planned_period":true}},{"enabled":true,"heading":"日限注意","kind":"attention","options":{"days":true,"follow_up_and_late_start":false,"waiting_mark":true}},{"enabled":true,"heading":"所感・連絡事項","kind":"note","options":{}}],"title":"週報 {開始日}〜{終了日}"} as const;
@@ -280,6 +293,61 @@ export type BlockingTodo = {
 	title: string,
 	/**  For a child: shown 「親 / 子」. */
 	parent_title: string | null,
+	project_name: string,
+};
+
+/**  A TODO going 作業中 that waits for unfinished TODOs. */
+export type BulkBlocked = {
+	todo: BulkTodo,
+	blocked_by: BlockingTodo[],
+};
+
+/**  The change given to every selected TODO. */
+export type BulkChange = 
+/**  日限を日付で決める. `null` is refused (the 日限 is not emptied). */
+{ kind: "set_due"; date: string | null } | 
+/**  日限をN日ずらす (−365〜365, not 0). */
+{ kind: "shift_due"; days: number } | 
+/**  予定期間をN日ずらす (−365〜365, not 0). */
+{ kind: "shift_planned"; days: number } | { kind: "priority"; priority: Priority } | 
+/**  One of [`BULK_STATUSES`]. 中止 needs the reason, given to every TODO. */
+{ kind: "status"; status: Status; reason: string | null };
+
+/**  What a bulk change would do (the confirmation). */
+export type BulkPreview = {
+	/**  The TODOs to change. */
+	targets: number[],
+	/**  The TODOs left out, in the order selected. */
+	skipped: BulkSkipped[],
+	/**  To 作業中: those that wait for unfinished TODOs. */
+	blocked: BulkBlocked[],
+	/**  To 完了・中止: the open children closed with their parent. */
+	closing_children: number,
+	/**  To 完了・中止: the repeating TODOs that make their next round. */
+	next_rounds: number,
+};
+
+/**  What a bulk change did. */
+export type BulkResult = {
+	/**  The TODOs changed (not the children closed with them). */
+	changed: number[],
+	/**  The TODOs left out, worked out at the save. */
+	skipped: BulkSkipped[],
+};
+
+/**  A selected TODO left out, with why (「すでにその日限です。」). */
+export type BulkSkipped = {
+	todo: BulkTodo,
+	reason: string,
+};
+
+/**  A selected TODO named in the confirmation (left out, or waiting). */
+export type BulkTodo = {
+	id: number,
+	title: string,
+	/**  For a child: shown 「親 / 子」. */
+	parent_title: string | null,
+	project_id: number,
 	project_name: string,
 };
 

@@ -566,6 +566,132 @@ body,
   color: var(--text);
 }
 
+/* 一括変更 (T-14). The checkbox column of the TODO list: the click area
+   reaches over the cell's padding, so a click next to the box does not open
+   the detail panel. The title cell keeps its left padding (the fold button
+   sits in it). */
+.todo-table .az-table th:first-child,
+.todo-table .az-table td:first-child {
+  padding-right: 0;
+}
+
+.todo-select {
+  display: flex;
+  align-items: center;
+  margin: calc(-1 * var(--space-3)) 0 calc(-1 * var(--space-3)) calc(-1 * var(--space-4));
+  padding: var(--space-3) 0 var(--space-3) var(--space-4);
+  cursor: default;
+}
+
+.az-table th .todo-select {
+  margin-block: calc(-1 * var(--space-2));
+  padding-block: var(--space-2);
+}
+
+.todo-select .az-check__box {
+  margin-top: 0;
+}
+
+/* The band above the list while TODOs are selected. It stays at the top of
+   the page while a long list scrolls (at the very top: the page's padding
+   would leave rows showing above it), under the detail panel lying over the
+   page (below 1280px). The buttons wrap on a narrow page (150%). */
+.bulk-bar {
+  position: sticky;
+  top: calc(-1 * var(--space-6));
+  z-index: var(--z-sticky);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-lg);
+  background: var(--primary-soft);
+  box-shadow: var(--shadow-sm);
+}
+
+.bulk-bar__count {
+  margin-right: var(--space-2);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 22px;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+/* The confirmation under the input. Its lists shrink first on a short
+   window, so the buttons stay in view without scrolling the dialog. */
+.bulk-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--text);
+}
+
+.bulk-confirm p {
+  margin: 0;
+}
+
+.bulk-confirm__lead {
+  font-weight: 600;
+}
+
+.bulk-confirm__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.bulk-confirm__warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+  color: var(--warning);
+}
+
+.bulk-confirm__warning .az-icon {
+  flex: none;
+  margin-top: 3px;
+}
+
+.bulk-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: max(88px, min(240px, 100vh - 520px));
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-shade);
+}
+
+.bulk-list__item {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.bulk-list__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--space-2);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.bulk-list__note {
+  color: var(--text-muted);
+}
+
 /* 後続TODOのずらし (G-8): the 後続TODO the confirmation lists. */
 .shift-list {
   display: flex;

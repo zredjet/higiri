@@ -6,6 +6,7 @@
 //! call directly.
 
 pub mod backup;
+pub mod bulk;
 pub mod clock;
 pub mod dashboard;
 pub mod dependencies;
@@ -61,6 +62,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             dependencies::list_dependencies,
             shift::preview_dependent_shift,
             shift::shift_with_dependents,
+            bulk::preview_bulk_change,
+            bulk::apply_bulk_change,
             work_logs::list_timeline,
             work_logs::save_work_log,
             work_logs::delete_work_log,
@@ -99,6 +102,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         // The 表示倍率 the settings screen offers (v0.4.0), and the default.
         .constant("ZOOM_LEVELS", crate::domain::settings::ZOOM_LEVELS)
         .constant("DEFAULT_ZOOM", crate::domain::settings::DEFAULT_ZOOM)
+        // The statuses the bulk change offers (v0.4.0, T-14), in order.
+        .constant("BULK_STATUSES", crate::domain::bulk::BULK_STATUSES)
         // IDs and counts are i64; they stay far below 2^53 in this app.
         .dangerously_cast_bigints_to_number()
         // One TS type per Rust type (no separate *_Serialize / *_Deserialize).
@@ -146,7 +151,7 @@ mod tests {
             .collect();
         allowed.sort();
         assert_eq!(allowed, commands_in_bindings());
-        assert_eq!(allowed.len(), 46);
+        assert_eq!(allowed.len(), 48);
     }
 
     /// Regenerates `src/lib/bindings.ts` and fails when the committed file was

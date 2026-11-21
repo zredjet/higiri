@@ -28,8 +28,10 @@ use chrono::{Days, NaiveDate, TimeZone, Utc};
 use sqlx::SqlitePool;
 
 use crate::commands::{
-    dashboard, dependencies, gantt, projects, repeats, reports, search, settings, templates, todos,
+    bulk, dashboard, dependencies, gantt, projects, repeats, reports, search, settings, templates,
+    todos,
 };
+use crate::domain::bulk::BulkChange;
 use crate::domain::date::{format_date, format_timestamp};
 use crate::domain::listing::{DueFilter, TodoSort};
 use crate::domain::model::{Priority, Status, Todo};
@@ -73,6 +75,16 @@ const SEARCHES: [(&str, &str); 6] = [
     // No hit: every field of every TODO is read.
     ("search_todos (no hit)", "該当なし"),
 ];
+
+/// TODOs selected for 一括変更 (T-14).
+pub const BULK: usize = 1_000;
+
+fn bulk_status(status: Status) -> BulkChange {
+    BulkChange::Status {
+        status,
+        reason: None,
+    }
+}
 
 /// Small deterministic generator, so every run measures the same data.
 struct Rng(u64);
@@ -722,6 +734,115 @@ async fn measure(pool: &SqlitePool, today: NaiveDate) -> Vec<(&'static str, Dura
         .await,
     ));
 
+    // 一括変更 (T-14): 1,000 TODOs selected (the first 1,000: every status,
+    // parents with their children, repeating TODOs). The confirmations write
+    // nothing. The saves move the 日限 by +7 and back, and put 1,000 open
+    // TODOs on 保留 and back, so nothing stays changed (closing is measured
+    // on a copy, in `perf_5000_todos_20000_logs`). The history rows they add
+    // are deleted after, so the later measures see the same data.
+    let (events_before,): (i64,) = sqlx::query_as("SELECT MAX(id) FROM todo_events")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let first: Vec<i64> = (1..=BULK as i64).collect();
+    for (label, change) in [
+        (
+            "preview_bulk_change (due)",
+            BulkChange::ShiftDue { days: 7 },
+        ),
+        ("preview_bulk_change (done)", bulk_status(Status::Done)),
+        ("preview_bulk_change (doing)", bulk_status(Status::Doing)),
+    ] {
+        times.push((
+            label,
+            median(runs, || bulk::preview(pool, &first, change.clone(), today)).await,
+        ));
+    }
+    let mut moves = Vec::with_capacity(runs + 1);
+    for _ in 0..=runs {
+        let t = Instant::now();
+        let done = bulk::apply(
+            pool,
+            &first,
+            BulkChange::ShiftDue { days: 7 },
+            today,
+            Utc::now(),
+        )
+        .await
+        .unwrap();
+        moves.push(t.elapsed());
+        assert!(done.changed.len() > 300, "{} moved", done.changed.len());
+        bulk::apply(
+            pool,
+            &first,
+            BulkChange::ShiftDue { days: -7 },
+            today,
+            Utc::now(),
+        )
+        .await
+        .unwrap();
+    }
+    moves.remove(0);
+    moves.sort();
+    times.push(("apply_bulk_change (due)", moves[runs / 2]));
+    let open: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT id, status FROM todos WHERE status IN ('todo', 'doing') ORDER BY id LIMIT ?1",
+    )
+    .bind(BULK as i64)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(open.len(), BULK);
+    let open_ids: Vec<i64> = open.iter().map(|(id, _)| *id).collect();
+    let back = |status: &str| -> Vec<i64> {
+        open.iter()
+            .filter(|(_, s)| s == status)
+            .map(|(id, _)| *id)
+            .collect()
+    };
+    let (was_todo, was_doing) = (back("todo"), back("doing"));
+    let mut holds = Vec::with_capacity(runs + 1);
+    for _ in 0..=runs {
+        let t = Instant::now();
+        let done = bulk::apply(
+            pool,
+            &open_ids,
+            bulk_status(Status::Hold),
+            today,
+            Utc::now(),
+        )
+        .await
+        .unwrap();
+        holds.push(t.elapsed());
+        assert_eq!(done.changed.len(), BULK);
+        bulk::apply(
+            pool,
+            &was_todo,
+            bulk_status(Status::Todo),
+            today,
+            Utc::now(),
+        )
+        .await
+        .unwrap();
+        bulk::apply(
+            pool,
+            &was_doing,
+            bulk_status(Status::Doing),
+            today,
+            Utc::now(),
+        )
+        .await
+        .unwrap();
+    }
+    holds.remove(0);
+    holds.sort();
+    times.push(("apply_bulk_change (hold)", holds[runs / 2]));
+    sqlx::query("DELETE FROM todo_events WHERE id > ?1")
+        .bind(events_before)
+        .execute(pool)
+        .await
+        .unwrap();
+
     // What the first screen asks for (App.tsx: settings, projects, the
     // dashboard and its badge, the startup reminder). The screen sends them
     // at once; here they run one after the other.
@@ -917,6 +1038,45 @@ async fn perf_5000_todos_20000_logs() {
         .await
         .unwrap();
     println!("{:<30} {}", "import_data (JSON)", ms(t.elapsed()));
+    // 一括変更 (T-14): closing 1,000 open TODOs (their open children close
+    // with them, the repeating ones make their next round), on a copy of the
+    // database, so the counts below stay.
+    let copy = tmp.path().join("bulk-close.db");
+    sqlx::query("VACUUM INTO ?1")
+        .bind(copy.display().to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+    {
+        let copied = db::open(&copy).await.unwrap();
+        let open: Vec<(i64,)> = sqlx::query_as(
+            "SELECT id FROM todos WHERE status NOT IN ('done', 'cancelled') ORDER BY id LIMIT ?1",
+        )
+        .bind(BULK as i64)
+        .fetch_all(&copied)
+        .await
+        .unwrap();
+        let ids: Vec<i64> = open.into_iter().map(|(id,)| id).collect();
+        let preview = bulk::preview(&copied, &ids, bulk_status(Status::Done), today)
+            .await
+            .unwrap();
+        let t = Instant::now();
+        bulk::apply(&copied, &ids, bulk_status(Status::Done), today, Utc::now())
+            .await
+            .unwrap();
+        println!(
+            "{:<30} {}",
+            format!(
+                "apply_bulk_change (done: {} + {} children, {} rounds)",
+                preview.targets.len(),
+                preview.closing_children,
+                preview.next_rounds
+            ),
+            ms(t.elapsed())
+        );
+        copied.close().await;
+    }
+
     let counts: (i64, i64) =
         sqlx::query_as("SELECT (SELECT COUNT(*) FROM todos), (SELECT COUNT(*) FROM work_logs)")
             .fetch_one(&pool)
