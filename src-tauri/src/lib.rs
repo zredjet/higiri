@@ -83,6 +83,12 @@ pub fn run() {
                 resident::on_close_requested(window, api);
             }
         })
+        // 表示倍率 again after a page load (see resident.rs).
+        .on_page_load(|webview, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                resident::on_page_loaded(webview);
+            }
+        })
         .setup(move |app| {
             specta.mount_events(app);
             log::info!("Higiri {} starting", app.package_info().version);
@@ -122,6 +128,10 @@ pub fn run() {
                     log::error!("settings could not be read: {}", e.message);
                     Settings::default()
                 });
+
+            // 表示倍率 (v0.4.0) before the window is first shown.
+            app.manage(resident::Zoom::new(&settings));
+            resident::apply_zoom(app.handle());
 
             // The tray first: without it, × quits instead of hiding.
             let tray_ready = match tray::create(app.handle()) {

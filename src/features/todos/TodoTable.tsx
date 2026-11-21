@@ -155,7 +155,7 @@ export function TodoTable({ rows, showProject, selectedId, onOpen, emptyText }: 
   ];
 
   return (
-    <div {...wrapperProps}>
+    <div {...wrapperProps} className={wrapperProps.className ? `todo-table ${wrapperProps.className}` : "todo-table"}>
       <Table<TodoListRow & { id: number }>
         columns={columns}
         rows={drawn.slice(shown.first, shown.end).map((r) => ({ ...r, id: r.item.todo.id }))}

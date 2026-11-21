@@ -618,13 +618,15 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let pool = file_db(tmp.path()).await;
-        // At backup time: autostart off, the other kept values unset, and a
-        // user setting (theme, notification times) that the restore brings back.
+        // At backup time: autostart off, 表示倍率 80%, the other kept values
+        // unset, and a user setting (theme, notification times) that the
+        // restore brings back.
         cmd::update(
             &pool,
             SettingsInput {
                 theme: Theme::Dark,
                 notify_times: vec!["08:00".into()],
+                zoom: 80,
                 ..SettingsInput::from(&Settings::default())
             },
         )
@@ -632,12 +634,14 @@ mod tests {
         .unwrap();
         run_daily(&pool, tmp.path(), d("2026-11-18")).await.unwrap();
 
-        // Since then: autostart on, the app wrote its values, the user changed the theme.
+        // Since then: autostart on, 表示倍率 125%, the app wrote its values,
+        // the user changed the theme.
         cmd::update(
             &pool,
             SettingsInput {
                 theme: Theme::Light,
                 autostart: true,
+                zoom: 125,
                 ..SettingsInput::from(&Settings::default())
             },
         )
@@ -671,6 +675,7 @@ mod tests {
         assert_eq!(after.notify_times, ["08:00"]);
         // Kept as they were.
         assert!(after.autostart);
+        assert_eq!(after.zoom, 125);
         assert_eq!(after.last_reminded_on, before.last_reminded_on);
         assert_eq!(after.last_notified_at, before.last_notified_at);
         assert!(after.tray_hint_shown);
@@ -695,6 +700,7 @@ mod tests {
         assert_eq!(undone.theme, Theme::Light);
         assert!(!undone.tray_hint_shown);
         assert!(undone.autostart);
+        assert_eq!(undone.zoom, 125);
     }
 
     #[tokio::test]

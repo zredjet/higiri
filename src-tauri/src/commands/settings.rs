@@ -2,8 +2,8 @@
 //!
 //! `update_settings` saves in the inner function (database only), then the
 //! command applies the result to the running app and the OS: the resident
-//! timer and the × button (`resident::apply`), and start at login
-//! (`autostart::apply`).
+//! timer, the × button and the 表示倍率 of the main window
+//! (`resident::apply`), and start at login (`autostart::apply`).
 
 use serde::Deserialize;
 use sqlx::SqlitePool;
@@ -16,7 +16,7 @@ use crate::domain::notify::{self, TimesError};
 use crate::domain::report_template::{HEADING_MAX, Kind, TITLE_MAX, TemplateError};
 use crate::domain::settings::{
     CustomHoliday, DayCount, ReminderFrequency, ReportTemplate, Settings, Theme,
-    WeeklyReportTemplate,
+    WeeklyReportTemplate, is_zoom_level,
 };
 use crate::{autostart, repo, resident};
 
@@ -45,6 +45,8 @@ pub struct SettingsInput {
     pub report_template: ReportTemplate,
     /// Checked and saved as the daily one (v0.3.0).
     pub weekly_report_template: WeeklyReportTemplate,
+    /// 表示倍率 in percent: one of `ZOOM_LEVELS` (v0.4.0).
+    pub zoom: u32,
 }
 
 impl From<&Settings> for SettingsInput {
@@ -62,6 +64,7 @@ impl From<&Settings> for SettingsInput {
             custom_holidays: s.custom_holidays.clone(),
             report_template: s.report_template.clone(),
             weekly_report_template: s.weekly_report_template.clone(),
+            zoom: s.zoom,
         }
     }
 }
@@ -138,6 +141,9 @@ pub async fn update(pool: &SqlitePool, input: SettingsInput) -> CmdResult<Settin
         .weekly_report_template
         .checked()
         .map_err(|e| template_error(e, "週報"))?;
+    if !is_zoom_level(input.zoom) {
+        return Err(AppError::validation("表示倍率は一覧から選んでください。"));
+    }
     let mut tx = pool.begin().await?;
     let current = repo::settings::load(&mut tx).await?;
     let next = Settings {
@@ -153,6 +159,7 @@ pub async fn update(pool: &SqlitePool, input: SettingsInput) -> CmdResult<Settin
         custom_holidays,
         report_template,
         weekly_report_template,
+        zoom: input.zoom,
         ..current
     };
     repo::settings::save_user_settings(&mut tx, &next).await?;
@@ -610,6 +617,27 @@ mod tests {
             "日報の題名と見出しに改行は使えません。1行で入力してください。"
         );
         assert_eq!(get(&pool).await.unwrap(), Settings::default());
+    }
+
+    #[tokio::test]
+    async fn zoom_is_saved_when_one_of_the_levels() {
+        let pool = db::open_in_memory().await.unwrap();
+        let zoom = |z| SettingsInput {
+            zoom: z,
+            ..SettingsInput::from(&Settings::default())
+        };
+        for z in [70, 80, 90, 100, 110, 125, 150] {
+            let s = update(&pool, zoom(z)).await.unwrap();
+            assert_eq!(s.zoom, z);
+            assert_eq!(get(&pool).await.unwrap(), s);
+        }
+        for z in [0, 60, 75, 120, 175, 1000] {
+            let e = update(&pool, zoom(z)).await.unwrap_err();
+            assert_eq!(e.kind, ErrorKind::Validation, "{z}");
+            assert_eq!(e.message, "表示倍率は一覧から選んでください。");
+        }
+        // The refused values left the last saved one.
+        assert_eq!(get(&pool).await.unwrap().zoom, 150);
     }
 
     #[tokio::test]

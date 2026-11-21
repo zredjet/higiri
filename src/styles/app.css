@@ -21,6 +21,7 @@ body,
 
 /* ---------- Shell: side nav + content (+ detail panel) ---------- */
 .app {
+  position: relative;
   display: flex;
   height: 100vh;
   overflow: hidden;
@@ -37,7 +38,7 @@ body,
 .app__main {
   flex: 1 1 auto;
   min-width: 0;
-  overflow-y: auto;
+  overflow: auto;
   box-sizing: border-box;
   padding: var(--space-6) var(--space-8) var(--space-8);
   display: flex;
@@ -57,6 +58,39 @@ body,
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+}
+
+/*
+ * 表示倍率 (v0.4.0) makes CSS pixels larger, so the page gets narrower: 150%
+ * of a 1280px window is 853px, and of the smallest window (960×600) 640×400.
+ * - The pages keep at least 528px (the Gantt chart's names and a week of
+ *   days). Narrower than that, the page scrolls sideways inside .app__main,
+ *   so the side nav and the detail panel stay where they are.
+ * - Below 1280px the detail panel lies over the right of the page instead of
+ *   squeezing it (it would leave the list and the chart a few columns), and
+ *   the TODO list keeps its columns (it scrolls sideways in its frame, as the
+ *   dashboard's table does) instead of folding every cell into many lines.
+ *   From 1280px (100% of the default window) both stay as they were.
+ */
+.app__main > * {
+  min-width: 528px;
+}
+
+@media (max-width: 1279.98px) {
+  .todo-table > .az-table-wrap > .az-table {
+    min-width: 840px;
+  }
+
+  .app__detail {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: calc(var(--z-sticky) + 1);
+    width: 440px;
+    max-width: calc(100% - var(--sidenav-width));
+    box-shadow: var(--shadow-lg);
+  }
 }
 
 .detail-panel__header {
@@ -508,8 +542,10 @@ body,
   min-width: 0;
 }
 
+/* On a short window (表示倍率) the results give up their height first (the
+   rest of the dialog is about 330px). */
 .dependency-picker {
-  max-height: 320px;
+  max-height: max(96px, min(320px, 100vh - 330px));
   overflow-y: auto;
 }
 
@@ -967,11 +1003,13 @@ input[type="date"][data-empty="true"]:not(:focus) {
 }
 
 /* ---------- Reminder dialog ---------- */
-/* Long lists scroll inside the dialog, so 「確認しました」 stays in view. */
+/* Long lists scroll inside the dialog, so 「確認しました」 stays in view; on a
+   short window (表示倍率) the list gives up its height first (the rest of the
+   dialog is about 300px). */
 .reminder-list {
   display: flex;
   flex-direction: column;
-  max-height: min(400px, 50vh);
+  max-height: max(88px, min(400px, 50vh, 100vh - 300px));
   overflow-y: auto;
   border-bottom: 1px solid var(--border);
 }
@@ -1012,7 +1050,8 @@ input[type="date"][data-empty="true"]:not(:focus) {
 }
 
 /* ---------- Search dialog ---------- */
-/* Results scroll inside the dialog, so the field stays in view. */
+/* Results scroll inside the dialog, so the field stays in view (on a short
+   window too: the rest of the dialog is about 250px). */
 .search-dialog__status {
   min-height: 18px;
 }
@@ -1023,7 +1062,7 @@ input[type="date"][data-empty="true"]:not(:focus) {
   padding: 0;
   display: flex;
   flex-direction: column;
-  max-height: min(480px, 55vh);
+  max-height: max(96px, min(480px, 55vh, 100vh - 250px));
   overflow-y: auto;
 }
 
@@ -1128,6 +1167,13 @@ input[type="date"][data-empty="true"]:not(:focus) {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
   gap: var(--space-4);
+}
+
+/* 表示: the 表示倍率 select is as wide as its longest label needs. */
+.settings-zoom .az-select {
+  width: 200px;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 /* 通知と常駐: the list of notification times. */
@@ -1268,9 +1314,9 @@ input[type="date"][data-empty="true"]:not(:focus) {
 }
 
 /* ---------- Gantt ---------- */
-/* The chart fills the rest of the page and scrolls its own rows. */
+/* The chart fills the rest of the page and scrolls its own rows. On a short
+   window (表示倍率) the page scrolls, and the chart keeps its min-height. */
 .app__main--fill {
-  overflow: hidden;
   gap: var(--space-4);
 }
 

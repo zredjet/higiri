@@ -17,9 +17,11 @@
 //! | `custom_holidays` | `[{"name", "start", "end", "yearly"}, …]` |
 //! | `report_template` | `{"title", "sections": [{"kind", "heading", "enabled", "options"}, …]}` |
 //! | `weekly_report_template` | the same shape, with the weekly report's kinds and items |
+//! | `zoom` | `70`, `80`, `90`, `100`, `110`, `125` or `150` |
 //!
 //! Missing keys, unknown keys and unreadable values fall back to the defaults
-//! so that a bad row never prevents the app from starting.
+//! so that a bad row never prevents the app from starting (a `zoom` that is
+//! not one of the levels, too).
 //!
 //! `last_reminded_on`, `last_notified_at` and `tray_hint_shown` are written by
 //! the app, one key at a time ([`set_last_reminded_on`] and the like), so that
@@ -33,7 +35,9 @@ use sqlx::SqliteConnection;
 use super::Result;
 use crate::domain::date::{format_timestamp, parse_timestamp};
 use crate::domain::notify::normalize_times;
-use crate::domain::settings::{CustomHoliday, ReportTemplate, Settings, WeeklyReportTemplate};
+use crate::domain::settings::{
+    CustomHoliday, ReportTemplate, Settings, WeeklyReportTemplate, is_zoom_level,
+};
 
 pub const REMINDER_FREQUENCY: &str = "reminder_frequency";
 pub const SOON_DAYS: &str = "soon_days";
@@ -50,14 +54,17 @@ pub const DAY_COUNT: &str = "day_count";
 pub const CUSTOM_HOLIDAYS: &str = "custom_holidays";
 pub const REPORT_TEMPLATE: &str = "report_template";
 pub const WEEKLY_REPORT_TEMPLATE: &str = "weekly_report_template";
+pub const ZOOM: &str = "zoom";
 
 /// Keys a restore (and the JSON import) leaves as they are on this PC:
-/// `autostart` belongs to the PC, the others are written by the app.
-pub const KEPT_ON_REPLACE: [&str; 4] = [
+/// `autostart` and `zoom` belong to the PC (the screen differs from PC to
+/// PC), the others are written by the app.
+pub const KEPT_ON_REPLACE: [&str; 5] = [
     AUTOSTART,
     LAST_NOTIFIED_AT,
     TRAY_HINT_SHOWN,
     LAST_REMINDED_ON,
+    ZOOM,
 ];
 
 fn read<T: DeserializeOwned>(value: &str, fallback: T) -> T {
@@ -101,6 +108,14 @@ fn read_weekly_report_template(
         .unwrap_or(fallback)
 }
 
+/// A stored 表示倍率, or the fallback unless it is one of the levels.
+fn read_zoom(value: &str, fallback: u32) -> u32 {
+    serde_json::from_str::<u32>(value)
+        .ok()
+        .filter(|&z| is_zoom_level(z))
+        .unwrap_or(fallback)
+}
+
 /// A stored UTC timestamp (or null), or the fallback when unreadable.
 fn read_timestamp(value: &str, fallback: Option<DateTime<Utc>>) -> Option<DateTime<Utc>> {
     match serde_json::from_str::<Option<String>>(value) {
@@ -136,6 +151,7 @@ pub async fn load(conn: &mut SqliteConnection) -> Result<Settings> {
                 s.weekly_report_template =
                     read_weekly_report_template(&value, s.weekly_report_template)
             }
+            ZOOM => s.zoom = read_zoom(&value, s.zoom),
             _ => {}
         }
     }
@@ -178,6 +194,7 @@ pub async fn save_user_settings(conn: &mut SqliteConnection, s: &Settings) -> Re
     put(conn, CUSTOM_HOLIDAYS, &s.custom_holidays).await?;
     put(conn, REPORT_TEMPLATE, &s.report_template).await?;
     put(conn, WEEKLY_REPORT_TEMPLATE, &s.weekly_report_template).await?;
+    put(conn, ZOOM, &s.zoom).await?;
     Ok(())
 }
 
@@ -248,6 +265,7 @@ mod tests {
                 title: "{開始日}の週".into(),
                 ..WeeklyReportTemplate::default()
             },
+            zoom: 125,
         };
         save(&mut c, &s).await.unwrap();
         assert_eq!(load(&mut c).await.unwrap(), s);
@@ -308,8 +326,47 @@ mod tests {
                 ("soon_days".to_owned(), "5".to_owned()),
                 ("theme".to_owned(), r#""system""#.to_owned()),
                 ("tray_hint_shown".to_owned(), "true".to_owned()),
+                ("zoom".to_owned(), "125".to_owned()),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn zoom_is_one_of_the_levels() {
+        let (_pool, mut c) = conn().await;
+        // No row: 100.
+        assert_eq!(load(&mut c).await.unwrap().zoom, 100);
+        for (stored, zoom) in [
+            ("70", 70),
+            ("80", 80),
+            ("90", 90),
+            ("100", 100),
+            ("110", 110),
+            ("125", 125),
+            ("150", 150),
+            // Not one of the levels.
+            ("0", 100),
+            ("75", 100),
+            ("120", 100),
+            ("200", 100),
+            ("-80", 100),
+            // Unreadable.
+            ("125.0", 100),
+            ("1.25", 100),
+            (r#""125""#, 100),
+            ("null", 100),
+            ("[125]", 100),
+        ] {
+            sqlx::query(
+                "INSERT INTO settings (key, value) VALUES ('zoom', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            )
+            .bind(stored)
+            .execute(&mut *c)
+            .await
+            .unwrap();
+            assert_eq!(load(&mut c).await.unwrap().zoom, zoom, "{stored}");
+        }
     }
 
     #[tokio::test]

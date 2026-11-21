@@ -149,6 +149,10 @@ export const DEFAULT_REPORT_TEMPLATE = {"sections":[{"enabled":true,"heading":"�
 
 export const DEFAULT_WEEKLY_REPORT_TEMPLATE = {"sections":[{"enabled":true,"heading":"今週の作業","kind":"work","options":{"due_date":true,"log_body":false,"project_headings":true,"status":true,"total_time":true,"work_days":true,"work_time":true}},{"enabled":true,"heading":"今週完了・中止","kind":"closed","options":{"close_reason":true,"closed_date":true}},{"enabled":true,"heading":"待ち","kind":"waiting","options":{"follow_up_date":true,"waiting_days":true,"waiting_on":true}},{"enabled":true,"heading":"来週の予定","kind":"next_week","options":{"due_date":true,"planned_period":true}},{"enabled":true,"heading":"日限注意","kind":"attention","options":{"days":true,"follow_up_and_late_start":false,"waiting_mark":true}},{"enabled":true,"heading":"所感・連絡事項","kind":"note","options":{}}],"title":"週報 {開始日}〜{終了日}"} as const;
 
+export const DEFAULT_ZOOM = 100 as const;
+
+export const ZOOM_LEVELS = [70,80,90,100,110,125,150] as const;
+
 /* Types */
 export type AppError = {
 	kind: ErrorKind,
@@ -664,6 +668,8 @@ export type Settings = {
 	report_template: ReportTemplate,
 	/**  Sections, headings and items of the weekly report (v0.3.0). */
 	weekly_report_template: WeeklyReportTemplate,
+	/**  表示倍率 in percent, one of [`ZOOM_LEVELS`] (v0.4.0). Belongs to the PC. */
+	zoom: number,
 };
 
 /**
@@ -690,6 +696,8 @@ export type SettingsInput = {
 	report_template: ReportTemplate,
 	/**  Checked and saved as the daily one (v0.3.0). */
 	weekly_report_template: WeeklyReportTemplate,
+	/**  表示倍率 in percent: one of `ZOOM_LEVELS` (v0.4.0). */
+	zoom: number,
 };
 
 /**  What the startup reminder dialog shows. */

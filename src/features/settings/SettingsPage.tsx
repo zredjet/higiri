@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Alert, Button, Card, Checkbox, RadioGroup, Switch, Table, TextField } from "../../components/aizome";
+import { Alert, Button, Card, Checkbox, RadioGroup, Select, Switch, Table, TextField } from "../../components/aizome";
 import { DateField } from "../../components/DateField";
 import { PageHeader } from "../../components/PageHeader";
 import type {
@@ -31,12 +31,15 @@ import { ImportDialog } from "./ImportDialog";
 import { ReportTemplateCard } from "./ReportTemplateCard";
 import { RestoreDialog } from "./RestoreDialog";
 import { TodoTemplateCard } from "./TodoTemplateCard";
+import { ZOOM_DESCRIPTION, zoomOptions } from "./zoomText";
 
 const THEME_OPTIONS: Array<{ value: Theme; label: string }> = [
   { value: "light", label: "ライト" },
   { value: "dark", label: "ダーク" },
   { value: "system", label: "OSの設定に合わせる" },
 ];
+
+const ZOOM_OPTIONS = zoomOptions();
 
 const REMINDER_OPTIONS: Array<{ value: ReminderFrequency; label: string; description: string }> = [
   {
@@ -478,14 +481,25 @@ function DisplayCard() {
     <Card title="表示">
       {update.error ? <Alert tone="danger">{errorMessage(update.error)}</Alert> : null}
       {s ? (
-        <RadioGroup
-          label="配色"
-          name="theme"
-          orientation="horizontal"
-          options={THEME_OPTIONS}
-          value={s.theme}
-          onChange={(value) => update.mutate({ theme: value as Theme })}
-        />
+        <div className="settings-card__body">
+          <RadioGroup
+            label="配色"
+            name="theme"
+            orientation="horizontal"
+            options={THEME_OPTIONS}
+            value={s.theme}
+            onChange={(value) => update.mutate({ theme: value as Theme })}
+          />
+          {/* 表示倍率 (v0.4.0): Rust zooms the whole window as soon as it is saved. */}
+          <Select
+            className="settings-zoom"
+            label="表示倍率"
+            description={ZOOM_DESCRIPTION}
+            options={ZOOM_OPTIONS}
+            value={String(s.zoom)}
+            onChange={(e) => update.mutate({ zoom: Number(e.target.value) })}
+          />
+        </div>
       ) : null}
     </Card>
   );

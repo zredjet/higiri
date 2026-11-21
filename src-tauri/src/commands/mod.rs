@@ -90,6 +90,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             "DEFAULT_WEEKLY_REPORT_TEMPLATE",
             crate::domain::report_template::WeeklyReportTemplate::default(),
         )
+        // The 表示倍率 the settings screen offers (v0.4.0), and the default.
+        .constant("ZOOM_LEVELS", crate::domain::settings::ZOOM_LEVELS)
+        .constant("DEFAULT_ZOOM", crate::domain::settings::DEFAULT_ZOOM)
         // IDs and counts are i64; they stay far below 2^53 in this app.
         .dangerously_cast_bigints_to_number()
         // One TS type per Rust type (no separate *_Serialize / *_Deserialize).

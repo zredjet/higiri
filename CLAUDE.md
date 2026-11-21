@@ -85,14 +85,14 @@ SQLite(アプリのデータフォルダ内の todo.db)
 
   - 入力をそのまま入れる列(`waiting_on`、`follow_up_date`、`close_reason`)は、空に戻したときだけ `auto` に入る。入力した値は `waiting_on` / `follow_up_date` / `reason` のキーに入る。
   - 例: 作業中から待ちにした行は `{"waiting_on":"認証担当の回答","follow_up_date":"2026-11-20","auto":{"waiting_since":"2026-11-19"}}`。完了から再開した行は `{"auto":{"actual_end":null,"closed_at":null}}`。
-- `settings` は1キー1行で、値は JSON。キーは `reminder_frequency`(`"every_launch"` / `"once_per_day"`)、`soon_days`(数値)、`follow_up_days`(数値)、`last_reminded_on`(`"YYYY-MM-DD"` か `null`)、`theme`(`"light"` / `"dark"` / `"system"`)。読めない値は既定値として扱う。v1.1 で足したキーは「v1.1 の決めごと」に、v0.3.0 で足したキー(`weekly_report_template`)は「v0.3.0 の決めごと」にある。
+- `settings` は1キー1行で、値は JSON。キーは `reminder_frequency`(`"every_launch"` / `"once_per_day"`)、`soon_days`(数値)、`follow_up_days`(数値)、`last_reminded_on`(`"YYYY-MM-DD"` か `null`)、`theme`(`"light"` / `"dark"` / `"system"`)。読めない値は既定値として扱う。v1.1 で足したキーは「v1.1 の決めごと」に、v0.3.0 で足したキー(`weekly_report_template`)は「v0.3.0 の決めごと」に、v0.4.0 で足したキー(`zoom` など)は「v0.4.0 の決めごと」にある。
 - JSON の書き出し(フェーズ15)の表は、`projects`、`todos`、`work_logs`、`todo_events`、`reports`、`todo_templates`、`todo_repeats`、`todo_dependencies` の順(`json_data.rs` の `TABLES`)。`todo_events.note`、`todo_templates.body`、`todo_repeats.rule` と settings の値は、保存してある JSON の文をそのまま JSON の値として埋め込む。`schema_version` は v0.3.0 で2になった。取り込みでは、`schema_version` が1のファイル(v0.2.0 までの書き出し)は v0.3.0 の3つの表のキーがなくてよく(空として扱う)、2以上でどれかがなければ `Malformed`。
 - 接続のたびに外部キー制約を有効にし、WALモードにする。
 - 適用済みのマイグレーションファイルは書き換えない。変更は新しいファイルを足す。
 - DBへの接続なしで `cargo build` が通る構成にする(`query!` 系マクロを使うなら `cargo sqlx prepare` の成果物をコミットする)。
 - バックアップは `VACUUM INTO` で作る。WALモードのDBファイルを単純コピーしない。
 - バックアップは `src-tauri/src/backup.rs`。データフォルダの `backups/` に、その日最初の起動時に `todo-YYYY-MM-DD.db` を作り、新しい順に7個残す(起動しなかった日は数えない)。常駐中に日付が変わったときも、常駐のタイマーが `backup::run_daily` でその日のバックアップを作る(`notifier::backup_if_new_day`。1日1個、7個残すのは同じ)。復元と JSON の取り込み(フェーズ15)の前には今のデータを `before-restore-<UTC日時>.db` に退避し、新しい順に3個残す。退避も復元の一覧に「復元・取り込みの前の状態」として出し、復元と取り込みを取り消せるようにする。
-- 復元は、選んだバックアップの作業用コピーを検査してマイグレーションを当ててから、`ATTACH` して全テーブルの行を1トランザクションで入れ替える(接続プールを開いたまま、再起動なしで済む)。新しい版のアプリで作ったバックアップと、壊れたファイルは復元しない。`autostart`、`last_notified_at`、`tray_hint_shown`、`last_reminded_on`(`repo::settings::KEPT_ON_REPLACE`)は、入れ替えの同じトランザクションの中で今の値に戻す(今ない値は、入れ替えたあともない)。退避・行の入れ替え・古い退避の削除は `backup::keep_and_replace`(行の入れ替えは中の `backup::copy_rows`)で、フェーズ15の JSON の取り込みも同じ関数を使う。入れ替える表は `backup.rs` の `DELETE_CHILD_FIRST` と `INSERT_PARENT_FIRST` に並べる(9つすべて)。v0.3.0 の表は、消すのは `todo_dependencies`、`todo_repeats` を `todos` より先、入れるのは `todos` より後(`todo_templates` はほかの表を指さない)。v0.2.0 までのバックアップは、作業用のコピーにマイグレーションを当てるので、3つの表が空になって復元される。復元のあとは `restore_backup` の `#[tauri::command]` の層で `resident::apply` を呼び、×ボタンの動きとタイマーの待ち時間を復元した設定に合わせる。
+- 復元は、選んだバックアップの作業用コピーを検査してマイグレーションを当ててから、`ATTACH` して全テーブルの行を1トランザクションで入れ替える(接続プールを開いたまま、再起動なしで済む)。新しい版のアプリで作ったバックアップと、壊れたファイルは復元しない。`autostart`、`last_notified_at`、`tray_hint_shown`、`last_reminded_on`、`zoom`(v0.4.0。`repo::settings::KEPT_ON_REPLACE`)は、入れ替えの同じトランザクションの中で今の値に戻す(今ない値は、入れ替えたあともない)。退避・行の入れ替え・古い退避の削除は `backup::keep_and_replace`(行の入れ替えは中の `backup::copy_rows`)で、フェーズ15の JSON の取り込みも同じ関数を使う。入れ替える表は `backup.rs` の `DELETE_CHILD_FIRST` と `INSERT_PARENT_FIRST` に並べる(9つすべて)。v0.3.0 の表は、消すのは `todo_dependencies`、`todo_repeats` を `todos` より先、入れるのは `todos` より後(`todo_templates` はほかの表を指さない)。v0.2.0 までのバックアップは、作業用のコピーにマイグレーションを当てるので、3つの表が空になって復元される。復元のあとは `restore_backup` の `#[tauri::command]` の層で `resident::apply` を呼び、×ボタンの動きとタイマーの待ち時間を復元した設定に合わせる。
 
 ## 画面の決めごと
 
@@ -254,7 +254,7 @@ v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作った�
     - 書き出し: 表(v0.3.0 からは8つ)と settings を1つのトランザクションで読む。保存先と同じフォルダの `<名前>.part` に書いてから名前を変え、失敗したら `.part` を消す(途中までのファイルを残さない)。JSON として読めない settings の値は書き出さない(アプリは既定値として読むので、取り込んでも同じになる)。JSON として読めない `note` は文字列として書き出す(アプリが書くことはない。その行は取り込みで「読めない値」として断られる)。
     - 取り込みの順: (1) 先頭の BOM を除く。(2) 先頭の項目だけを読む(ほかのキーも構文は確かめる)。JSON として読めなければ `NotJson`、`format` が違えば `NotOurs`、`format_version` が1より大きいか `schema_version` がこの版の最新より大きければ `TooNew`、版の値がおかしければ `Malformed`。(3) 5つの表と settings を読む(どれかがなければ `Malformed`。ほかのキーは無視。v0.3.0 の3つの表は `schema_version` が2以上のときだけ要る)。(4) `backups/import-work.db` を作り、ファイルの `schema_version` までマイグレーションを当てて(`MIGRATOR.run_to`)、外部キーを遅らせた1つのトランザクションで行を入れる。列は作業用の DB の `pragma_table_info` と照らし、知らない列と型の違う値(INTEGER の列に整数以外、TEXT の列に文字列以外)は `Malformed`。ない列は表の既定値になる。外部キー・CHECK・NOT NULL・主キーの重複は `Constraint`。(5) 残りのマイグレーションを当て、アプリの読み取り(`repo::projects::list`、`repo::todos::list`、`repo::work_logs::list_all`、`repo::events::list_all`、`repo::reports::list_all`。v0.3.0 で `repo::templates::list`、`repo::repeats::list`、`repo::dependencies::list` を足した)で全行を読み直す。読めない値(日付の書き方、ステータス名、優先度、変更履歴の種類と `note` の形、テンプレートの `body` と周期の `rule`)は `Unreadable`。(6) `backup::keep_and_replace` で退避して入れ替える。断ったときは退避も入れ替えもせず、作業用の DB は成否にかかわらず消す。
     - 行は同じ列の並びが続く間、1つの INSERT にまとめる(1文の値は4,000個まで)。ID はファイルの値のまま入れる。`AUTOINCREMENT` の表はない(`sqlite_sequence` もない)ので、取り込んだあとの新しい行は今ある最大の ID の次になる。
-    - settings: ファイルの値をそのまま入れる。知らないキーも残し(アプリは無視する)、読めない値も残す(アプリは既定値として読む。DB のときと同じ)。`KEPT_ON_REPLACE` の4つは `copy_rows` が今の値に戻す。
+    - settings: ファイルの値をそのまま入れる。知らないキーも残し(アプリは無視する)、読めない値も残す(アプリは既定値として読む。DB のときと同じ)。`KEPT_ON_REPLACE` の4つ(v0.4.0 で `zoom` を足して5つ)は `copy_rows` が今の値に戻す。
     - エラーの文は `commands/json_data.rs` の `import_error`。断ったときは「〜ため、取り込めませんでした。今のデータは変わっていません。」に、どうすればよいか(「Higiriの「JSONで書き出す」で作ったファイルを選んでください。」「アプリを新しい版にしてから取り込んでください。」「書き出したあとに手で直した所があれば元に戻すか、書き出し直したファイルを選んでください。」)を続ける。
     - ダイアログは .md の保存と同じく `spawn_blocking` で開く(保存は `blocking_save_file`、既定の名前は `higiri-YYYY-MM-DD.json`。取り込みは `blocking_pick_file`)。どちらも JSON の絞り込みを付ける。選ばずに閉じたら `null` を返し、何もしない。`export_data` は保存先のパス、`import_data` はファイル名を返す。取り込みのあとは `resident::apply` を呼ぶ(復元と同じ)。
     - 動作ログ: 書き出しと取り込みをしたこと、取り込みで作った退避のファイル名、断った理由の種類(読めない値は列の名前まで)だけを書く(件数・中身・パスは書かない。`ImportError` は値を持たない)。
@@ -451,6 +451,22 @@ v0.4.0 は `docs/implementation-plan-v0.4.0.md` のフェーズ25〜30で作る�
 - 後続TODOのずらしは「足りない分だけ」(利用者が決定)。入口はガントのドラッグだけ。動かすのは予定期間だけで、日限は動かさない。計算は `domain/` の純粋関数で、確認と保存で同じ関数を使い、保存のときに計算し直す。
 - 一括変更で変えられないものは、確認の時点で理由を示して除き、残りで進める(利用者が決定)。保存の途中の想定外の失敗だけは全体を断る。ステータスは1件ずつ今の遷移を通す(子も閉じ、繰り返しの次の回も作る)。待ちと削除は入れない。先行TODOが終わっていないTODOを作業中にするときの確認は、一括変更のダイアログの確認の欄で出す。
 - ずらす日数は、後続のずらしも一括変更も暦日で数える(ガントのドラッグと同じ)。
+- 表示倍率(フェーズ26)
+  - コマンドは足していない(41個のまま)。`update_settings` が `SettingsInput.zoom` を受け取る。
+  - 作ったもの(フェーズ26)
+    - `domain/settings.rs`: `Settings.zoom`(百分率)、`ZOOM_LEVELS`(`[70, 80, 90, 100, 110, 125, 150]`)、`DEFAULT_ZOOM`(100)、`is_zoom_level`、`zoom_factor`(100 → 1.0)。`ZOOM_LEVELS` と `DEFAULT_ZOOM` は tauri-specta の `constant` で `bindings.ts` に出す(`commands::specta_builder`)。画面の選択肢はこれから作る。
+    - `repo::settings`: キー `zoom`。一覧にない値と読めない値(`125.0`、`"125"`、`null` など)は既定値の100として読む(`read_zoom`)。`save_user_settings` が書く。`KEPT_ON_REPLACE` は5つ(`zoom` を足した)。
+    - `commands/settings.rs`: 一覧にない値は「表示倍率は一覧から選んでください。」で断る(ほかの設定の検査のあと、保存の前)。
+    - 反映: `resident.rs` の `Zoom`(今の倍率を `AtomicU32` で持つ managed state)、`apply_zoom`(メインのウィンドウの webview に `set_zoom(zoom_factor(..))`)。`resident::apply`(`update_settings`、復元、取り込みのあと)は、倍率が変わったときだけ当て直す。起動時は setup で設定を読んだ直後(ウィンドウを出す前)に当てる。さらに、メインの webview のページの読み込みが終わるたびに当て直す(`lib.rs` の `on_page_load` → `resident::on_page_loaded`。WebView2 はサイトごとに倍率を覚え、ページの読み込みで戻すことがあるため)。当てられなかったときは動作ログに書くだけ。
+    - Ctrl+ホイールなど WebView の標準の拡大・縮小は今までどおり効かない(`zoomHotkeysEnabled` は既定の false のまま)。`npm run dev:web` では倍率は効かない。
+    - macOS(WKWebView の `pageZoom`)では、倍率を上げると CSS の幅が減って並びが組み直されることを確かめた(150%・幅1280でダッシュボードの件数のカードが5列から3列+2列に折り返す)。Windows(WebView2 の `ICoreWebView2Controller::put_ZoomFactor`)はブラウザの拡大と同じ仕組みで、`devicePixelRatio` が変わって組み直される(実機ではまだ見ていない)。
+    - 画面: 設定の「表示」のカードの「配色」の下に「表示倍率」の `Select`(`src/features/settings/zoomText.ts` の `zoomOptions`。「70%」〜「150%」、100は「100%(標準)」。説明は `ZOOM_DESCRIPTION`。Vitest あり)。選んだらすぐ `useUpdateSettings` で保存し、Rust が反映する。`settingsInputOf` に `zoom` を足した。
+    - 幅の備え(`src/styles/app.css`。Aizome の写しは変えていない): 150% では幅1280のウィンドウが853px、最小の960×600が640×400px 相当になる。
+      - `.app__main > *` に `min-width: 528px`(ガントの名前の欄302pxと1週間分の日付)。それより狭いと `.app__main`(`overflow: auto`)の中で横にスクロールする。サイドナビと詳細パネルは動かない。
+      - 1280px 未満(`max-width: 1279.98px`)では、詳細パネルを右に重ねて出す(`position: absolute`、幅440px、`max-width: calc(100% - サイドナビの幅)`、`--shadow-lg`、`z-index` はガントの見出しの sticky より1つ上)。並べて出すと一覧とガントが数列分しか残らないため。TODO一覧の表には `min-width: 840px` を付け、セルを何行にも折らずに表の枠の中で横にスクロールさせる(ダッシュボードの日限注意の表は、もとから横にスクロールする)。表の外側の要素に `todo-table` のクラスを足した(`TodoTable.tsx`)。1280px 以上(100%の既定の大きさ)は今までと同じ(パネルは横に並び、一覧の列は詰まる)。
+      - ガントの画面(`.app__main--fill`)は `overflow: hidden` をやめた。高さが足りないとき(150%では見出し・絞り込み・凡例で半分ほどを使う)は画面が縦にスクロールし、ガントは `min-height: 240px` を保つ。
+      - 起動時リマインドの一覧(`max(88px, min(400px, 50vh, 100vh - 300px))`)、検索の結果(`max(96px, min(480px, 55vh, 100vh - 250px))`)、先行TODOの選択の結果(`max(96px, min(320px, 100vh - 330px))`)は、背の低いウィンドウでは一覧の高さを先に縮める。「確認しました」などのボタンが、ダイアログの中をスクロールしなくても見えるようにするため。ほかのダイアログは、Aizome のとおり画面の高さを超えると中がスクロールする。
+      - 画面を切り替えたら `.app__main` のスクロールを左上に戻す(`App.tsx`)。画面どうしで同じ要素を使うので、前の画面のスクロールが残り、ガントの期間のボタンなどが上に隠れたまま開くことがあったため。
 
 ## 品質の決めごと
 

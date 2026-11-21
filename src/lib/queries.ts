@@ -109,6 +109,7 @@ export function settingsInputOf(s: Settings): SettingsInput {
     custom_holidays: s.custom_holidays,
     report_template: s.report_template,
     weekly_report_template: s.weekly_report_template,
+    zoom: s.zoom,
   };
 }
 

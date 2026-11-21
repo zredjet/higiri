@@ -9,14 +9,18 @@
 //!   nothing could bring the window back.
 //! - The first time × hides the window, a notification says so once
 //!   (`tray_hint_shown`), even with the notifications turned off.
+//! - 表示倍率 (v0.4.0): the main window's webview is zoomed as a whole
+//!   (`set_zoom`), before the window is first shown, whenever the setting
+//!   changes, and again after every page load (WebView2 keeps a zoom factor
+//!   per site and may reset it when a page loads).
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use sqlx::SqlitePool;
-use tauri::{AppHandle, CloseRequestApi, Manager, Runtime, Window};
+use tauri::{AppHandle, CloseRequestApi, Manager, Runtime, Webview, Window};
 
 use crate::domain::notify;
-use crate::domain::settings::Settings;
+use crate::domain::settings::{Settings, zoom_factor};
 use crate::notifier::{self, Notifier};
 use crate::repo;
 
@@ -56,6 +60,40 @@ impl CloseBehavior {
     }
 }
 
+/// The 表示倍率 of the main window in percent, kept in step with the settings
+/// (managed state), so that a page load can apply it again.
+pub struct Zoom(AtomicU32);
+
+impl Zoom {
+    pub fn new(settings: &Settings) -> Zoom {
+        Zoom(AtomicU32::new(settings.zoom))
+    }
+}
+
+/// Zooms the main window's webview to the 表示倍率 in [`Zoom`].
+pub fn apply_zoom<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(w) = app.get_webview_window(MAIN_WINDOW) {
+        zoom_webview(app, w.as_ref());
+    }
+}
+
+/// A page finished loading in a webview: the main one gets its zoom again.
+pub fn on_page_loaded<R: Runtime>(webview: &Webview<R>) {
+    if webview.label() == MAIN_WINDOW {
+        zoom_webview(webview.app_handle(), webview);
+    }
+}
+
+fn zoom_webview<R: Runtime>(app: &AppHandle<R>, webview: &Webview<R>) {
+    let Some(zoom) = app.try_state::<Zoom>() else {
+        return;
+    };
+    let percent = zoom.0.load(Ordering::Relaxed);
+    if let Err(e) = webview.set_zoom(zoom_factor(percent)) {
+        log::error!("zoom {percent}% could not be applied: {e}");
+    }
+}
+
 /// Brings the main window back: restore from minimized, show, focus.
 pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
     if let Some(w) = app.get_webview_window(MAIN_WINDOW) {
@@ -65,9 +103,10 @@ pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-/// Applies saved settings to the running app: what × does, and the resident
-/// timer's settings (it keeps them in memory and computes its wait again).
-/// Called after update_settings and after a restore replaced the settings.
+/// Applies saved settings to the running app: what × does, the resident
+/// timer's settings (it keeps them in memory and computes its wait again) and
+/// the 表示倍率 (only when it changed). Called after update_settings and after
+/// a restore replaced the settings (which keeps the 表示倍率).
 pub fn apply<R: Runtime>(app: &AppHandle<R>, settings: &Settings) {
     if let Some(close) = app.try_state::<CloseBehavior>() {
         close
@@ -76,6 +115,11 @@ pub fn apply<R: Runtime>(app: &AppHandle<R>, settings: &Settings) {
     }
     if let Some(notifier) = app.try_state::<Notifier>() {
         notifier.update(settings);
+    }
+    if let Some(zoom) = app.try_state::<Zoom>()
+        && zoom.0.swap(settings.zoom, Ordering::Relaxed) != settings.zoom
+    {
+        apply_zoom(app);
     }
 }
 

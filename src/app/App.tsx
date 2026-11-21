@@ -59,6 +59,17 @@ export default function App() {
     }
   }, [dashboard.data]);
 
+  // Each screen opens at its top-left. The content area is shared by the
+  // screens, and with a large 表示倍率 most of them scroll (the Gantt chart's
+  // period buttons would stay scrolled out of view).
+  const main = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (main.current) {
+      main.current.scrollTop = 0;
+      main.current.scrollLeft = 0;
+    }
+  }, [route]);
+
   const currentProjectId = route.page === "todos" ? route.projectId : null;
   const openNewTodo = useCallback(() => setNewTodo({ projectId: currentProjectId }), [currentProjectId]);
 
@@ -137,7 +148,7 @@ export default function App() {
         />
       </div>
 
-      <main className={route.page === "gantt" ? "app__main app__main--fill" : "app__main"}>
+      <main ref={main} className={route.page === "gantt" ? "app__main app__main--fill" : "app__main"}>
         {projects.error ? <Alert tone="danger">{errorMessage(projects.error)}</Alert> : null}
         {route.page === "dashboard" && <DashboardPage onOpenTodo={setOpenTodoId} onAddTodo={openNewTodo} />}
         {route.page === "todos" && (

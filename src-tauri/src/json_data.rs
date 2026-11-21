@@ -806,6 +806,7 @@ mod tests {
                 theme: Theme::Dark,
                 notify_times: vec!["08:30".into()],
                 autostart: true,
+                zoom: 150,
                 ..SettingsInput::from(&Settings::default())
             },
         )
@@ -970,6 +971,7 @@ mod tests {
         assert!(note.is_object(), "{note}");
         assert_eq!(v["settings"]["theme"], "dark");
         assert_eq!(v["settings"]["notify_times"], json!(["08:30"]));
+        assert_eq!(v["settings"]["zoom"], 150);
         assert_eq!(v["settings"]["last_reminded_on"], "2026-11-18");
         assert!(text.contains(r#""future_key": {"b":1,"a":[2]}"#), "{text}");
         let stored_note: (String,) =
@@ -1110,6 +1112,7 @@ mod tests {
             SettingsInput {
                 autostart: false,
                 theme: Theme::Light,
+                zoom: 80,
                 ..SettingsInput::from(&Settings::default())
             },
         )
@@ -1132,6 +1135,8 @@ mod tests {
         assert_eq!(kept(&after), kept(&before));
         let read = cmd_settings::get(&dst).await.unwrap();
         assert!(!read.autostart);
+        // The file has 150%.
+        assert_eq!(read.zoom, 80);
         assert_eq!(read.last_reminded_on, Some(d("2026-11-19")));
         assert_eq!(read.last_notified_at, Some(ts(2026, 11, 19, 0, 0)));
         assert!(!read.tray_hint_shown);

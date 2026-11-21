@@ -62,11 +62,27 @@ pub struct Settings {
     pub report_template: ReportTemplate,
     /// Sections, headings and items of the weekly report (v0.3.0).
     pub weekly_report_template: WeeklyReportTemplate,
+    /// 表示倍率 in percent, one of [`ZOOM_LEVELS`] (v0.4.0). Belongs to the PC.
+    pub zoom: u32,
 }
 
 pub const DEFAULT_SOON_DAYS: u32 = 3;
 pub const DEFAULT_FOLLOW_UP_DAYS: u32 = 3;
 pub use super::notify::DEFAULT_TIMES as DEFAULT_NOTIFY_TIMES;
+
+/// 表示倍率 the settings screen offers, in percent (v0.4.0).
+pub const ZOOM_LEVELS: [u32; 7] = [70, 80, 90, 100, 110, 125, 150];
+pub const DEFAULT_ZOOM: u32 = 100;
+
+/// Whether `zoom` is one of [`ZOOM_LEVELS`].
+pub fn is_zoom_level(zoom: u32) -> bool {
+    ZOOM_LEVELS.contains(&zoom)
+}
+
+/// The webview's scale factor for a 表示倍率 in percent (100 → 1.0).
+pub fn zoom_factor(zoom: u32) -> f64 {
+    f64::from(zoom) / 100.0
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -86,6 +102,7 @@ impl Default for Settings {
             custom_holidays: Vec::new(),
             report_template: ReportTemplate::default(),
             weekly_report_template: WeeklyReportTemplate::default(),
+            zoom: DEFAULT_ZOOM,
         }
     }
 }
@@ -112,5 +129,19 @@ mod tests {
         assert!(s.custom_holidays.is_empty());
         assert_eq!(s.report_template, ReportTemplate::default());
         assert_eq!(s.weekly_report_template, WeeklyReportTemplate::default());
+        assert_eq!(s.zoom, 100);
+    }
+
+    #[test]
+    fn zoom_levels_are_those_of_the_design() {
+        assert_eq!(ZOOM_LEVELS, [70, 80, 90, 100, 110, 125, 150]);
+        assert!(is_zoom_level(DEFAULT_ZOOM));
+        for z in [0, 60, 75, 100 + 1, 120, 175, 200] {
+            assert!(!is_zoom_level(z), "{z}");
+        }
+        assert_eq!(zoom_factor(100), 1.0);
+        assert_eq!(zoom_factor(70), 0.7);
+        assert_eq!(zoom_factor(125), 1.25);
+        assert_eq!(zoom_factor(150), 1.5);
     }
 }
