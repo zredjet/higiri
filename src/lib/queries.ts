@@ -88,10 +88,12 @@ export function useArchiveProject() {
 }
 
 export function useDeleteProject() {
+  const qc = useQueryClient();
   const invalidate = useInvalidateProjectData();
   return useMutation({
     mutationFn: (id: number) => commands.deleteProject(id),
-    onSuccess: invalidate,
+    // Deleting a project also takes its id out of cli_hidden_projects (v0.5.0).
+    onSuccess: () => Promise.all([invalidate(), qc.invalidateQueries({ queryKey: queryKeys.settings })]),
   });
 }
 

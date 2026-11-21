@@ -1359,6 +1359,11 @@ input[type="date"][data-empty="true"]:not(:focus) {
   overflow-wrap: anywhere;
 }
 
+/* CLIに出すプロジェクト (v0.5.0): the switch at the right of its cell, under the column's name. */
+.cli-projects__switch {
+  justify-content: flex-end;
+}
+
 /* 表示: the 表示倍率 select is as wide as its longest label needs. */
 .settings-zoom .az-select {
   width: 200px;

@@ -6,9 +6,12 @@ import "./components/aizome/tokens.css";
 import "./components/aizome/aizome.css";
 import "./styles/app.css";
 import App from "./app/App";
+import { refetchOnFront } from "./lib/front";
 import { installGlobalErrorLogging } from "./lib/log";
 
 installGlobalErrorLogging();
+// Also when the window is clicked after using higiri-cli in a terminal beside it (v0.5.0).
+refetchOnFront();
 
 // Commands are local and either work or fail for a reason retrying will not fix.
 // They never use the network, so going offline must not pause loading or saving.

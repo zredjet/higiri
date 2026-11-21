@@ -37,6 +37,7 @@ import {
   mirrorLastOkText,
   restoredFileText,
 } from "./backupText";
+import { CLI_PROJECTS_TEXT, cliProjectRows, cliSwitchLabel, hiddenAfter, type CliProjectRow } from "./cliProjects";
 import { ImportDialog } from "./ImportDialog";
 import { ReportTemplateCard } from "./ReportTemplateCard";
 import { RestoreDialog } from "./RestoreDialog";
@@ -70,6 +71,15 @@ const DAY_COUNT_OPTIONS: Array<{ value: DayCount; label: string; description: st
   },
 ];
 
+/**
+ * The リマインド card starts its number fields again from the saved values when these change (a save, a
+ * restore), not on every load of the settings: they are loaded again whenever the window comes to the front
+ * (v0.5.0), which would drop a number not saved yet.
+ */
+function reminderKey(s: Settings): string {
+  return `${s.soon_days}/${s.follow_up_days}`;
+}
+
 /** A development build (`tauri dev`) never registers itself to start at login. */
 const DEV_BUILD = import.meta.env.DEV;
 
@@ -79,7 +89,7 @@ export function SettingsPage() {
   return (
     <div className="settings-page">
       <PageHeader title="設定" actions={<span className="text-caption">変更はすぐに保存されます</span>} />
-      {settings.data ? <ReminderCard key={settings.dataUpdatedAt} settings={settings.data} /> : null}
+      {settings.data ? <ReminderCard key={reminderKey(settings.data)} settings={settings.data} /> : null}
       {settings.data ? <DayCountCard settings={settings.data} /> : null}
       {settings.data ? <ResidentCard settings={settings.data} /> : null}
       {settings.data ? <ReportTemplateCard kind="daily" template={settings.data.report_template} /> : null}
@@ -87,6 +97,7 @@ export function SettingsPage() {
       <TodoTemplateCard />
       <DisplayCard />
       <DataCard settings={settings.data} />
+      {settings.data ? <CliProjectsCard settings={settings.data} /> : null}
       <ArchivedProjectsCard />
     </div>
   );
@@ -573,6 +584,65 @@ function DisplayCard() {
           />
         </div>
       ) : null}
+    </Card>
+  );
+}
+
+/**
+ * CLIに出すプロジェクト (v0.5.0, A-1): which projects higiri-cli shows (`cli_hidden_projects`). Every project
+ * is shown at first, a new one too. A switch saves at once, as the other switches do.
+ */
+function CliProjectsCard({ settings }: { settings: Settings }) {
+  const projects = useProjects(true);
+  const update = useUpdateSettings();
+  const rows = cliProjectRows(projects.data ?? [], settings.cli_hidden_projects);
+  const error = projects.error ?? update.error;
+
+  return (
+    <Card title={CLI_PROJECTS_TEXT.title} description={CLI_PROJECTS_TEXT.description}>
+      <div className="settings-card__body settings-card__body--tight">
+        {error ? <Alert tone="danger">{errorMessage(error)}</Alert> : null}
+        {rows.length > 0 ? (
+          <Table<CliProjectRow>
+            rows={rows}
+            density="compact"
+            columns={[
+              {
+                key: "name",
+                header: "プロジェクト",
+                render: (r) => (
+                  <>
+                    {r.name}
+                    {r.archived ? <span className="text-muted">{CLI_PROJECTS_TEXT.archived}</span> : null}
+                  </>
+                ),
+              },
+              {
+                key: "shown",
+                header: CLI_PROJECTS_TEXT.column,
+                align: "right",
+                width: 120,
+                render: (r) => (
+                  <Switch
+                    className="cli-projects__switch"
+                    aria-label={cliSwitchLabel(r.name)}
+                    checked={r.shown}
+                    disabled={update.isPending}
+                    onChange={(on) =>
+                      update.mutate((current) => ({
+                        cli_hidden_projects: hiddenAfter(current.cli_hidden_projects, r.id, on),
+                      }))
+                    }
+                  />
+                ),
+              },
+            ]}
+          />
+        ) : projects.isSuccess ? (
+          <p className="settings-card__text text-muted">{CLI_PROJECTS_TEXT.empty}</p>
+        ) : null}
+        <p className="settings-card__text">{CLI_PROJECTS_TEXT.note}</p>
+      </div>
     </Card>
   );
 }

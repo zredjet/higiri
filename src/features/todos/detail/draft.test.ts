@@ -63,6 +63,16 @@ describe("mergeDraft", () => {
     expect(mergeDraft(dragged, draft, touched("due_date")).due_date).toBeNull();
   });
 
+  it("keeps the memo being typed when higiri-cli changed the TODO and the window came back (v0.5.0)", () => {
+    // `higiri-cli update 3 --due 2026-12-04 --title …`, then the TODO is loaded again on focus.
+    const changedByCli = { ...SAVED, due_date: "2026-12-04", title: "移行手順書(第2版)" };
+    const draft = { ...SAVED, memo_md: "打っている途中" };
+    expect(mergeDraft(changedByCli, draft, touched("memo_md"))).toEqual({
+      ...changedByCli,
+      memo_md: "打っている途中",
+    });
+  });
+
   it("sends only the panel's edits on top of the TODO as saved now", () => {
     // The panel opened before the drag and saves its memo after it: the
     // dragged span stays.

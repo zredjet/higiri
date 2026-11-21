@@ -1,4 +1,4 @@
-# macOS (Apple Silicon): Higiri.app in a ZIP (no disk image; unzip and run).
+# macOS (Apple Silicon): Higiri.app, with higiri-cli inside, in a ZIP (no disk image; unzip and run).
 # Start it from the Actions tab ("Run workflow"). Releases come from release.yml.
 # The ZIP is attached to the run as is (Higiri_<version>_macos_arm64.zip).
 # The app is ad-hoc signed only (no Apple Developer ID), so macOS asks for
