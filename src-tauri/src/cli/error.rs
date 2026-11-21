@@ -137,6 +137,25 @@ impl CliError {
         )
     }
 
+    /// `install-skill` could not write `path` (phase 35).
+    pub fn skill_not_written(path: &std::path::Path) -> CliError {
+        CliError::new(
+            CliErrorKind::Internal,
+            format!(
+                "Skill を書けませんでした({})。書き込めるフォルダか確かめてから、もう一度実行してください。",
+                path.display()
+            ),
+        )
+    }
+
+    /// `install-skill` found neither `CLAUDE_CONFIG_DIR` nor a home folder.
+    pub fn no_home_folder() -> CliError {
+        CliError::new(
+            CliErrorKind::Internal,
+            "ホームフォルダの場所が分からないため、Skill を書けませんでした。Claude Code の設定フォルダを環境変数 CLAUDE_CONFIG_DIR に入れてから、もう一度実行してください。",
+        )
+    }
+
     /// The JSON line for standard error.
     pub fn to_line(&self) -> String {
         serde_json::to_string(&Written { error: self }).unwrap_or_else(|_| {

@@ -9,6 +9,8 @@
 //!   there is no SQL here. The clock is read here, with `commands::clock`.
 //! - Before a write, today's daily backup is taken unless it is there
 //!   (`write`). The read sub-commands take none.
+//! - `install-skill` (phase 35) writes the Claude Code Skill built into the
+//!   CLI (`skill`) and opens no database.
 //! - Success: one JSON object on standard output, exit code 0. Refusal or
 //!   failure: `{"error":{"kind","message"}}` on standard error, exit code 1.
 //!   Wrong arguments: clap's message, exit code 2.
@@ -17,6 +19,7 @@ pub mod args;
 pub mod error;
 pub mod output;
 pub mod read;
+pub mod skill;
 pub mod write;
 
 use std::io::Write;
@@ -54,19 +57,26 @@ pub fn main() -> ExitCode {
             return ExitCode::from(u8::try_from(e.exit_code()).unwrap_or(2));
         }
     };
-    let result = match (
-        write::read_body(&mut cli.command, &mut std::io::stdin().lock()),
-        data_folder(cli.dev),
-    ) {
-        (Err(e), _) => Err(e),
-        (Ok(()), None) => Err(CliError::no_data_folder()),
-        (Ok(()), Some(dir)) => match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime.block_on(run(&cli.command, &dir, clock::today(), clock::now())),
-            Err(_) => Err(CliError::internal()),
-        },
+    let result = if cli.command == Command::InstallSkill {
+        // A file to write, no data: it works before the app has made any.
+        skill::install_for_user().and_then(json)
+    } else {
+        match (
+            write::read_body(&mut cli.command, &mut std::io::stdin().lock()),
+            data_folder(cli.dev),
+        ) {
+            (Err(e), _) => Err(e),
+            (Ok(()), None) => Err(CliError::no_data_folder()),
+            (Ok(()), Some(dir)) => match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => {
+                    runtime.block_on(run(&cli.command, &dir, clock::today(), clock::now()))
+                }
+                Err(_) => Err(CliError::internal()),
+            },
+        }
     };
     let reply = Reply::of(result);
     // Nothing to do when the reader went away (a closed pipe).
@@ -157,6 +167,8 @@ async fn dispatch(
         Command::AppendMemo(args) => {
             json(write::append_memo(pool, data_dir, args, today, now).await?)
         }
+        // `main` runs it without opening the database; here for the match.
+        Command::InstallSkill => json(skill::install_for_user()?),
     }
 }
 

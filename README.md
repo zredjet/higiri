@@ -129,6 +129,12 @@ Claude Code などから `higiri-cli` の名前で呼べるように、CLI の�
 | `higiri-cli log <id>` | 作業ログを足します |
 | `higiri-cli append-memo <id>` | メモの末尾に書き足します。メモの書き換えと削除はできません |
 
+**そのほか**
+
+| サブコマンド | 中身 |
+| --- | --- |
+| `higiri-cli install-skill` | Claude Code の Skill を入れます(下の「Claude Code で使う」) |
+
 - 引数の詳しい書き方は、`higiri-cli --help` と `higiri-cli <サブコマンド> --help` で見られます。
 - TODO と作業ログの削除、バックアップからの復元、JSON の取り込み、設定の変更、プロジェクトの作成と編集は、CLI ではできません。アプリの画面で行ってください。
 - 書き込む前に、その日のバックアップがまだなければ作ります。
@@ -137,9 +143,32 @@ Claude Code などから `higiri-cli` の名前で呼べるように、CLI の�
 
 ### Claude Code で使う
 
-`higiri-cli install-skill` を実行すると、Claude Code の Skill(`higiri`)が入ります(v0.5.0 で使えます)。Claude Code に「今日なにをやればいい?」と聞くと、TODO を読んで、やる作業を理由を添えて提案します。TODO を読むときは確認なしに動き、TODO を足す・変える・作業ログを付けるときは、毎回 Claude Code が確かめてから行います。
+`higiri-cli install-skill` を実行すると、Claude Code の Skill(`higiri`)が `~/.claude/skills/higiri/SKILL.md` に入ります(環境変数 `CLAUDE_CONFIG_DIR` を設定しているときは、その下の `skills/higiri/`)。すでにあれば上書きします。Higiri を新しい版にしたときも、もう一度実行してください。
 
-作業ログを付けるプロジェクトは、リポジトリの `CLAUDE.md` に `Higiri のプロジェクト: 社内ツール整備` のような1行を書いておくと、そのプロジェクトの TODO から選びます。
+Claude Code に「今日なにをやればいい?」と聞くと、TODO を読んで、やる作業を理由を添えて3〜5件提案します。「この作業を TODO のログに付けて」「これを完了にして」のように頼むと、TODO を足す・変える・作業ログを付けることもできます。
+
+- Claude Code が Skill を使うときに、Skill を実行してよいかの確認が出ます。Skill を使ったその依頼の中では、TODO を読むコマンド(`today`、`list`、`show`、`search`、`projects`)は確認なしに動きます。同じ会話の次の依頼からは、読むたびにも確認が出ます。
+- TODO を足す・変える、作業ログを付ける、メモに書き足すときは、毎回 Claude Code の確認が出ます。作業ログ、TODO の追加、メモへの書き足しは、Claude Code が本文や項目を見せて確かめてから行います。
+- 作業ログを付けるプロジェクトは、リポジトリの `CLAUDE.md` に `Higiri のプロジェクト: 社内ツール整備` のような1行を書いておくと、そのプロジェクトの TODO から選びます。
+
+Skill の実行と読むときの確認をなくしたいときは、`~/.claude/settings.json` の `permissions.allow` に次の行を足します(すでに `permissions.allow` があれば、その中に足します)。書くサブコマンド(`add`、`update`、`status`、`log`、`append-memo`)は足さないでください。足すと、確認なしに TODO が変わるようになります。
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Skill(higiri)",
+      "Bash(higiri-cli today *)",
+      "Bash(higiri-cli list *)",
+      "Bash(higiri-cli show *)",
+      "Bash(higiri-cli search *)",
+      "Bash(higiri-cli projects *)"
+    ]
+  }
+}
+```
+
+`show` の行を足すと、TODO のメモと作業ログの本文も、確認なしに AI に渡ります(下の「AI に渡るデータ」)。本文を渡す前に確かめたいときは、`show` の行は足さないでください。
 
 ### AI に渡るデータ
 

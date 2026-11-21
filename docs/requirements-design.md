@@ -1716,7 +1716,8 @@ v0.5.0の相談(2026-11-21)で、案のまま認めた所と、選び直した�
 
 - 名前は `higiri`。中身はSKILL.mdの1つだけ(CLIに埋め込む)。
 - `description` は「Higiri(TODO管理アプリ)のTODOを読み、追加し、ステータスを変え、作業ログを付ける。今日やるべき作業を提案する。TODO、日限、やること、作業ログ、日報の材料の話が出たら使う。」。
-- `allowed-tools` には、読むサブコマンドだけを書く(`Bash(higiri-cli today:*)`、`list`、`show`、`search`、`projects`)。書くサブコマンドは書かないので、毎回 Claude Code の確認が出る。
+- `allowed-tools` には、読むサブコマンドだけを書く(`Bash(higiri-cli today *)`、`list`、`show`、`search`、`projects`。今の Claude Code の資料の書き方で、`Bash(higiri-cli today:*)` と同じ意味)。書くサブコマンドは書かないので、毎回 Claude Code の確認が出る。
+  - `allowed-tools` を持つ Skill は、Claude Code が呼ぶときに、Skill を実行してよいかの確認が出る。`allowed-tools` の許可は Skill を呼んだ依頼の中だけで、同じ会話の次の依頼からは、読むサブコマンドにも確認が出る(Claude Code 2.1.319 で確かめた)。確認をなくしたいときは、利用者が `~/.claude/settings.json` の `permissions.allow` に読む5つと `Skill(higiri)` を足す(READMEに書く。`install-skill` は設定に書かない)。
 - 本文に書くこと
   1. 日付、日数、日限注意の区分は、出力のまま使う。数え直さない。今日の日付は `today` の出力のもの。
   2. 提案のしかた: `today` を読み、3〜5件を理由を添えて出す。順は、超過 → 本日 → 要確認(相手に確かめる作業として) → 間近 → 着手遅れ → 今日の作業の残り。同じ区分の中は優先度の高い順。`blocked_by` のあるものは、先行TODOを先に出すか、理由を添えて後ろに回す。見積の時間はアプリにないので、時間の割り振りは、使える時間を利用者に聞いてから行う。

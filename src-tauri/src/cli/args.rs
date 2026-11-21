@@ -57,6 +57,8 @@ pub enum Command {
     Log(LogArgs),
     /// TODOのメモの末尾に書き足します。メモの書き換えと削除はできません。
     AppendMemo(AppendMemoArgs),
+    /// Claude Code の Skill(higiri)を ~/.claude/skills/higiri/SKILL.md に書きます。環境変数 CLAUDE_CONFIG_DIR があれば、その下の skills/higiri/ に書きます。あれば上書きします。書いた場所を出します。
+    InstallSkill,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
@@ -422,6 +424,10 @@ mod tests {
             parse(&["projects", "--archived"]).unwrap().command,
             Command::Projects(ProjectsArgs { archived: true })
         );
+        assert_eq!(
+            parse(&["install-skill"]).unwrap().command,
+            Command::InstallSkill
+        );
     }
 
     #[test]
@@ -579,6 +585,7 @@ mod tests {
             &["log", "5", "--body", "x", "--date", "11/19"],
             &["append-memo", "5"],
             &["append-memo", "--body", "x"],
+            &["install-skill", "higiri"],
         ] {
             let e = parse(args).unwrap_err();
             assert_eq!(e.exit_code(), 2, "{args:?}: {e}");
@@ -604,6 +611,11 @@ mod tests {
         );
         assert!(text.contains("未着手"), "{text}");
         assert!(!text.contains("Print help"), "{text}");
+
+        let help = parse(&["install-skill", "--help"]).unwrap_err();
+        assert_eq!(help.exit_code(), 0);
+        let text = help.render().to_string();
+        assert!(text.contains("CLAUDE_CONFIG_DIR"), "{text}");
 
         let help = parse(&["status", "--help"]).unwrap_err();
         let text = help.render().to_string();

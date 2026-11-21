@@ -50,6 +50,43 @@ fn wrong_arguments_go_to_stderr_with_2() {
     }
 }
 
+/// `install-skill` writes under `CLAUDE_CONFIG_DIR`, which the test sets for
+/// the child only, so it runs everywhere without touching the user's
+/// Claude Code. The home folder has no data: no database is opened.
+#[test]
+fn install_skill_writes_under_claude_config_dir_and_replaces() {
+    let config = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let skill = config.path().join("skills").join("higiri").join("SKILL.md");
+    let install = || {
+        cli(&["install-skill"])
+            .env("CLAUDE_CONFIG_DIR", config.path())
+            .env("HOME", home.path())
+            .output()
+            .unwrap()
+    };
+
+    let out = install();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert!(out.stderr.is_empty());
+    let expected = format!(
+        "{}\n",
+        serde_json::json!({ "path": skill.display().to_string() })
+    );
+    assert_eq!(text(&out.stdout), expected);
+    let written = std::fs::read_to_string(&skill).unwrap();
+    assert_eq!(written, include_str!("../src/cli/SKILL.md"));
+
+    std::fs::write(&skill, "古い Skill").unwrap();
+    let out = install();
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(text(&out.stdout), expected);
+    assert_eq!(std::fs::read_to_string(&skill).unwrap(), written);
+
+    // Nothing was made for the data.
+    assert_eq!(std::fs::read_dir(home.path()).unwrap().count(), 0);
+}
+
 #[cfg(target_os = "macos")]
 mod with_a_home_of_its_own {
     use std::process::Output;
