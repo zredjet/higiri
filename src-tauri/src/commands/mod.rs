@@ -74,6 +74,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             backup::list_backups,
             backup::restore_backup,
             backup::open_data_folder,
+            backup::choose_backup_mirror,
+            backup::clear_backup_mirror,
+            backup::restore_backup_file,
             notify::test_notification,
             holidays::list_holidays,
             search::search_todos,
@@ -140,7 +143,7 @@ mod tests {
             .collect();
         allowed.sort();
         assert_eq!(allowed, commands_in_bindings());
-        assert_eq!(allowed.len(), 41);
+        assert_eq!(allowed.len(), 44);
     }
 
     /// Regenerates `src/lib/bindings.ts` and fails when the committed file was

@@ -64,7 +64,7 @@ pub async fn import_data(
 }
 
 /// Runs a blocking dialog off the main thread.
-async fn pick(
+pub(super) async fn pick(
     dialog: impl FnOnce() -> Option<FilePath> + Send + 'static,
 ) -> CmdResult<Option<FilePath>> {
     tauri::async_runtime::spawn_blocking(dialog)
@@ -91,7 +91,7 @@ fn write_error() -> AppError {
     }
 }
 
-fn read_error() -> AppError {
+pub(super) fn read_error() -> AppError {
     AppError {
         kind: ErrorKind::Internal,
         message: "ファイルを読めませんでした。ファイルの場所を確かめて、もう一度選んでください。"

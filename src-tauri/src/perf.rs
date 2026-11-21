@@ -787,6 +787,56 @@ async fn perf_5000_todos_20000_logs() {
     let backed_up = t.elapsed();
     println!("{:<30} {}", "daily backup (VACUUM INTO)", ms(backed_up));
 
+    // C-3: the 7 daily backups to an empty mirror folder, then the
+    // dashboard with the mirror's notice (it lists the backups folder).
+    let backups = crate::backup::dir(tmp.path());
+    let newest = backups.join(format!("todo-{today}.db"));
+    for days_ago in 1..7 {
+        let day = shift(today, -days_ago);
+        std::fs::copy(&newest, backups.join(format!("todo-{day}.db"))).unwrap();
+    }
+    let mirror = tmp.path().join("mirror");
+    std::fs::create_dir(&mirror).unwrap();
+    let t = Instant::now();
+    crate::backup::sync_mirror(tmp.path(), &mirror).unwrap();
+    println!(
+        "{:<30} {}",
+        format!(
+            "backup mirror (7 x {:.1} MB)",
+            std::fs::metadata(&newest).unwrap().len() as f64 / 1_000_000.0
+        ),
+        ms(t.elapsed())
+    );
+    {
+        let mut c = pool.acquire().await.unwrap();
+        crate::repo::settings::set_backup_mirror(
+            &mut c,
+            Some(&mirror.display().to_string()),
+            Some(shift(today, -7)),
+        )
+        .await
+        .unwrap();
+    }
+    let with_notice = median(7, || dashboard::with_backup_alert(&pool, tmp.path(), today)).await;
+    assert!(
+        dashboard::with_backup_alert(&pool, tmp.path(), today)
+            .await
+            .unwrap()
+            .backup_mirror_alert
+            .is_some()
+    );
+    println!(
+        "{:<30} {}",
+        "get_dashboard (mirror notice)",
+        ms(with_notice)
+    );
+    {
+        let mut c = pool.acquire().await.unwrap();
+        crate::repo::settings::set_backup_mirror(&mut c, None, None)
+            .await
+            .unwrap();
+    }
+
     // 起動2秒 (Rust side): what setup does before the window (open the
     // database, the first launch of the day's backup) and the first screen's
     // commands. The WebView's own loading is not in this number.

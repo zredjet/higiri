@@ -5,6 +5,7 @@ import type { Dashboard, ProjectSummary, Status, TodoItem, Urgency } from "../..
 import { formatDate, formatDateWithWeekday, monthDay } from "../../lib/date";
 import { errorMessage } from "../../lib/errors";
 import { useChangeStatus, useDashboard } from "../../lib/queries";
+import { mirrorAlertText } from "../settings/backupText";
 import { asksBeforeDoing } from "../todos/dependencyText";
 import { DoneWithChildrenDialog, StartBlockedDialog } from "../todos/detail/StatusDialogs";
 import {
@@ -40,6 +41,7 @@ export function DashboardPage({ onOpenTodo, onAddTodo }: DashboardPageProps) {
           </Button>
         }
       />
+      {d?.backup_mirror_alert ? <Alert tone="warning">{mirrorAlertText(d.backup_mirror_alert)}</Alert> : null}
       {dash.error ? <Alert tone="danger">{errorMessage(dash.error)}</Alert> : null}
       {d ? (
         <>

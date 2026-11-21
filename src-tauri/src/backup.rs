@@ -9,11 +9,18 @@
 //!   backup's rows in one transaction. The open pool stays usable, so the app
 //!   does not need to restart. The JSON import (`json_data`) replaces the data
 //!   the same way ([`keep_and_replace`]).
-//! - The settings in `repo::settings::KEPT_ON_REPLACE` (`autostart`, which
-//!   belongs to this PC, and the values the app writes) keep their current
-//!   values through the replacement.
+//! - The settings in `repo::settings::KEPT_ON_REPLACE` (`autostart`, `zoom`
+//!   and the backup mirror's folder, which belong to this PC, and the values
+//!   the app writes) keep their current values through the replacement.
+//! - A restore can also take a file chosen anywhere ([`restore_file`]; v0.4.0,
+//!   C-3), such as a backup on the mirror after moving to a new PC.
+//! - バックアップの複製先 (v0.4.0, C-3): [`sync_mirror`] keeps a folder chosen
+//!   by the user (an external drive, a synced folder) in step with the daily
+//!   backups: the newest 7, under the same names. Copies taken before a
+//!   restore are not mirrored.
 //!
-//! Copies are written with `VACUUM INTO`, never by copying the WAL-mode file.
+//! Copies are written with `VACUUM INTO`, never by copying the WAL-mode file
+//! (the daily backups are such copies, so the mirror copies their files).
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -89,6 +96,12 @@ pub enum BackupError {
     Damaged,
     #[error("path is not valid UTF-8: {0:?}")]
     Path(PathBuf),
+    /// The chosen file could not be read (restore_file).
+    #[error("the chosen file could not be read: {0}")]
+    Source(std::io::Error),
+    /// The chosen file is the database in use (restore_file).
+    #[error("the chosen file is the database in use")]
+    InUse,
 }
 
 pub type Result<T> = std::result::Result<T, BackupError>;
@@ -226,6 +239,136 @@ pub fn names_to_prune(names: &[String], keep_daily: usize, keep_before: usize) -
         .collect()
 }
 
+/// Dates of the daily backups in `backups/`, newest first. A missing folder
+/// is an empty list.
+pub fn daily_dates(data_dir: &Path) -> std::io::Result<Vec<NaiveDate>> {
+    let mut out: Vec<NaiveDate> = file_names(&dir(data_dir))?
+        .iter()
+        .filter_map(|n| match BackupName::parse(n) {
+            Some(BackupName::Daily(d)) => Some(d),
+            _ => None,
+        })
+        .collect();
+    out.sort_by_key(|&d| std::cmp::Reverse(d));
+    Ok(out)
+}
+
+/// Names of the regular files in `folder`. A missing folder is an empty list.
+fn file_names(folder: &Path) -> std::io::Result<Vec<String>> {
+    let entries = match std::fs::read_dir(folder) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let mut out = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        if let Some(n) = entry.file_name().to_str() {
+            out.push(n.to_owned());
+        }
+    }
+    Ok(out)
+}
+
+/// `todo-2026-11-19.db.part`: a copy to the mirror that did not finish.
+fn is_daily_part(file_name: &str) -> bool {
+    matches!(
+        file_name
+            .strip_suffix(PART_SUFFIX)
+            .and_then(BackupName::parse),
+        Some(BackupName::Daily(_))
+    )
+}
+
+/// Brings the mirror folder in step with the daily backups (v0.4.0, C-3):
+///
+/// 1. removes the `.part` files a failed copy left there;
+/// 2. copies each of the newest 7 daily backups the mirror does not have,
+///    through `todo-YYYY-MM-DD.db.part` (a drive pulled out in the middle of
+///    a copy never leaves a file that counts as a backup);
+/// 3. keeps the newest 7 `todo-YYYY-MM-DD.db` there.
+///
+/// No other file of the mirror is touched, and it is never created: a
+/// missing folder (a drive that is not plugged in) is an error. The daily
+/// backups are single files (`VACUUM INTO`), so a file copy is enough.
+/// Returns the newest daily backup's date (None when there is none).
+/// Blocking: may take a while on a slow drive (see [`mirror`]).
+pub fn sync_mirror(data_dir: &Path, mirror: &Path) -> std::io::Result<Option<NaiveDate>> {
+    if !mirror.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "the mirror folder is not there",
+        ));
+    }
+    let mut daily = daily_dates(data_dir)?;
+    daily.truncate(KEEP_DAILY);
+
+    for n in file_names(mirror)? {
+        if is_daily_part(&n) {
+            std::fs::remove_file(mirror.join(&n))?;
+        }
+    }
+    let there = file_names(mirror)?;
+    let source_dir = dir(data_dir);
+    for d in &daily {
+        let name = BackupName::Daily(*d).file_name();
+        if there.contains(&name) {
+            continue;
+        }
+        copy_through_part(&source_dir.join(&name), &mirror.join(&name))?;
+    }
+    // Only daily names count; before-restore copies are never put there, so
+    // any with that name are someone else's and stay.
+    for n in names_to_prune(&file_names(mirror)?, KEEP_DAILY, usize::MAX) {
+        std::fs::remove_file(mirror.join(&n))?;
+    }
+    Ok(daily.first().copied())
+}
+
+/// [`sync_mirror`] off the async threads (a slow or missing drive must not
+/// hold up the resident timer or the commands).
+pub async fn mirror(data_dir: PathBuf, mirror: PathBuf) -> std::io::Result<Option<NaiveDate>> {
+    tauri::async_runtime::spawn_blocking(move || sync_mirror(&data_dir, &mirror))
+        .await
+        .map_err(std::io::Error::other)?
+}
+
+/// Copies `source` to `target` through `target.part`, flushed to the drive
+/// before it gets its name. A failed copy removes its `.part`.
+fn copy_through_part(source: &Path, target: &Path) -> std::io::Result<()> {
+    let part = part_of(target);
+    let copied = (|| {
+        std::fs::copy(source, &part)?;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&part)?
+            .sync_all()?;
+        std::fs::rename(&part, target)
+    })();
+    if copied.is_err() {
+        let _ = std::fs::remove_file(&part);
+    }
+    copied
+}
+
+/// Whether `path` is `base` or inside it (links and `..` resolved; letters
+/// compared without case, as the folders of Windows and macOS usually are).
+/// False when either cannot be resolved (does not exist).
+pub fn is_within(path: &Path, base: &Path) -> bool {
+    let (Ok(path), Ok(base)) = (std::fs::canonicalize(path), std::fs::canonicalize(base)) else {
+        return false;
+    };
+    let parts = |p: &Path| -> Vec<String> {
+        p.components()
+            .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
+            .collect()
+    };
+    parts(&path).starts_with(&parts(&base))
+}
+
 fn prune(dir: &Path) -> Result<()> {
     let mut names = Vec::new();
     for entry in std::fs::read_dir(dir)? {
@@ -247,9 +390,7 @@ fn path_str(p: &Path) -> Result<&str> {
 /// Writes a consistent copy of the database to `target` (via a `.part` file,
 /// so an interrupted copy never looks like a backup).
 async fn vacuum_into(pool: &SqlitePool, target: &Path) -> Result<()> {
-    let mut part = target.as_os_str().to_owned();
-    part.push(PART_SUFFIX);
-    let part = PathBuf::from(part);
+    let part = part_of(target);
     remove_if_exists(&part)?;
     sqlx::query("VACUUM INTO ?1")
         .bind(path_str(&part)?)
@@ -257,6 +398,13 @@ async fn vacuum_into(pool: &SqlitePool, target: &Path) -> Result<()> {
         .await?;
     std::fs::rename(&part, target)?;
     Ok(())
+}
+
+/// `target` with `.part` added: where a copy is written before it gets its name.
+fn part_of(target: &Path) -> PathBuf {
+    let mut part = target.as_os_str().to_owned();
+    part.push(PART_SUFFIX);
+    PathBuf::from(part)
 }
 
 fn remove_if_exists(p: &Path) -> Result<()> {
@@ -295,27 +443,58 @@ pub async fn run_daily(
     Ok(Some(target))
 }
 
-/// Replaces all data with the backup `file_name`, after keeping a copy of
-/// the current data. Returns the name of that copy.
+/// Replaces all data with the backup `file_name` (in the backups folder),
+/// after keeping a copy of the current data. Returns the name of that copy.
 pub async fn restore(
     pool: &SqlitePool,
     data_dir: &Path,
     file_name: &str,
     now: DateTime<Utc>,
 ) -> Result<String> {
-    let dir = dir(data_dir);
     // Rebuilt from the parsed name, so no other path can be reached.
     let name =
         BackupName::parse(file_name).ok_or_else(|| BackupError::NotFound(file_name.to_owned()))?;
-    let source = dir.join(name.file_name());
+    let source = dir(data_dir).join(name.file_name());
     if !source.is_file() {
         return Err(BackupError::NotFound(file_name.to_owned()));
     }
+    restore_from(pool, data_dir, &source, now).await
+}
+
+/// Replaces all data with the Higiri database `source`, a file the user chose
+/// anywhere (a backup on the mirror, in `backups/`, …), after keeping a copy
+/// of the current data, as [`restore`] does. The file itself is never
+/// changed. The database in use (`todo.db` of the data folder) is refused:
+/// as a plain file it may lack the latest changes (they can still be in its
+/// `-wal` file). Returns the name of the kept copy.
+pub async fn restore_file(
+    pool: &SqlitePool,
+    data_dir: &Path,
+    source: &Path,
+    now: DateTime<Utc>,
+) -> Result<String> {
+    if is_within(source, &data_dir.join(db::DB_FILE_NAME)) {
+        return Err(BackupError::InUse);
+    }
+    restore_from(pool, data_dir, source, now).await
+}
+
+async fn restore_from(
+    pool: &SqlitePool,
+    data_dir: &Path,
+    source: &Path,
+    now: DateTime<Utc>,
+) -> Result<String> {
+    let dir = dir(data_dir);
+    std::fs::create_dir_all(&dir)?;
 
     // 1. Check and migrate a work copy; the backup itself is never changed.
     let work = dir.join(RESTORE_WORK_FILE);
     remove_db_files(&work)?;
-    std::fs::copy(&source, &work)?;
+    if let Err(e) = std::fs::copy(source, &work) {
+        let _ = remove_db_files(&work);
+        return Err(BackupError::Source(e));
+    }
     let result = async {
         prepare(&work).await?;
         keep_and_replace(pool, data_dir, &work, now).await
@@ -632,10 +811,18 @@ mod tests {
         )
         .await
         .unwrap();
+        let mirror_then = tmp.path().join("mirror-then").display().to_string();
+        let mirror_now = tmp.path().join("mirror-now").display().to_string();
+        {
+            let mut c = pool.acquire().await.unwrap();
+            repo_settings::set_backup_mirror(&mut c, Some(&mirror_then), Some(d("2026-11-17")))
+                .await
+                .unwrap();
+        }
         run_daily(&pool, tmp.path(), d("2026-11-18")).await.unwrap();
 
-        // Since then: autostart on, 表示倍率 125%, the app wrote its values,
-        // the user changed the theme.
+        // Since then: autostart on, 表示倍率 125%, another mirror, the app
+        // wrote its values, the user changed the theme.
         cmd::update(
             &pool,
             SettingsInput {
@@ -658,6 +845,9 @@ mod tests {
             repo_settings::set_tray_hint_shown(&mut c, true)
                 .await
                 .unwrap();
+            repo_settings::set_backup_mirror(&mut c, Some(&mirror_now), Some(d("2026-11-19")))
+                .await
+                .unwrap();
         }
         let before = cmd::get(&pool).await.unwrap();
 
@@ -676,6 +866,8 @@ mod tests {
         // Kept as they were.
         assert!(after.autostart);
         assert_eq!(after.zoom, 125);
+        assert_eq!(after.backup_mirror_dir, Some(mirror_now.clone()));
+        assert_eq!(after.backup_mirror_last_ok, Some(d("2026-11-19")));
         assert_eq!(after.last_reminded_on, before.last_reminded_on);
         assert_eq!(after.last_notified_at, before.last_notified_at);
         assert!(after.tray_hint_shown);
@@ -701,6 +893,7 @@ mod tests {
         assert!(!undone.tray_hint_shown);
         assert!(undone.autostart);
         assert_eq!(undone.zoom, 125);
+        assert_eq!(undone.backup_mirror_dir, Some(mirror_now));
     }
 
     #[tokio::test]
@@ -967,5 +1160,375 @@ mod tests {
                 .iter()
                 .all(|b| b.kind == BackupKind::Daily)
         );
+    }
+
+    // ---- バックアップの複製先 (v0.4.0) ----
+
+    /// Writes files into a folder (created first).
+    fn put_files(folder: &Path, files: &[(&str, &str)]) {
+        std::fs::create_dir_all(folder).unwrap();
+        for (name, body) in files {
+            std::fs::write(folder.join(name), body).unwrap();
+        }
+    }
+
+    /// File names in a folder, sorted, with their contents.
+    fn contents(folder: &Path) -> Vec<(String, String)> {
+        let mut out: Vec<(String, String)> = std::fs::read_dir(folder)
+            .unwrap()
+            .map(|e| e.unwrap())
+            .filter(|e| e.file_type().unwrap().is_file())
+            .map(|e| {
+                (
+                    e.file_name().to_string_lossy().into_owned(),
+                    std::fs::read_to_string(e.path()).unwrap_or_default(),
+                )
+            })
+            .collect();
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn the_mirror_gets_only_the_daily_backups_it_lacks() {
+        let data = tempfile::tempdir().unwrap();
+        let mirror = tempfile::tempdir().unwrap();
+        put_files(
+            &dir(data.path()),
+            &[
+                ("todo-2026-11-19.db", "19"),
+                ("todo-2026-11-18.db", "18"),
+                ("todo-2026-11-16.db", "16"),
+                ("before-restore-20261119T010000.000Z.db", "kept"),
+                ("restore-work.db", "work"),
+            ],
+        );
+        let backups_before = contents(&dir(data.path()));
+        put_files(
+            mirror.path(),
+            &[
+                // Already there: not copied again.
+                ("todo-2026-11-18.db", "18 on the mirror"),
+                // Left by a copy that did not finish.
+                ("todo-2026-11-19.db.part", "half"),
+                // Not ours.
+                ("notes.txt", "memo"),
+                ("todo.db", "other"),
+                ("before-restore-20261101T010000.000Z.db", "someone else's"),
+                ("todo-2026-11-17.db.bak", "x"),
+            ],
+        );
+        std::fs::create_dir(mirror.path().join("todo-2026-11-10.db")).unwrap();
+
+        let newest = sync_mirror(data.path(), mirror.path()).unwrap();
+        assert_eq!(newest, Some(d("2026-11-19")));
+        assert_eq!(
+            contents(mirror.path()),
+            [
+                (
+                    "before-restore-20261101T010000.000Z.db".to_owned(),
+                    "someone else's".to_owned()
+                ),
+                ("notes.txt".to_owned(), "memo".to_owned()),
+                ("todo-2026-11-16.db".to_owned(), "16".to_owned()),
+                ("todo-2026-11-17.db.bak".to_owned(), "x".to_owned()),
+                (
+                    "todo-2026-11-18.db".to_owned(),
+                    "18 on the mirror".to_owned()
+                ),
+                ("todo-2026-11-19.db".to_owned(), "19".to_owned()),
+                ("todo.db".to_owned(), "other".to_owned()),
+            ]
+        );
+        assert!(mirror.path().join("todo-2026-11-10.db").is_dir());
+        // The backups folder is as it was.
+        assert_eq!(contents(&dir(data.path())), backups_before);
+
+        // In step: nothing changes.
+        assert_eq!(
+            sync_mirror(data.path(), mirror.path()).unwrap(),
+            Some(d("2026-11-19"))
+        );
+        assert_eq!(contents(mirror.path()).len(), 7);
+    }
+
+    #[test]
+    fn the_mirror_keeps_the_newest_seven() {
+        let data = tempfile::tempdir().unwrap();
+        let mirror = tempfile::tempdir().unwrap();
+        put_files(
+            &dir(data.path()),
+            &[("todo-2026-11-19.db", "19"), ("todo-2026-11-18.db", "18")],
+        );
+        // Nine old ones, from the weeks before.
+        let old: Vec<String> = (1..=9)
+            .map(|day| format!("todo-2026-11-{day:02}.db"))
+            .collect();
+        let old_files: Vec<(&str, &str)> = old.iter().map(|n| (n.as_str(), "old")).collect();
+        put_files(mirror.path(), &old_files);
+
+        sync_mirror(data.path(), mirror.path()).unwrap();
+        let names: Vec<String> = contents(mirror.path())
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "todo-2026-11-05.db",
+                "todo-2026-11-06.db",
+                "todo-2026-11-07.db",
+                "todo-2026-11-08.db",
+                "todo-2026-11-09.db",
+                "todo-2026-11-18.db",
+                "todo-2026-11-19.db",
+            ]
+        );
+    }
+
+    #[test]
+    fn only_the_newest_seven_daily_backups_are_copied() {
+        let data = tempfile::tempdir().unwrap();
+        let mirror = tempfile::tempdir().unwrap();
+        // Eight in the backups folder (one more than it keeps).
+        let names: Vec<String> = (10..=17)
+            .map(|day| format!("todo-2026-11-{day}.db"))
+            .collect();
+        let files: Vec<(&str, &str)> = names.iter().map(|n| (n.as_str(), "x")).collect();
+        put_files(&dir(data.path()), &files);
+        assert_eq!(
+            sync_mirror(data.path(), mirror.path()).unwrap(),
+            Some(d("2026-11-17"))
+        );
+        let there = contents(mirror.path());
+        assert_eq!(there.len(), 7);
+        assert_eq!(there[0].0, "todo-2026-11-11.db");
+    }
+
+    #[test]
+    fn no_daily_backup_yet_is_nothing_to_copy() {
+        let data = tempfile::tempdir().unwrap();
+        let mirror = tempfile::tempdir().unwrap();
+        assert_eq!(sync_mirror(data.path(), mirror.path()).unwrap(), None);
+        assert!(contents(mirror.path()).is_empty());
+    }
+
+    #[test]
+    fn a_missing_mirror_fails_and_is_not_created() {
+        let data = tempfile::tempdir().unwrap();
+        put_files(&dir(data.path()), &[("todo-2026-11-19.db", "19")]);
+        let gone = tempfile::tempdir().unwrap();
+        let mirror = gone.path().join("USB");
+        let err = sync_mirror(data.path(), &mirror).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+        assert!(!mirror.exists());
+        // A file in place of the folder fails too.
+        std::fs::write(&mirror, "a file").unwrap();
+        assert!(sync_mirror(data.path(), &mirror).is_err());
+        assert_eq!(
+            contents(&dir(data.path())),
+            [("todo-2026-11-19.db".to_owned(), "19".to_owned())]
+        );
+    }
+
+    #[test]
+    fn a_copy_that_fails_leaves_no_part_file() {
+        let data = tempfile::tempdir().unwrap();
+        let mirror = tempfile::tempdir().unwrap();
+        put_files(&dir(data.path()), &[("todo-2026-11-19.db", "19")]);
+        // A folder with the backup's name: the copy cannot take its name.
+        std::fs::create_dir(mirror.path().join("todo-2026-11-19.db")).unwrap();
+        assert!(sync_mirror(data.path(), mirror.path()).is_err());
+        assert!(contents(mirror.path()).is_empty());
+        assert_eq!(contents(&dir(data.path())).len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_mirror_that_cannot_be_written_fails() {
+        use std::os::unix::fs::PermissionsExt;
+        let data = tempfile::tempdir().unwrap();
+        let mirror = tempfile::tempdir().unwrap();
+        put_files(&dir(data.path()), &[("todo-2026-11-19.db", "19")]);
+        std::fs::set_permissions(mirror.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
+        let result = sync_mirror(data.path(), mirror.path());
+        std::fs::set_permissions(mirror.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(result.is_err());
+        assert!(contents(mirror.path()).is_empty());
+        assert_eq!(contents(&dir(data.path())).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_mirror_copies_real_backups_off_the_async_threads() {
+        let data = tempfile::tempdir().unwrap();
+        let pool = file_db(data.path()).await;
+        add_project(&pool, "A").await;
+        run_daily(&pool, data.path(), d("2026-11-19"))
+            .await
+            .unwrap();
+        let usb = tempfile::tempdir().unwrap();
+        let newest = mirror(data.path().to_owned(), usb.path().to_owned())
+            .await
+            .unwrap();
+        assert_eq!(newest, Some(d("2026-11-19")));
+        assert_eq!(
+            std::fs::read(usb.path().join("todo-2026-11-19.db")).unwrap(),
+            std::fs::read(dir(data.path()).join("todo-2026-11-19.db")).unwrap()
+        );
+    }
+
+    #[test]
+    fn daily_dates_are_newest_first_and_only_daily() {
+        let data = tempfile::tempdir().unwrap();
+        assert_eq!(daily_dates(data.path()).unwrap(), vec![]);
+        put_files(
+            &dir(data.path()),
+            &[
+                ("todo-2026-11-16.db", ""),
+                ("todo-2026-11-19.db", ""),
+                ("todo-2026-11-18.db.part", ""),
+                ("before-restore-20261119T010000.000Z.db", ""),
+            ],
+        );
+        assert_eq!(
+            daily_dates(data.path()).unwrap(),
+            vec![d("2026-11-19"), d("2026-11-16")]
+        );
+    }
+
+    #[test]
+    fn within_means_the_folder_or_inside_it() {
+        let data = tempfile::tempdir().unwrap();
+        let inside = data.path().join("backups");
+        std::fs::create_dir(&inside).unwrap();
+        let other = tempfile::tempdir().unwrap();
+        assert!(is_within(data.path(), data.path()));
+        assert!(is_within(&inside, data.path()));
+        // Through `..` and in other letters.
+        assert!(is_within(&inside.join(".."), data.path()));
+        let upper = PathBuf::from(data.path().to_string_lossy().to_uppercase());
+        if upper.exists() {
+            assert!(is_within(&upper, data.path()));
+        }
+        assert!(!is_within(other.path(), data.path()));
+        // The folder holding the data folder is not inside it.
+        assert!(!is_within(data.path().parent().unwrap(), data.path()));
+        // A folder that does not exist cannot be resolved.
+        assert!(!is_within(&data.path().join("none"), data.path()));
+    }
+
+    // ---- ファイルを選んで復元 (v0.4.0) ----
+
+    #[tokio::test]
+    async fn a_file_outside_the_backups_folder_is_restored() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = file_db(tmp.path()).await;
+        add_project(&pool, "A").await;
+        run_daily(&pool, tmp.path(), d("2026-11-18")).await.unwrap();
+        // On the mirror of an old PC.
+        let usb = tempfile::tempdir().unwrap();
+        let chosen = usb.path().join("todo-2026-11-18.db");
+        std::fs::copy(dir(tmp.path()).join("todo-2026-11-18.db"), &chosen).unwrap();
+        let chosen_bytes = std::fs::read(&chosen).unwrap();
+        add_project(&pool, "B").await;
+
+        let kept = restore_file(&pool, tmp.path(), &chosen, ts(2026, 11, 19, 12, 0))
+            .await
+            .unwrap();
+        assert_eq!(project_names(&pool).await, ["A"]);
+        assert_eq!(kept, "before-restore-20261119T120000.000Z.db");
+        assert!(dir(tmp.path()).join(&kept).is_file());
+        // The chosen file is unchanged and nothing else was put next to it.
+        assert_eq!(std::fs::read(&chosen).unwrap(), chosen_bytes);
+        assert_eq!(std::fs::read_dir(usb.path()).unwrap().count(), 1);
+        assert!(!dir(tmp.path()).join(RESTORE_WORK_FILE).exists());
+
+        // A file in the backups folder can be chosen too (the kept copy).
+        restore_file(
+            &pool,
+            tmp.path(),
+            &dir(tmp.path()).join(&kept),
+            ts(2026, 11, 19, 12, 5),
+        )
+        .await
+        .unwrap();
+        assert_eq!(project_names(&pool).await, ["A", "B"]);
+    }
+
+    #[tokio::test]
+    async fn a_chosen_file_that_is_not_a_backup_changes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = file_db(tmp.path()).await;
+        add_project(&pool, "A").await;
+        let files = tempfile::tempdir().unwrap();
+        let now = ts(2026, 11, 19, 12, 0);
+
+        // Not a database.
+        let text = files.path().join("todo-2026-11-17.db");
+        std::fs::write(&text, b"not a database").unwrap();
+        assert!(matches!(
+            restore_file(&pool, tmp.path(), &text, now).await,
+            Err(BackupError::Damaged)
+        ));
+        // A database, but not Higiri's.
+        let other = files.path().join("other.db");
+        let other_pool = SqlitePool::connect_with(
+            SqliteConnectOptions::new()
+                .filename(&other)
+                .create_if_missing(true),
+        )
+        .await
+        .unwrap();
+        sqlx::query("CREATE TABLE notes (body TEXT)")
+            .execute(&other_pool)
+            .await
+            .unwrap();
+        other_pool.close().await;
+        assert!(matches!(
+            restore_file(&pool, tmp.path(), &other, now).await,
+            Err(BackupError::Damaged)
+        ));
+        // Made by a newer version.
+        run_daily(&pool, tmp.path(), d("2026-11-16")).await.unwrap();
+        let newer = files.path().join("newer.db");
+        std::fs::copy(dir(tmp.path()).join("todo-2026-11-16.db"), &newer).unwrap();
+        let newer_pool = SqlitePool::connect_with(SqliteConnectOptions::new().filename(&newer))
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) \
+             VALUES (99990101000000, 'future', 1, x'00', 0)",
+        )
+        .execute(&newer_pool)
+        .await
+        .unwrap();
+        newer_pool.close().await;
+        let newer_bytes = std::fs::read(&newer).unwrap();
+        assert!(matches!(
+            restore_file(&pool, tmp.path(), &newer, now).await,
+            Err(BackupError::TooNew)
+        ));
+        // The chosen file was not migrated.
+        assert_eq!(std::fs::read(&newer).unwrap(), newer_bytes);
+        // Gone since it was chosen.
+        assert!(matches!(
+            restore_file(&pool, tmp.path(), &files.path().join("gone.db"), now).await,
+            Err(BackupError::Source(_))
+        ));
+        // The database in use.
+        assert!(matches!(
+            restore_file(&pool, tmp.path(), &tmp.path().join(db::DB_FILE_NAME), now).await,
+            Err(BackupError::InUse)
+        ));
+
+        // Nothing was changed, and no copy of the current data was taken.
+        assert_eq!(project_names(&pool).await, ["A"]);
+        assert!(
+            list(tmp.path())
+                .unwrap()
+                .iter()
+                .all(|b| b.kind == BackupKind::Daily)
+        );
+        assert!(!dir(tmp.path()).join(RESTORE_WORK_FILE).exists());
     }
 }

@@ -436,6 +436,46 @@ export function useRestoreBackup() {
   });
 }
 
+/**
+ * 「ファイルを選んで復元」: opens the file dialog (Rust side) and restores the chosen backup, then reloads
+ * everything on screen. Resolves to the file name, or null when cancelled (nothing changed).
+ */
+export function useRestoreBackupFile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => commands.restoreBackupFile(),
+    onSuccess: (fileName) => (fileName === null ? undefined : qc.invalidateQueries()),
+  });
+}
+
+/** The settings and the dashboard's notice change with the backup mirror. */
+function useInvalidateBackupMirror() {
+  const qc = useQueryClient();
+  return () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: queryKeys.settings }),
+      qc.invalidateQueries({ queryKey: queryKeys.dashboard }),
+    ]);
+}
+
+/**
+ * 「複製先を選ぶ」「複製先を変える」: opens the folder dialog (Rust side), copies the daily backups there and
+ * saves it. Resolves to the mirror, or null when cancelled (nothing changed).
+ */
+export function useChooseBackupMirror() {
+  const invalidate = useInvalidateBackupMirror();
+  return useMutation({
+    mutationFn: () => commands.chooseBackupMirror(),
+    onSuccess: (mirror) => (mirror === null ? undefined : invalidate()),
+  });
+}
+
+/** 「複製をやめる」: no mirror from now on (its files stay). */
+export function useClearBackupMirror() {
+  const invalidate = useInvalidateBackupMirror();
+  return useMutation({ mutationFn: () => commands.clearBackupMirror(), onSuccess: invalidate });
+}
+
 /** 「JSONで書き出す」: opens the save dialog (Rust side) and writes all data. Resolves to the path, or null when cancelled. */
 export function useExportData() {
   return useMutation({ mutationFn: () => commands.exportData() });

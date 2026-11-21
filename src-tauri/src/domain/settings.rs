@@ -64,6 +64,12 @@ pub struct Settings {
     pub weekly_report_template: WeeklyReportTemplate,
     /// 表示倍率 in percent, one of [`ZOOM_LEVELS`] (v0.4.0). Belongs to the PC.
     pub zoom: u32,
+    /// バックアップの複製先: an absolute folder, or none (v0.4.0). Belongs to
+    /// the PC; chosen with choose_backup_mirror only, not by update_settings.
+    pub backup_mirror_dir: Option<String>,
+    /// The newest daily backup that reached the mirror (written by the app,
+    /// not by update_settings).
+    pub backup_mirror_last_ok: Option<NaiveDate>,
 }
 
 pub const DEFAULT_SOON_DAYS: u32 = 3;
@@ -103,6 +109,8 @@ impl Default for Settings {
             report_template: ReportTemplate::default(),
             weekly_report_template: WeeklyReportTemplate::default(),
             zoom: DEFAULT_ZOOM,
+            backup_mirror_dir: None,
+            backup_mirror_last_ok: None,
         }
     }
 }
@@ -130,6 +138,8 @@ mod tests {
         assert_eq!(s.report_template, ReportTemplate::default());
         assert_eq!(s.weekly_report_template, WeeklyReportTemplate::default());
         assert_eq!(s.zoom, 100);
+        assert_eq!(s.backup_mirror_dir, None);
+        assert_eq!(s.backup_mirror_last_ok, None);
     }
 
     #[test]

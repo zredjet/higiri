@@ -2,44 +2,68 @@ import { useState } from "react";
 import { Alert, Button, Dialog, RadioGroup } from "../../components/aizome";
 import type { Backup } from "../../lib/bindings";
 import { errorMessage } from "../../lib/errors";
-import { useBackups, useRestoreBackup } from "../../lib/queries";
+import { useBackups, useRestoreBackup, useRestoreBackupFile } from "../../lib/queries";
 import { backupDetail, backupLabel } from "./backupText";
 
 interface RestoreDialogProps {
   open: boolean;
   onClose: () => void;
   onRestored: (backup: Backup) => void;
+  /** 「ファイルを選んで復元」 restored the file `fileName`. */
+  onRestoredFile: (fileName: string) => void;
 }
 
-/** 「バックアップから復元」: pick a backup; the current data is kept before restoring. */
+/**
+ * 「バックアップから復元」: pick a backup, or a backup file anywhere (「ファイルを選んで復元」, v0.4.0: from the
+ * mirror after moving to a new PC). The current data is kept before restoring. Closing the file dialog without
+ * choosing leaves this one open.
+ */
 export function RestoreDialog(props: RestoreDialogProps) {
   if (!props.open) return null;
   return <RestoreForm {...props} />;
 }
 
-function RestoreForm({ onClose, onRestored }: RestoreDialogProps) {
+function RestoreForm({ onClose, onRestored, onRestoredFile }: RestoreDialogProps) {
   const backups = useBackups();
   const restore = useRestoreBackup();
+  const restoreFile = useRestoreBackupFile();
   const [selected, setSelected] = useState<string | null>(null);
   const list = backups.data ?? [];
   const chosen = list.find((b) => b.file_name === selected) ?? list[0];
-  const error = backups.error ?? restore.error;
+  const busy = restore.isPending || restoreFile.isPending;
+  // The error of the last thing tried.
+  const error = backups.error ?? (restoreFile.isError ? restoreFile.error : restore.error);
 
   return (
     <Dialog
       open
-      onClose={restore.isPending ? undefined : onClose}
+      onClose={busy ? undefined : onClose}
       title="バックアップから復元"
       description="選んだ時点のデータに戻します。今のデータは、復元の前に「復元・取り込みの前の状態」として残します。"
       footer={
         <>
-          <Button onClick={onClose} disabled={restore.isPending}>
+          <Button onClick={onClose} disabled={busy}>
             キャンセル
           </Button>
           <Button
-            variant="primary"
-            disabled={!chosen || restore.isPending}
+            loading={restoreFile.isPending}
+            disabled={restore.isPending}
             onClick={() => {
+              restore.reset();
+              restoreFile.mutate(undefined, {
+                onSuccess: (fileName) => {
+                  if (fileName !== null) onRestoredFile(fileName);
+                },
+              });
+            }}
+          >
+            ファイルを選んで復元
+          </Button>
+          <Button
+            variant="primary"
+            disabled={!chosen || busy}
+            onClick={() => {
+              restoreFile.reset();
               if (chosen) restore.mutate(chosen.file_name, { onSuccess: () => onRestored(chosen) });
             }}
           >
@@ -60,7 +84,7 @@ function RestoreForm({ onClose, onRestored }: RestoreDialogProps) {
             options={list.map((b) => ({ value: b.file_name, label: backupLabel(b), description: backupDetail(b) }))}
             value={chosen.file_name}
             onChange={setSelected}
-            disabled={restore.isPending}
+            disabled={busy}
           />
         ) : null}
       </div>

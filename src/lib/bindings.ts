@@ -115,6 +115,21 @@ export const commands = {
 	/**  Opens the data folder in Finder / Explorer. */
 	openDataFolder: (options?: InvokeOptions) => __TAURI_INVOKE<null>("open_data_folder", undefined, options),
 	/**
+	 *  「複製先を選ぶ」「複製先を変える」: asks for a folder, copies the daily
+	 *  backups there at once and saves it as the mirror only when that worked.
+	 *  Returns the mirror, or null when the user closed the dialog.
+	 */
+	chooseBackupMirror: (options?: InvokeOptions) => __TAURI_INVOKE<BackupMirror | null>("choose_backup_mirror", undefined, options),
+	/**  「複製をやめる」: no mirror from now on. The files already there stay. */
+	clearBackupMirror: (options?: InvokeOptions) => __TAURI_INVOKE<null>("clear_backup_mirror", undefined, options),
+	/**
+	 *  「ファイルを選んで復元」: asks for a backup file anywhere (on the mirror after
+	 *  moving to a new PC, for one) and restores it as restore_backup does. The
+	 *  screen has already said that all data will be replaced. Returns the file's
+	 *  name, or null when the user closed the dialog.
+	 */
+	restoreBackupFile: (options?: InvokeOptions) => __TAURI_INVOKE<string | null>("restore_backup_file", undefined, options),
+	/**
 	 *  「通知を試す」: shows a test notification, whether or not the
 	 *  notifications are turned on (it checks that the OS shows them at all).
 	 */
@@ -227,6 +242,22 @@ export type BackupKind =
 /**  復元・取り込みの前の状態 (taken just before a restore or a JSON import). */
 "before_restore";
 
+/**  バックアップの複製先 as chosen (v0.4.0). */
+export type BackupMirror = {
+	/**  The folder, as the dialog gave it. */
+	dir: string,
+	/**  The newest daily backup now on the mirror (null: there was none yet). */
+	last_ok: string | null,
+};
+
+/**  「バックアップを複製先に複製できない日が3日続いています」. */
+export type BackupMirrorAlert = {
+	/**  The newest daily backup that reached the mirror (null: none yet). */
+	last_ok: string | null,
+	/**  Daily backups taken since then (at least [`ALERT_DAYS`]). */
+	days: number,
+};
+
 /**
  *  An unfinished TODO to finish first (`TodoItem.blocked_by`): the mark in
  *  the list and the confirmation before 作業中.
@@ -285,6 +316,12 @@ export type Dashboard = {
 	waiting: TodoItem[],
 	/**  プロジェクトの進捗 (active projects). */
 	projects: ProjectSummary[],
+	/**
+	 *  The daily backups have not reached the mirror for 3 days or more
+	 *  (v0.4.0). Filled by get_dashboard from the backups folder; [`build`]
+	 *  leaves it null.
+	 */
+	backup_mirror_alert: BackupMirrorAlert | null,
 };
 
 /**  How day counts are made (`day_count`). */
@@ -670,6 +707,16 @@ export type Settings = {
 	weekly_report_template: WeeklyReportTemplate,
 	/**  表示倍率 in percent, one of [`ZOOM_LEVELS`] (v0.4.0). Belongs to the PC. */
 	zoom: number,
+	/**
+	 *  バックアップの複製先: an absolute folder, or none (v0.4.0). Belongs to
+	 *  the PC; chosen with choose_backup_mirror only, not by update_settings.
+	 */
+	backup_mirror_dir: string | null,
+	/**
+	 *  The newest daily backup that reached the mirror (written by the app,
+	 *  not by update_settings).
+	 */
+	backup_mirror_last_ok: string | null,
 };
 
 /**

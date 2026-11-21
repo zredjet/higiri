@@ -1,14 +1,20 @@
 //! ダッシュボード: get_dashboard, get_startup_reminder, ack_reminder.
 
+use std::path::Path;
+
 use chrono::NaiveDate;
 use sqlx::{SqliteConnection, SqlitePool};
 use tauri::State;
 
+use super::backup::DataDir;
 use super::clock;
 use super::error::CmdResult;
 use super::todos::all_links;
+use crate::backup;
+use crate::domain::backup_mirror::{self, BackupMirrorAlert};
 use crate::domain::dashboard::{self, Dashboard, StartupReminder};
 use crate::domain::model::{Project, Todo};
+use crate::domain::settings::Settings;
 use crate::domain::urgency::Rules;
 use crate::domain::views::Links;
 use crate::repo;
@@ -16,8 +22,11 @@ use crate::repo::todos::TodoFilter;
 
 #[tauri::command]
 #[specta::specta]
-pub async fn get_dashboard(pool: State<'_, SqlitePool>) -> CmdResult<Dashboard> {
-    get(&pool, clock::today()).await
+pub async fn get_dashboard(
+    pool: State<'_, SqlitePool>,
+    data_dir: State<'_, DataDir>,
+) -> CmdResult<Dashboard> {
+    with_backup_alert(&pool, &data_dir.0, clock::today()).await
 }
 
 /// The reminder to show at startup (or when the date changed while the app
@@ -44,17 +53,46 @@ async fn active(conn: &mut SqliteConnection) -> CmdResult<(Vec<Project>, Vec<Tod
     Ok((projects, todos, links))
 }
 
+/// The dashboard without the backup mirror's notice (the resident timer's
+/// counts).
 pub async fn get(pool: &SqlitePool, today: NaiveDate) -> CmdResult<Dashboard> {
+    Ok(load(pool, today).await?.0)
+}
+
+/// The dashboard as the screen shows it, with the backup mirror's notice
+/// (from the daily backups in `data_dir`).
+pub async fn with_backup_alert(
+    pool: &SqlitePool,
+    data_dir: &Path,
+    today: NaiveDate,
+) -> CmdResult<Dashboard> {
+    let (mut dash, settings) = load(pool, today).await?;
+    dash.backup_mirror_alert = mirror_alert(data_dir, &settings);
+    Ok(dash)
+}
+
+async fn load(pool: &SqlitePool, today: NaiveDate) -> CmdResult<(Dashboard, Settings)> {
     let mut conn = pool.acquire().await?;
     let settings = repo::settings::load(&mut conn).await?;
     let (projects, todos, links) = active(&mut conn).await?;
-    Ok(dashboard::build(
+    let dash = dashboard::build(
         projects,
         &todos,
         &links,
         today,
         &Rules::from_settings(&settings),
-    ))
+    );
+    Ok((dash, settings))
+}
+
+/// 3 or more daily backups after the last one that reached the mirror. A
+/// backups folder that cannot be read gives no notice (and a log line).
+fn mirror_alert(data_dir: &Path, settings: &Settings) -> Option<BackupMirrorAlert> {
+    settings.backup_mirror_dir.as_ref()?;
+    let daily = backup::daily_dates(data_dir)
+        .inspect_err(|e| log::error!("backups could not be listed: {}", e.kind()))
+        .ok()?;
+    backup_mirror::alert(true, settings.backup_mirror_last_ok, &daily)
 }
 
 pub async fn reminder(pool: &SqlitePool, today: NaiveDate) -> CmdResult<Option<StartupReminder>> {
@@ -189,5 +227,58 @@ mod tests {
         assert_eq!(reminder(&pool, d("2026-11-19")).await.unwrap(), None);
         let dash = get(&pool, d("2026-11-19")).await.unwrap();
         assert_eq!(dash.attention_total, 0);
+    }
+
+    #[tokio::test]
+    async fn the_mirror_notice_comes_after_three_missed_daily_backups() {
+        use crate::domain::backup_mirror::BackupMirrorAlert;
+
+        let pool = seeded().await;
+        let tmp = tempfile::tempdir().unwrap();
+        let backups = backup::dir(tmp.path());
+        std::fs::create_dir_all(&backups).unwrap();
+        let put = |day: &str| std::fs::write(backups.join(format!("todo-{day}.db")), "").unwrap();
+        for day in ["2026-11-16", "2026-11-17", "2026-11-18"] {
+            put(day);
+        }
+        let today = d("2026-11-19");
+        // No mirror: no notice, and get() never has one.
+        assert_eq!(
+            with_backup_alert(&pool, tmp.path(), today)
+                .await
+                .unwrap()
+                .backup_mirror_alert,
+            None
+        );
+        {
+            let mut c = pool.acquire().await.unwrap();
+            repo::settings::set_backup_mirror(
+                &mut c,
+                Some(&tmp.path().join("usb").display().to_string()),
+                Some(d("2026-11-16")),
+            )
+            .await
+            .unwrap();
+        }
+        // 11/17 and 11/18 missed: not yet.
+        assert_eq!(
+            with_backup_alert(&pool, tmp.path(), today)
+                .await
+                .unwrap()
+                .backup_mirror_alert,
+            None
+        );
+        put("2026-11-19");
+        let dash = with_backup_alert(&pool, tmp.path(), today).await.unwrap();
+        assert_eq!(
+            dash.backup_mirror_alert,
+            Some(BackupMirrorAlert {
+                last_ok: Some(d("2026-11-16")),
+                days: 3
+            })
+        );
+        // The rest of the dashboard is the same as without it.
+        assert_eq!(dash.attention_total, 5);
+        assert_eq!(get(&pool, today).await.unwrap().backup_mirror_alert, None);
     }
 }

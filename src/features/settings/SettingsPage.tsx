@@ -16,6 +16,9 @@ import { errorMessage } from "../../lib/errors";
 import { isComposing } from "../../lib/keys";
 import {
   useArchiveProject,
+  useChooseBackupMirror,
+  useClearBackupMirror,
+  useDashboard,
   useExportData,
   useHolidays,
   useOpenDataFolder,
@@ -26,7 +29,14 @@ import {
   type SettingsChange,
 } from "../../lib/queries";
 import { DeleteProjectDialog } from "../projects/DeleteProjectDialog";
-import { backupLabel } from "./backupText";
+import {
+  backupLabel,
+  MIRROR_INTRO,
+  mirrorAlertText,
+  mirrorDirText,
+  mirrorLastOkText,
+  restoredFileText,
+} from "./backupText";
 import { ImportDialog } from "./ImportDialog";
 import { ReportTemplateCard } from "./ReportTemplateCard";
 import { RestoreDialog } from "./RestoreDialog";
@@ -76,14 +86,17 @@ export function SettingsPage() {
       {settings.data ? <ReportTemplateCard kind="weekly" template={settings.data.weekly_report_template} /> : null}
       <TodoTemplateCard />
       <DisplayCard />
-      <DataCard />
+      <DataCard settings={settings.data} />
       <ArchivedProjectsCard />
     </div>
   );
 }
 
-/** データ: the data folder, restoring a backup (C-1), and the JSON export and import (C-2). */
-function DataCard() {
+/**
+ * データ: the data folder, restoring a backup (C-1), the backup mirror (C-3) and the JSON export and import
+ * (C-2).
+ */
+function DataCard({ settings }: { settings: Settings | undefined }) {
   const openFolder = useOpenDataFolder();
   const exportData = useExportData();
   const [restoring, setRestoring] = useState(false);
@@ -114,6 +127,7 @@ function DataCard() {
             バックアップから復元
           </Button>
         </div>
+        {settings ? <BackupMirrorSection settings={settings} onAction={() => setNotice(null)} /> : null}
         <p className="settings-card__text">
           全データを1つのJSONファイルに書き出せます。書き出したファイルから取り込むと、今のデータはすべて置き換わります。
         </p>
@@ -150,6 +164,10 @@ function DataCard() {
             `「${backupLabel(b)}」から復元しました。元に戻すときは「復元・取り込みの前の状態」を選んで復元してください。`,
           );
         }}
+        onRestoredFile={(fileName) => {
+          setRestoring(false);
+          setNotice(restoredFileText(fileName));
+        }}
       />
       <ImportDialog
         open={importing}
@@ -162,6 +180,60 @@ function DataCard() {
         }}
       />
     </Card>
+  );
+}
+
+/**
+ * バックアップの複製先 (v0.4.0, C-3): where the daily backups are copied, the last day they were, and the
+ * dashboard's notice when they have not been for 3 days or more. The folder dialog opens on the Rust side.
+ */
+function BackupMirrorSection({ settings, onAction }: { settings: Settings; onAction: () => void }) {
+  const choose = useChooseBackupMirror();
+  const clear = useClearBackupMirror();
+  const alert = useDashboard().data?.backup_mirror_alert ?? null;
+  const dir = settings.backup_mirror_dir;
+  const busy = choose.isPending || clear.isPending;
+  const error = choose.isError ? choose.error : clear.error;
+
+  function chooseFolder() {
+    onAction();
+    clear.reset();
+    choose.mutate();
+  }
+
+  return (
+    <section className="az-field backup-mirror" aria-labelledby="backup-mirror-label">
+      <h3 id="backup-mirror-label" className="az-field__label backup-mirror__label">
+        バックアップの複製先
+      </h3>
+      {alert && dir ? <Alert tone="warning">{mirrorAlertText(alert)}</Alert> : null}
+      {error ? <Alert tone="danger">{errorMessage(error)}</Alert> : null}
+      {dir ? (
+        <>
+          <p className="settings-card__text backup-mirror__dir">{mirrorDirText(dir)}</p>
+          <p className="settings-card__text">{mirrorLastOkText(settings.backup_mirror_last_ok)}</p>
+        </>
+      ) : (
+        <p className="settings-card__text">{MIRROR_INTRO}</p>
+      )}
+      <div className="settings-card__actions">
+        <Button iconStart="folder" loading={choose.isPending} disabled={clear.isPending} onClick={chooseFolder}>
+          {dir ? "複製先を変える" : "複製先を選ぶ"}
+        </Button>
+        {dir ? (
+          <Button
+            disabled={busy}
+            onClick={() => {
+              onAction();
+              choose.reset();
+              clear.mutate();
+            }}
+          >
+            複製をやめる
+          </Button>
+        ) : null}
+      </div>
+    </section>
   );
 }
 

@@ -1169,6 +1169,19 @@ input[type="date"][data-empty="true"]:not(:focus) {
   gap: var(--space-4);
 }
 
+/* データ: バックアップの複製先 (v0.4.0). A long folder path wraps. */
+.backup-mirror {
+  margin: 0;
+}
+
+.backup-mirror__label {
+  margin: 0;
+}
+
+.backup-mirror__dir {
+  overflow-wrap: anywhere;
+}
+
 /* 表示: the 表示倍率 select is as wide as its longest label needs. */
 .settings-zoom .az-select {
   width: 200px;

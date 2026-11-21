@@ -18,6 +18,8 @@
 //! | `report_template` | `{"title", "sections": [{"kind", "heading", "enabled", "options"}, …]}` |
 //! | `weekly_report_template` | the same shape, with the weekly report's kinds and items |
 //! | `zoom` | `70`, `80`, `90`, `100`, `110`, `125` or `150` |
+//! | `backup_mirror_dir` | an absolute folder (`"/Volumes/USB/higiri"`) or `null` |
+//! | `backup_mirror_last_ok` | `"YYYY-MM-DD"` or `null` |
 //!
 //! Missing keys, unknown keys and unreadable values fall back to the defaults
 //! so that a bad row never prevents the app from starting (a `zoom` that is
@@ -25,7 +27,9 @@
 //!
 //! `last_reminded_on`, `last_notified_at` and `tray_hint_shown` are written by
 //! the app, one key at a time ([`set_last_reminded_on`] and the like), so that
-//! saving the settings screen never puts back an older value.
+//! saving the settings screen never puts back an older value. So are the
+//! backup mirror's two keys ([`set_backup_mirror`]): the folder is chosen in
+//! a dialog on the Rust side only.
 
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
@@ -55,16 +59,20 @@ pub const CUSTOM_HOLIDAYS: &str = "custom_holidays";
 pub const REPORT_TEMPLATE: &str = "report_template";
 pub const WEEKLY_REPORT_TEMPLATE: &str = "weekly_report_template";
 pub const ZOOM: &str = "zoom";
+pub const BACKUP_MIRROR_DIR: &str = "backup_mirror_dir";
+pub const BACKUP_MIRROR_LAST_OK: &str = "backup_mirror_last_ok";
 
 /// Keys a restore (and the JSON import) leaves as they are on this PC:
-/// `autostart` and `zoom` belong to the PC (the screen differs from PC to
-/// PC), the others are written by the app.
-pub const KEPT_ON_REPLACE: [&str; 5] = [
+/// `autostart`, `zoom` and `backup_mirror_dir` belong to the PC (the screen
+/// and the folders differ from PC to PC), the others are written by the app.
+pub const KEPT_ON_REPLACE: [&str; 7] = [
     AUTOSTART,
     LAST_NOTIFIED_AT,
     TRAY_HINT_SHOWN,
     LAST_REMINDED_ON,
     ZOOM,
+    BACKUP_MIRROR_DIR,
+    BACKUP_MIRROR_LAST_OK,
 ];
 
 fn read<T: DeserializeOwned>(value: &str, fallback: T) -> T {
@@ -116,6 +124,14 @@ fn read_zoom(value: &str, fallback: u32) -> u32 {
         .unwrap_or(fallback)
 }
 
+/// A stored mirror folder: an absolute path, or none (anything else too).
+fn read_mirror_dir(value: &str) -> Option<String> {
+    serde_json::from_str::<Option<String>>(value)
+        .ok()
+        .flatten()
+        .filter(|dir| std::path::Path::new(dir).is_absolute())
+}
+
 /// A stored UTC timestamp (or null), or the fallback when unreadable.
 fn read_timestamp(value: &str, fallback: Option<DateTime<Utc>>) -> Option<DateTime<Utc>> {
     match serde_json::from_str::<Option<String>>(value) {
@@ -152,6 +168,10 @@ pub async fn load(conn: &mut SqliteConnection) -> Result<Settings> {
                     read_weekly_report_template(&value, s.weekly_report_template)
             }
             ZOOM => s.zoom = read_zoom(&value, s.zoom),
+            BACKUP_MIRROR_DIR => s.backup_mirror_dir = read_mirror_dir(&value),
+            BACKUP_MIRROR_LAST_OK => {
+                s.backup_mirror_last_ok = read(&value, s.backup_mirror_last_ok)
+            }
             _ => {}
         }
     }
@@ -177,6 +197,12 @@ pub async fn save(conn: &mut SqliteConnection, s: &Settings) -> Result<()> {
     set_last_reminded_on(conn, s.last_reminded_on).await?;
     set_last_notified_at(conn, s.last_notified_at).await?;
     set_tray_hint_shown(conn, s.tray_hint_shown).await?;
+    set_backup_mirror(
+        conn,
+        s.backup_mirror_dir.as_deref(),
+        s.backup_mirror_last_ok,
+    )
+    .await?;
     Ok(())
 }
 
@@ -219,6 +245,41 @@ pub async fn set_tray_hint_shown(conn: &mut SqliteConnection, shown: bool) -> Re
     put(conn, TRAY_HINT_SHOWN, &shown).await
 }
 
+/// The backup mirror's folder and its newest mirrored daily backup (both
+/// null: no mirror).
+pub async fn set_backup_mirror(
+    conn: &mut SqliteConnection,
+    dir: Option<&str>,
+    last_ok: Option<NaiveDate>,
+) -> Result<()> {
+    put(conn, BACKUP_MIRROR_DIR, &dir).await?;
+    put(conn, BACKUP_MIRROR_LAST_OK, &last_ok).await
+}
+
+/// Records the newest daily backup that reached the mirror `dir`, unless the
+/// mirror was changed or cleared meanwhile. Returns whether it was recorded.
+pub async fn set_backup_mirror_last_ok(
+    conn: &mut SqliteConnection,
+    dir: &str,
+    last_ok: Option<NaiveDate>,
+) -> Result<bool> {
+    let value = serde_json::to_string(&last_ok).unwrap_or_else(|_| "null".to_owned());
+    let dir = serde_json::to_string(dir).unwrap_or_else(|_| "null".to_owned());
+    let done = sqlx::query(
+        "INSERT INTO settings (key, value)
+         SELECT ?1, ?2
+         WHERE EXISTS (SELECT 1 FROM settings WHERE key = ?3 AND value = ?4)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    )
+    .bind(BACKUP_MIRROR_LAST_OK)
+    .bind(value)
+    .bind(BACKUP_MIRROR_DIR)
+    .bind(dir)
+    .execute(&mut *conn)
+    .await?;
+    Ok(done.rows_affected() > 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -228,6 +289,16 @@ mod tests {
     use crate::domain::settings::{DayCount, ReminderFrequency, Theme};
     use crate::domain::testing::{d, ts};
     use crate::repo::testing::conn;
+
+    /// Absolute folders on this OS.
+    #[cfg(windows)]
+    const MIRROR: &str = r"E:\higiri";
+    #[cfg(windows)]
+    const OTHER: &str = r"F:\backup";
+    #[cfg(not(windows))]
+    const MIRROR: &str = "/Volumes/USB/higiri";
+    #[cfg(not(windows))]
+    const OTHER: &str = "/Volumes/Other";
 
     #[tokio::test]
     async fn empty_table_gives_defaults() {
@@ -266,6 +337,8 @@ mod tests {
                 ..WeeklyReportTemplate::default()
             },
             zoom: 125,
+            backup_mirror_dir: Some(MIRROR.into()),
+            backup_mirror_last_ok: Some(d("2026-11-18")),
         };
         save(&mut c, &s).await.unwrap();
         assert_eq!(load(&mut c).await.unwrap(), s);
@@ -274,6 +347,8 @@ mod tests {
         let s2 = Settings {
             last_reminded_on: None,
             last_notified_at: None,
+            backup_mirror_dir: None,
+            backup_mirror_last_ok: None,
             ..s
         };
         save(&mut c, &s2).await.unwrap();
@@ -307,6 +382,8 @@ mod tests {
             rows,
             vec![
                 ("autostart".to_owned(), "true".to_owned()),
+                ("backup_mirror_dir".to_owned(), "null".to_owned()),
+                ("backup_mirror_last_ok".to_owned(), "null".to_owned()),
                 ("close_to_tray".to_owned(), "false".to_owned()),
                 (
                     "custom_holidays".to_owned(),
@@ -367,6 +444,125 @@ mod tests {
             .unwrap();
             assert_eq!(load(&mut c).await.unwrap().zoom, zoom, "{stored}");
         }
+    }
+
+    #[tokio::test]
+    async fn the_backup_mirror_is_an_absolute_folder_and_a_date() {
+        let (_pool, mut c) = conn().await;
+        set_backup_mirror(&mut c, Some(MIRROR), Some(d("2026-11-19")))
+            .await
+            .unwrap();
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT key, value FROM settings WHERE key LIKE 'backup_mirror%' ORDER BY key",
+        )
+        .fetch_all(&mut *c)
+        .await
+        .unwrap();
+        assert_eq!(
+            rows,
+            [
+                (
+                    "backup_mirror_dir".to_owned(),
+                    serde_json::to_string(MIRROR).unwrap()
+                ),
+                (
+                    "backup_mirror_last_ok".to_owned(),
+                    r#""2026-11-19""#.to_owned()
+                ),
+            ]
+        );
+        let s = load(&mut c).await.unwrap();
+        assert_eq!(s.backup_mirror_dir.as_deref(), Some(MIRROR));
+        assert_eq!(s.backup_mirror_last_ok, Some(d("2026-11-19")));
+
+        // Not an absolute folder, or unreadable: no mirror.
+        for bad in [r#""higiri""#, r#""""#, "1", r#"["/x"]"#, "null"] {
+            sqlx::query("UPDATE settings SET value = ?1 WHERE key = 'backup_mirror_dir'")
+                .bind(bad)
+                .execute(&mut *c)
+                .await
+                .unwrap();
+            assert_eq!(load(&mut c).await.unwrap().backup_mirror_dir, None, "{bad}");
+        }
+        for bad in [r#""2026/11/19""#, r#""yesterday""#, "20261119", "null"] {
+            sqlx::query("UPDATE settings SET value = ?1 WHERE key = 'backup_mirror_last_ok'")
+                .bind(bad)
+                .execute(&mut *c)
+                .await
+                .unwrap();
+            assert_eq!(
+                load(&mut c).await.unwrap().backup_mirror_last_ok,
+                None,
+                "{bad}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_mirrored_day_is_recorded_only_for_the_same_folder() {
+        let (_pool, mut c) = conn().await;
+        // No mirror: nothing recorded.
+        assert!(
+            !set_backup_mirror_last_ok(&mut c, MIRROR, Some(d("2026-11-19")))
+                .await
+                .unwrap()
+        );
+        assert_eq!(load(&mut c).await.unwrap().backup_mirror_last_ok, None);
+
+        set_backup_mirror(&mut c, Some(MIRROR), Some(d("2026-11-18")))
+            .await
+            .unwrap();
+        assert!(
+            set_backup_mirror_last_ok(&mut c, MIRROR, Some(d("2026-11-19")))
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            load(&mut c).await.unwrap().backup_mirror_last_ok,
+            Some(d("2026-11-19"))
+        );
+
+        // The folder was changed meanwhile: the new one's day stays.
+        set_backup_mirror(&mut c, Some(OTHER), Some(d("2026-11-17")))
+            .await
+            .unwrap();
+        assert!(
+            !set_backup_mirror_last_ok(&mut c, MIRROR, Some(d("2026-11-20")))
+                .await
+                .unwrap()
+        );
+        let s = load(&mut c).await.unwrap();
+        assert_eq!(s.backup_mirror_dir.as_deref(), Some(OTHER));
+        assert_eq!(s.backup_mirror_last_ok, Some(d("2026-11-17")));
+
+        // The key itself missing (only the folder written): written.
+        sqlx::query("DELETE FROM settings WHERE key = 'backup_mirror_last_ok'")
+            .execute(&mut *c)
+            .await
+            .unwrap();
+        assert!(
+            set_backup_mirror_last_ok(&mut c, OTHER, Some(d("2026-11-20")))
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            load(&mut c).await.unwrap().backup_mirror_last_ok,
+            Some(d("2026-11-20"))
+        );
+    }
+
+    #[tokio::test]
+    async fn user_settings_leave_the_backup_mirror() {
+        let (_pool, mut c) = conn().await;
+        set_backup_mirror(&mut c, Some(MIRROR), Some(d("2026-11-19")))
+            .await
+            .unwrap();
+        save_user_settings(&mut c, &Settings::default())
+            .await
+            .unwrap();
+        let s = load(&mut c).await.unwrap();
+        assert_eq!(s.backup_mirror_dir.as_deref(), Some(MIRROR));
+        assert_eq!(s.backup_mirror_last_ok, Some(d("2026-11-19")));
     }
 
     #[tokio::test]

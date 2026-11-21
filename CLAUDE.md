@@ -91,8 +91,8 @@ SQLite(アプリのデータフォルダ内の todo.db)
 - 適用済みのマイグレーションファイルは書き換えない。変更は新しいファイルを足す。
 - DBへの接続なしで `cargo build` が通る構成にする(`query!` 系マクロを使うなら `cargo sqlx prepare` の成果物をコミットする)。
 - バックアップは `VACUUM INTO` で作る。WALモードのDBファイルを単純コピーしない。
-- バックアップは `src-tauri/src/backup.rs`。データフォルダの `backups/` に、その日最初の起動時に `todo-YYYY-MM-DD.db` を作り、新しい順に7個残す(起動しなかった日は数えない)。常駐中に日付が変わったときも、常駐のタイマーが `backup::run_daily` でその日のバックアップを作る(`notifier::backup_if_new_day`。1日1個、7個残すのは同じ)。復元と JSON の取り込み(フェーズ15)の前には今のデータを `before-restore-<UTC日時>.db` に退避し、新しい順に3個残す。退避も復元の一覧に「復元・取り込みの前の状態」として出し、復元と取り込みを取り消せるようにする。
-- 復元は、選んだバックアップの作業用コピーを検査してマイグレーションを当ててから、`ATTACH` して全テーブルの行を1トランザクションで入れ替える(接続プールを開いたまま、再起動なしで済む)。新しい版のアプリで作ったバックアップと、壊れたファイルは復元しない。`autostart`、`last_notified_at`、`tray_hint_shown`、`last_reminded_on`、`zoom`(v0.4.0。`repo::settings::KEPT_ON_REPLACE`)は、入れ替えの同じトランザクションの中で今の値に戻す(今ない値は、入れ替えたあともない)。退避・行の入れ替え・古い退避の削除は `backup::keep_and_replace`(行の入れ替えは中の `backup::copy_rows`)で、フェーズ15の JSON の取り込みも同じ関数を使う。入れ替える表は `backup.rs` の `DELETE_CHILD_FIRST` と `INSERT_PARENT_FIRST` に並べる(9つすべて)。v0.3.0 の表は、消すのは `todo_dependencies`、`todo_repeats` を `todos` より先、入れるのは `todos` より後(`todo_templates` はほかの表を指さない)。v0.2.0 までのバックアップは、作業用のコピーにマイグレーションを当てるので、3つの表が空になって復元される。復元のあとは `restore_backup` の `#[tauri::command]` の層で `resident::apply` を呼び、×ボタンの動きとタイマーの待ち時間を復元した設定に合わせる。
+- バックアップは `src-tauri/src/backup.rs`。データフォルダの `backups/` に、その日最初の起動時に `todo-YYYY-MM-DD.db` を作り、新しい順に7個残す(起動しなかった日は数えない)。常駐中に日付が変わったときも、常駐のタイマーが `backup::run_daily` でその日のバックアップを作る(`notifier::backup_if_new_day`。1日1個、7個残すのは同じ)。復元と JSON の取り込み(フェーズ15)の前には今のデータを `before-restore-<UTC日時>.db` に退避し、新しい順に3個残す。退避も復元の一覧に「復元・取り込みの前の状態」として出し、復元と取り込みを取り消せるようにする。v0.4.0 では、利用者が選んだ複製先のフォルダに毎日のバックアップ(新しい7個)を同じ名前で写す(`backup::sync_mirror`。退避は写さない。下の「v0.4.0 の決めごと」のフェーズ27)。
+- 復元は、選んだバックアップの作業用コピーを検査してマイグレーションを当ててから、`ATTACH` して全テーブルの行を1トランザクションで入れ替える(接続プールを開いたまま、再起動なしで済む)。一覧から選ぶ復元(`backup::restore`)と、v0.4.0 のファイルを選ぶ復元(`backup::restore_file`。複製先のファイルなど、`backups/` の外も選べる)は、どちらも中の `restore_from` を通る。新しい版のアプリで作ったバックアップと、壊れたファイル(Higiri の DB でないものも)は復元しない。選んだファイルそのものは変えない。`autostart`、`last_notified_at`、`tray_hint_shown`、`last_reminded_on`、`zoom`、`backup_mirror_dir`、`backup_mirror_last_ok`(後の3つは v0.4.0。`repo::settings::KEPT_ON_REPLACE`)は、入れ替えの同じトランザクションの中で今の値に戻す(今ない値は、入れ替えたあともない)。退避・行の入れ替え・古い退避の削除は `backup::keep_and_replace`(行の入れ替えは中の `backup::copy_rows`)で、フェーズ15の JSON の取り込みも同じ関数を使う。入れ替える表は `backup.rs` の `DELETE_CHILD_FIRST` と `INSERT_PARENT_FIRST` に並べる(9つすべて)。v0.3.0 の表は、消すのは `todo_dependencies`、`todo_repeats` を `todos` より先、入れるのは `todos` より後(`todo_templates` はほかの表を指さない)。v0.2.0 までのバックアップは、作業用のコピーにマイグレーションを当てるので、3つの表が空になって復元される。復元のあとは `restore_backup`(と `restore_backup_file`)の `#[tauri::command]` の層で `resident::apply` を呼び、×ボタンの動きとタイマーの待ち時間を復元した設定に合わせる。
 
 ## 画面の決めごと
 
@@ -254,7 +254,7 @@ v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作った�
     - 書き出し: 表(v0.3.0 からは8つ)と settings を1つのトランザクションで読む。保存先と同じフォルダの `<名前>.part` に書いてから名前を変え、失敗したら `.part` を消す(途中までのファイルを残さない)。JSON として読めない settings の値は書き出さない(アプリは既定値として読むので、取り込んでも同じになる)。JSON として読めない `note` は文字列として書き出す(アプリが書くことはない。その行は取り込みで「読めない値」として断られる)。
     - 取り込みの順: (1) 先頭の BOM を除く。(2) 先頭の項目だけを読む(ほかのキーも構文は確かめる)。JSON として読めなければ `NotJson`、`format` が違えば `NotOurs`、`format_version` が1より大きいか `schema_version` がこの版の最新より大きければ `TooNew`、版の値がおかしければ `Malformed`。(3) 5つの表と settings を読む(どれかがなければ `Malformed`。ほかのキーは無視。v0.3.0 の3つの表は `schema_version` が2以上のときだけ要る)。(4) `backups/import-work.db` を作り、ファイルの `schema_version` までマイグレーションを当てて(`MIGRATOR.run_to`)、外部キーを遅らせた1つのトランザクションで行を入れる。列は作業用の DB の `pragma_table_info` と照らし、知らない列と型の違う値(INTEGER の列に整数以外、TEXT の列に文字列以外)は `Malformed`。ない列は表の既定値になる。外部キー・CHECK・NOT NULL・主キーの重複は `Constraint`。(5) 残りのマイグレーションを当て、アプリの読み取り(`repo::projects::list`、`repo::todos::list`、`repo::work_logs::list_all`、`repo::events::list_all`、`repo::reports::list_all`。v0.3.0 で `repo::templates::list`、`repo::repeats::list`、`repo::dependencies::list` を足した)で全行を読み直す。読めない値(日付の書き方、ステータス名、優先度、変更履歴の種類と `note` の形、テンプレートの `body` と周期の `rule`)は `Unreadable`。(6) `backup::keep_and_replace` で退避して入れ替える。断ったときは退避も入れ替えもせず、作業用の DB は成否にかかわらず消す。
     - 行は同じ列の並びが続く間、1つの INSERT にまとめる(1文の値は4,000個まで)。ID はファイルの値のまま入れる。`AUTOINCREMENT` の表はない(`sqlite_sequence` もない)ので、取り込んだあとの新しい行は今ある最大の ID の次になる。
-    - settings: ファイルの値をそのまま入れる。知らないキーも残し(アプリは無視する)、読めない値も残す(アプリは既定値として読む。DB のときと同じ)。`KEPT_ON_REPLACE` の4つ(v0.4.0 で `zoom` を足して5つ)は `copy_rows` が今の値に戻す。
+    - settings: ファイルの値をそのまま入れる。知らないキーも残し(アプリは無視する)、読めない値も残す(アプリは既定値として読む。DB のときと同じ)。`KEPT_ON_REPLACE` の4つ(v0.4.0 で `zoom`、`backup_mirror_dir`、`backup_mirror_last_ok` を足して7つ)は `copy_rows` が今の値に戻す。
     - エラーの文は `commands/json_data.rs` の `import_error`。断ったときは「〜ため、取り込めませんでした。今のデータは変わっていません。」に、どうすればよいか(「Higiriの「JSONで書き出す」で作ったファイルを選んでください。」「アプリを新しい版にしてから取り込んでください。」「書き出したあとに手で直した所があれば元に戻すか、書き出し直したファイルを選んでください。」)を続ける。
     - ダイアログは .md の保存と同じく `spawn_blocking` で開く(保存は `blocking_save_file`、既定の名前は `higiri-YYYY-MM-DD.json`。取り込みは `blocking_pick_file`)。どちらも JSON の絞り込みを付ける。選ばずに閉じたら `null` を返し、何もしない。`export_data` は保存先のパス、`import_data` はファイル名を返す。取り込みのあとは `resident::apply` を呼ぶ(復元と同じ)。
     - 動作ログ: 書き出しと取り込みをしたこと、取り込みで作った退避のファイル名、断った理由の種類(読めない値は列の名前まで)だけを書く(件数・中身・パスは書かない。`ImportError` は値を持たない)。
@@ -455,7 +455,7 @@ v0.4.0 は `docs/implementation-plan-v0.4.0.md` のフェーズ25〜30で作る�
   - コマンドは足していない(41個のまま)。`update_settings` が `SettingsInput.zoom` を受け取る。
   - 作ったもの(フェーズ26)
     - `domain/settings.rs`: `Settings.zoom`(百分率)、`ZOOM_LEVELS`(`[70, 80, 90, 100, 110, 125, 150]`)、`DEFAULT_ZOOM`(100)、`is_zoom_level`、`zoom_factor`(100 → 1.0)。`ZOOM_LEVELS` と `DEFAULT_ZOOM` は tauri-specta の `constant` で `bindings.ts` に出す(`commands::specta_builder`)。画面の選択肢はこれから作る。
-    - `repo::settings`: キー `zoom`。一覧にない値と読めない値(`125.0`、`"125"`、`null` など)は既定値の100として読む(`read_zoom`)。`save_user_settings` が書く。`KEPT_ON_REPLACE` は5つ(`zoom` を足した)。
+    - `repo::settings`: キー `zoom`。一覧にない値と読めない値(`125.0`、`"125"`、`null` など)は既定値の100として読む(`read_zoom`)。`save_user_settings` が書く。`KEPT_ON_REPLACE` は5つ(`zoom` を足した。フェーズ27で7つ)。
     - `commands/settings.rs`: 一覧にない値は「表示倍率は一覧から選んでください。」で断る(ほかの設定の検査のあと、保存の前)。
     - 反映: `resident.rs` の `Zoom`(今の倍率を `AtomicU32` で持つ managed state)、`apply_zoom`(メインのウィンドウの webview に `set_zoom(zoom_factor(..))`)。`resident::apply`(`update_settings`、復元、取り込みのあと)は、倍率が変わったときだけ当て直す。起動時は setup で設定を読んだ直後(ウィンドウを出す前)に当てる。さらに、メインの webview のページの読み込みが終わるたびに当て直す(`lib.rs` の `on_page_load` → `resident::on_page_loaded`。WebView2 はサイトごとに倍率を覚え、ページの読み込みで戻すことがあるため)。当てられなかったときは動作ログに書くだけ。
     - Ctrl+ホイールなど WebView の標準の拡大・縮小は今までどおり効かない(`zoomHotkeysEnabled` は既定の false のまま)。`npm run dev:web` では倍率は効かない。
@@ -467,6 +467,33 @@ v0.4.0 は `docs/implementation-plan-v0.4.0.md` のフェーズ25〜30で作る�
       - ガントの画面(`.app__main--fill`)は `overflow: hidden` をやめた。高さが足りないとき(150%では見出し・絞り込み・凡例で半分ほどを使う)は画面が縦にスクロールし、ガントは `min-height: 240px` を保つ。
       - 起動時リマインドの一覧(`max(88px, min(400px, 50vh, 100vh - 300px))`)、検索の結果(`max(96px, min(480px, 55vh, 100vh - 250px))`)、先行TODOの選択の結果(`max(96px, min(320px, 100vh - 330px))`)は、背の低いウィンドウでは一覧の高さを先に縮める。「確認しました」などのボタンが、ダイアログの中をスクロールしなくても見えるようにするため。ほかのダイアログは、Aizome のとおり画面の高さを超えると中がスクロールする。
       - 画面を切り替えたら `.app__main` のスクロールを左上に戻す(`App.tsx`)。画面どうしで同じ要素を使うので、前の画面のスクロールが残り、ガントの期間のボタンなどが上に隠れたまま開くことがあったため。
+      - 150%・幅1280で、ダッシュボードの日限注意の表と TODO一覧の表が枠の中で横にスクロールするのは、このままでよい(列をまとめる作りにはしない。利用者が決定)。
+- バックアップの複製先(フェーズ27)
+  - コマンドは `choose_backup_mirror`、`clear_backup_mirror`、`restore_backup_file` を足して44個。どれもダイアログを開く `#[tauri::command]` と、場所を受け取る内側の関数(`commands/backup.rs` の `choose_mirror`、`clear_mirror`、`restore_file`)に分け、テストは内側の関数を作業用のフォルダで呼ぶ。ダイアログは `json_data.rs` の `pick`(`spawn_blocking`)で開く。3つとも、終わったら `resident::apply` で常駐のタイマーに設定を渡す。
+  - 作ったもの(フェーズ27)
+    - `domain/backup_mirror.rs`: `missed(last_ok, 毎日のバックアップの日付)`(`last_ok` より後の個数。`null` ならすべて)、`behind`(1個以上。タイマーがやり直すか)、`alert(複製先があるか, last_ok, 日付)`(3個以上(`ALERT_DAYS`)で `BackupMirrorAlert { last_ok, days }`)。日数は起動した日(毎日のバックアップがある日)で数える。
+    - `domain/settings.rs`: `Settings.backup_mirror_dir`(文字列か `null`)、`backup_mirror_last_ok`(日付か `null`)。`SettingsInput` には入れない。`repo::settings`: 絶対パスでない値と読めない値は `null` として読む。書くのは `set_backup_mirror(dir, last_ok)`(2つを一緒に。選んだ・やめたとき)と、タイマーの `set_backup_mirror_last_ok(dir, last_ok)`(DB の複製先が `dir` のままのときだけ書く。複製している間に複製先を変えられても、新しい複製先の日付を上書きしない)。`save` も2つを書く。`KEPT_ON_REPLACE` は7つ。
+    - `backup.rs`
+      - `sync_mirror(data_dir, 複製先)`: (1) 複製先がない(フォルダでない)ときは失敗にし、フォルダを作らない(抜いたドライブの場所に作らないため)。(2) 複製先の `todo-YYYY-MM-DD.db.part` を消す。(3) `backups/` の新しい7個のうち、複製先に同じ名前のファイルがないものを `.part` に写し、`sync_all` してから名前を変える(失敗したら `.part` を消す)。(4) 複製先の `todo-YYYY-MM-DD.db` を新しい7個に減らす(`names_to_prune`。`before-restore-…` の名前やほかのファイル、フォルダには触れない)。戻り値は `backups/` のいちばん新しい毎日のバックアップの日付。ファイルの操作は同期なので、非同期の側からは `backup::mirror`(`spawn_blocking`)で呼ぶ。
+      - `daily_dates(data_dir)`: `backups/` の毎日のバックアップの日付(新しい順)。
+      - `is_within(path, base)`: 両方を `canonicalize` して、大文字・小文字を区別せずに部品で比べる(`..` やリンクも解く)。複製先にデータフォルダとその中を選べないようにするのと、今使っている `todo.db` を復元に選べないようにするのに使う。
+      - 復元は `restore`(一覧の名前)と `restore_file`(選んだファイルの場所)から、中の `restore_from` に分けた。`restore_file` は、データフォルダの今使っている `todo.db` を `BackupError::InUse` で断る(ただのファイルとして写すと、`-wal` に残っている最近の変更がない状態に戻ることがあるため)。選んだファイルを写せないときは `BackupError::Source`。選んだファイルは変えない(作業用のコピーにマイグレーションを当てる)。`backups/` の中のファイルも選べる。
+    - `commands/backup.rs`
+      - `choose_mirror`: データフォルダとその中は「アプリのデータフォルダの中は選べません。…」で断る。すぐに複製し、成功したときだけ2つのキーを保存する。失敗は「選んだフォルダに複製できませんでした。書き込めるフォルダか確かめてから、もう一度選んでください。」。戻り値は `BackupMirror { dir, last_ok }`(`dir` はダイアログが返したパスのまま)。前の複製先のファイルは消さない。
+      - `clear_mirror`: 2つのキーを `null` にする。複製先のファイルは消さない。
+      - `restore_backup_file`: `.db` の絞り込みのファイルのダイアログ。戻り値はファイル名。エラーの文は一覧からの復元と同じ(`restore_error`)。今使っている `todo.db` は「今使っているデータのファイルは選べません。バックアップのファイル(todo-2026-11-18.db など)を選んでください。」、読めないファイルは JSON の取り込みと同じ「ファイルを読めませんでした。…」。
+      - 動作ログには、選んだ・やめた・復元したことと、失敗の種類(`io::ErrorKind`)だけを書く。パスは書かない(選んだファイルの復元は「a chosen file」と書く)。
+    - 常駐のタイマー(`notifier.rs`): `MirrorSettings`(複製先、`last_ok`、その日に失敗を書いたか、前回が失敗だったか)を `Notifier` がメモリに持つ。起きるたびに `mirror_if_behind` が、`backups/` の一覧(DB ではない)と `last_ok` を `backup_mirror::behind` で比べ、そろっていなければ `backup::mirror` で写す。写せたら `set_backup_mirror_last_ok` で保存し、メモリも進める。写せなければ、次に起きたとき(最長10分後)にやり直す。動作ログは、失敗をその日の最初の1回だけ、前回が失敗で今回写せたら「works again」を1回、ふだんの成功は1日1回の「copied」。`Notifier::update` は、同じ複製先なら `last_ok` を新しいほうにし(タイマーが書く前に読んだ設定で戻さない)、違う複製先(か、なし)なら入れ替える。
+    - 起動時の複製は、setup の中では待たず、setup の最後に動かすタイマーの最初の起床(すぐに起きる。`run_daily` のあと)で行う。遅いドライブや、つながらないネットワークのフォルダで、ウィンドウが出るのが遅れないようにするため。
+    - タイマーが写したことは画面に送らない(画面にイベントの権限を付けないため)。設定画面とダッシュボードは、ウィンドウが前面に来たときと画面を開き直したときに取り直すので(TanStack Query の既定)、そこで知らせが消え、最後に複製できた日が進む。
+    - ダッシュボード: `Dashboard.backup_mirror_alert`。`dashboard::build` は `null` のままにし、`get_dashboard` の中(`commands/dashboard.rs` の `with_backup_alert`)で `backups/` の一覧と settings から入れる。常駐のタイマーの件数(`dashboard::get`)は一覧を読まない。
+    - 画面
+      - `backupText.ts`: `MIRROR_INTRO`、`mirrorDirText`(「複製先: …」)、`mirrorLastOkText`(「最後に複製できた日: 11/19」。まだなければ「まだありません」)、`mirrorAlertText`(日数は `days`。`last_ok` が `null` なら括弧の「最後に複製できた日」を出さない)、`restoredFileText`。Vitest あり。
+      - 設定の「データ」のカード: バックアップの文とボタンの下に「バックアップの複製先」のまとまり(`SettingsPage.tsx` の `BackupMirrorSection`)。複製先がないときは説明と「複製先を選ぶ」、あるときは複製先のパス(長いパスは折り返す。`app.css` の `.backup-mirror__dir`)、最後に複製できた日、「複製先を変える」「複製をやめる」。知らせの条件に当たるときは、まとまりの見出しの下にダッシュボードと同じ文の `Alert`(warning。`useDashboard` の `backup_mirror_alert`)。エラーはまとまりの中に出す。「複製をやめる」に確認は挟まない(もう一度選べば戻り、ファイルも消さないため)。
+      - 復元のダイアログ(`RestoreDialog`): フッターの「キャンセル」と「復元する」の間に「ファイルを選んで復元」。ファイルを選ばずに閉じたら、復元のダイアログは開いたまま。復元したら知らせ(`restoredFileText`)を出し、すべての一覧を取り直す。
+      - ダッシュボード: 見出しのすぐ下に、`backup_mirror_alert` があれば `Alert`(warning、×なし)。
+      - フックは `queries.ts` の `useChooseBackupMirror`、`useClearBackupMirror`(設定とダッシュボードを取り直す)、`useRestoreBackupFile`(すべての一覧を取り直す)。
+    - perf(`perf.rs`): 毎日のバックアップ7個を空の複製先に写す時間と、知らせつきの `get_dashboard` を測る。
 
 ## 品質の決めごと
 

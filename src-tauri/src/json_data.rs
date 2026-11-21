@@ -823,6 +823,15 @@ mod tests {
         repo_settings::set_tray_hint_shown(&mut c, true)
             .await
             .unwrap();
+        // The mirror of the PC that wrote the file.
+        let mirror = std::env::temp_dir().join("higiri-mirror-of-the-file");
+        repo_settings::set_backup_mirror(
+            &mut c,
+            Some(&mirror.display().to_string()),
+            Some(d("2026-11-10")),
+        )
+        .await
+        .unwrap();
         sqlx::query(
             "INSERT INTO settings (key, value) VALUES
                ('soon_days', '\"abc\"'), ('future_key', '{\"b\":1,\"a\":[2]}')
@@ -1107,6 +1116,7 @@ mod tests {
         let bytes = export(&src).await;
         let tmp = tempfile::tempdir().unwrap();
         let dst = file_db(tmp.path()).await;
+        let this_pc_mirror = tmp.path().join("mirror").display().to_string();
         cmd_settings::update(
             &dst,
             SettingsInput {
@@ -1126,6 +1136,9 @@ mod tests {
             repo_settings::set_last_notified_at(&mut c, Some(ts(2026, 11, 19, 0, 0)))
                 .await
                 .unwrap();
+            repo_settings::set_backup_mirror(&mut c, Some(&this_pc_mirror), Some(d("2026-11-19")))
+                .await
+                .unwrap();
             // tray_hint_shown stays unset here, though the file has true.
         }
         let before = dump(&dst).await.1;
@@ -1137,6 +1150,9 @@ mod tests {
         assert!(!read.autostart);
         // The file has 150%.
         assert_eq!(read.zoom, 80);
+        // The file has another PC's mirror (11/10).
+        assert_eq!(read.backup_mirror_dir, Some(this_pc_mirror));
+        assert_eq!(read.backup_mirror_last_ok, Some(d("2026-11-19")));
         assert_eq!(read.last_reminded_on, Some(d("2026-11-19")));
         assert_eq!(read.last_notified_at, Some(ts(2026, 11, 19, 0, 0)));
         assert!(!read.tray_hint_shown);

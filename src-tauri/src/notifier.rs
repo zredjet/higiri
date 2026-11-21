@@ -8,15 +8,21 @@
 //! 1. reads the clock with `commands::clock`;
 //! 2. takes the day's backup with `backup::run_daily` when the date changed
 //!    since the last wake (one a day, the newest 7 kept, as at startup);
-//! 3. when a notification time is due ([`tick`]): counts 日限注意 with the
+//! 3. copies the daily backups to the backup mirror (v0.4.0, C-3) when the
+//!    newest one has not reached it ([`mirror_if_behind`]): right after the
+//!    startup's backup (the first wake), after a new day's backup, and again
+//!    at every wake while the mirror cannot be written (a drive plugged back
+//!    in catches up the same day);
+//! 4. when a notification time is due ([`tick`]): counts 日限注意 with the
 //!    dashboard's own count, notifies when there is at least one, and saves
 //!    `last_notified_at` either way, so a time with none is not notified later.
 //!
-//! The settings it needs ([`NotifySettings`]) are kept in memory by
-//! [`Notifier`], so a wake that only reads the clock never touches the
-//! database: only a due time (the count and `last_notified_at`) and a new day
-//! (the backup) do. Saving the settings or restoring a backup hands the new
-//! values over with [`Notifier::update`], which also wakes the task so it
+//! The settings it needs ([`NotifySettings`], [`MirrorSettings`]) are kept in
+//! memory by [`Notifier`], so a wake that only reads the clock never touches
+//! the database: only a due time (the count and `last_notified_at`), a new
+//! day (the backup) and a copy to the mirror (`backup_mirror_last_ok`) do.
+//! Saving the settings, changing the mirror or restoring a backup hands the
+//! new values over with [`Notifier::update`], which also wakes the task so it
 //! computes the wait again.
 
 use std::path::{Path, PathBuf};
@@ -32,6 +38,7 @@ use tokio::sync::Notify;
 use crate::backup;
 use crate::commands::error::CmdResult;
 use crate::commands::{clock, dashboard};
+use crate::domain::backup_mirror;
 use crate::domain::notify::{self, MAX_WAIT, Message};
 use crate::domain::settings::Settings;
 use crate::repo;
@@ -63,10 +70,50 @@ impl NotifySettings {
     }
 }
 
+/// What the timer needs to keep the backup mirror in step (v0.4.0), and what
+/// it logged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirrorSettings {
+    /// The mirror folder (none: no mirror).
+    pub dir: Option<PathBuf>,
+    /// The newest daily backup that reached it.
+    pub last_ok: Option<NaiveDate>,
+    /// The day a failure was last logged (one line a day).
+    failure_logged_on: Option<NaiveDate>,
+    /// The last copy failed (the next one that works is logged).
+    failing: bool,
+}
+
+impl From<&Settings> for MirrorSettings {
+    fn from(s: &Settings) -> MirrorSettings {
+        MirrorSettings {
+            dir: s.backup_mirror_dir.as_ref().map(PathBuf::from),
+            last_ok: s.backup_mirror_last_ok,
+            failure_logged_on: None,
+            failing: false,
+        }
+    }
+}
+
+impl MirrorSettings {
+    /// Takes saved settings. The same folder keeps what was logged, and an
+    /// older day (read before the timer saved its own) does not replace a
+    /// newer one; another folder (or none) starts afresh.
+    fn take(&mut self, settings: &Settings) {
+        let next = MirrorSettings::from(settings);
+        if next.dir == self.dir {
+            self.last_ok = self.last_ok.max(next.last_ok);
+        } else {
+            *self = next;
+        }
+    }
+}
+
 /// The resident timer's settings and its wake-up (managed state).
 pub struct Notifier {
     wake: Arc<Notify>,
     settings: Arc<Mutex<NotifySettings>>,
+    mirror: Arc<Mutex<MirrorSettings>>,
 }
 
 impl Notifier {
@@ -75,6 +122,7 @@ impl Notifier {
         Notifier {
             wake: Arc::default(),
             settings: Arc::new(Mutex::new(NotifySettings::from(settings))),
+            mirror: Arc::new(Mutex::new(MirrorSettings::from(settings))),
         }
     }
 
@@ -92,6 +140,7 @@ impl Notifier {
                 current.notified(at);
             }
         }
+        lock(&self.mirror).take(settings);
         self.wake.notify_one();
     }
 
@@ -99,9 +148,14 @@ impl Notifier {
     pub fn settings(&self) -> NotifySettings {
         lock(&self.settings).clone()
     }
+
+    /// A copy of the mirror's settings in memory.
+    pub fn mirror(&self) -> MirrorSettings {
+        lock(&self.mirror).clone()
+    }
 }
 
-fn lock(m: &Mutex<NotifySettings>) -> std::sync::MutexGuard<'_, NotifySettings> {
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -193,6 +247,79 @@ pub async fn backup_if_new_day(
     }
 }
 
+/// What one wake did about the backup mirror.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mirrored {
+    /// No mirror, or the newest daily backup is already there.
+    InStep,
+    /// Copied; the newest daily backup on the mirror now.
+    Copied(Option<NaiveDate>),
+    /// The mirror could not be written (tried again at the next wake).
+    Failed,
+}
+
+/// Copies the daily backups to the mirror when the newest one has not
+/// reached it. Reads only the backups folder to decide (never the database);
+/// a copy that worked saves `backup_mirror_last_ok` (unless the mirror was
+/// changed meanwhile). The log says when it failed (once a day) and when it
+/// works again, without the folder's path.
+pub async fn mirror_if_behind(
+    pool: &SqlitePool,
+    data_dir: &Path,
+    shared: &Mutex<MirrorSettings>,
+    today: NaiveDate,
+) -> Mirrored {
+    let current = lock(shared).clone();
+    let Some(dir) = current.dir.clone() else {
+        return Mirrored::InStep;
+    };
+    let daily = match backup::daily_dates(data_dir) {
+        Ok(daily) => daily,
+        Err(e) => {
+            log::error!("backups could not be listed: {}", e.kind());
+            return Mirrored::InStep;
+        }
+    };
+    if !backup_mirror::behind(current.last_ok, &daily) {
+        return Mirrored::InStep;
+    }
+    match backup::mirror(data_dir.to_owned(), dir.clone()).await {
+        Ok(last_ok) => {
+            let saved = async {
+                let mut conn = pool.acquire().await?;
+                let dir = dir.to_string_lossy();
+                repo::settings::set_backup_mirror_last_ok(&mut conn, &dir, last_ok).await
+            }
+            .await;
+            if let Err(e) = saved {
+                log::error!("could not save backup_mirror_last_ok: {e}");
+            }
+            let mut m = lock(shared);
+            if m.dir.as_ref() == Some(&dir) {
+                m.last_ok = m.last_ok.max(last_ok);
+                if m.failing {
+                    log::info!("backup mirror works again; daily backups copied");
+                } else {
+                    log::info!("daily backups copied to the backup mirror");
+                }
+                m.failing = false;
+            }
+            Mirrored::Copied(last_ok)
+        }
+        Err(e) => {
+            let mut m = lock(shared);
+            if m.dir.as_ref() == Some(&dir) {
+                if m.failure_logged_on != Some(today) {
+                    log::warn!("backup mirror could not be written: {}", e.kind());
+                    m.failure_logged_on = Some(today);
+                }
+                m.failing = true;
+            }
+            Mirrored::Failed
+        }
+    }
+}
+
 /// Shows an OS notification. Errors are logged by the callers that need it.
 pub fn show<R: Runtime>(
     app: &AppHandle<R>,
@@ -206,7 +333,9 @@ pub fn show<R: Runtime>(
 }
 
 /// Starts the resident timer. `backup_day` is the day whose backup the
-/// startup already took.
+/// startup already took. Its first wake comes at once, so the startup's
+/// backup reaches the mirror right after the window opens (a slow drive does
+/// not hold up the startup).
 pub fn spawn<R: Runtime>(
     app: AppHandle<R>,
     notifier: &Notifier,
@@ -216,6 +345,7 @@ pub fn spawn<R: Runtime>(
 ) {
     let wake = Arc::clone(&notifier.wake);
     let shared = Arc::clone(&notifier.settings);
+    let mirror = Arc::clone(&notifier.mirror);
     tauri::async_runtime::spawn(async move {
         let mut backup_day = backup_day;
         loop {
@@ -223,6 +353,7 @@ pub fn spawn<R: Runtime>(
             let zone = clock::zone();
             let today = now.with_timezone(&zone).date_naive();
             backup_if_new_day(&pool, &data_dir, &mut backup_day, today).await;
+            mirror_if_behind(&pool, &data_dir, &mirror, today).await;
             let wait = match check(&shared, &pool, now, &zone).await {
                 Ok(t) => {
                     if let Some(m) = t.message {
@@ -466,5 +597,178 @@ mod tests {
             None
         );
         assert_eq!(backup::list(tmp.path()).unwrap().len(), 2);
+    }
+
+    // ---- バックアップの複製先 (v0.4.0) ----
+
+    /// A data folder with daily backup files (contents do not matter here),
+    /// an in-memory database whose mirror is `mirror` (mirrored up to
+    /// `last_ok`), and the timer's state read from it.
+    async fn mirrored(
+        data: &Path,
+        days: &[&str],
+        mirror: &Path,
+        last_ok: Option<NaiveDate>,
+    ) -> (SqlitePool, Notifier) {
+        let backups = backup::dir(data);
+        std::fs::create_dir_all(&backups).unwrap();
+        for day in days {
+            std::fs::write(backups.join(format!("todo-{day}.db")), day).unwrap();
+        }
+        let pool = db::open_in_memory().await.unwrap();
+        {
+            let mut c = pool.acquire().await.unwrap();
+            repo::settings::set_backup_mirror(&mut c, Some(&mirror.display().to_string()), last_ok)
+                .await
+                .unwrap();
+        }
+        let n = Notifier::new(&settings::get(&pool).await.unwrap());
+        (pool, n)
+    }
+
+    #[tokio::test]
+    async fn the_newest_daily_backup_reaches_the_mirror_once() {
+        let data = tempfile::tempdir().unwrap();
+        let usb = tempfile::tempdir().unwrap();
+        let (pool, n) = mirrored(
+            data.path(),
+            &["2026-11-18", "2026-11-19"],
+            usb.path(),
+            Some(d("2026-11-18")),
+        )
+        .await;
+        let today = d("2026-11-19");
+        assert_eq!(
+            mirror_if_behind(&pool, data.path(), &n.mirror, today).await,
+            Mirrored::Copied(Some(today))
+        );
+        assert!(usb.path().join("todo-2026-11-19.db").is_file());
+        assert!(usb.path().join("todo-2026-11-18.db").is_file());
+        // Saved and kept in memory.
+        assert_eq!(
+            settings::get(&pool).await.unwrap().backup_mirror_last_ok,
+            Some(today)
+        );
+        assert_eq!(n.mirror().last_ok, Some(today));
+
+        // In step: the next wakes neither copy nor read the database.
+        std::fs::remove_file(usb.path().join("todo-2026-11-18.db")).unwrap();
+        pool.close().await;
+        assert_eq!(
+            mirror_if_behind(&pool, data.path(), &n.mirror, today).await,
+            Mirrored::InStep
+        );
+        assert!(!usb.path().join("todo-2026-11-18.db").exists());
+    }
+
+    #[tokio::test]
+    async fn a_mirror_that_is_not_there_is_tried_again_at_every_wake() {
+        let data = tempfile::tempdir().unwrap();
+        let usb = tempfile::tempdir().unwrap();
+        let drive = usb.path().join("USB");
+        let (pool, n) = mirrored(
+            data.path(),
+            &["2026-11-18", "2026-11-19"],
+            &drive,
+            Some(d("2026-11-18")),
+        )
+        .await;
+        let today = d("2026-11-19");
+        for _ in 0..3 {
+            assert_eq!(
+                mirror_if_behind(&pool, data.path(), &n.mirror, today).await,
+                Mirrored::Failed
+            );
+        }
+        // Logged once today; nothing saved, the backups folder as it was.
+        let m = n.mirror();
+        assert_eq!(m.failure_logged_on, Some(today));
+        assert!(m.failing);
+        assert_eq!(m.last_ok, Some(d("2026-11-18")));
+        assert_eq!(
+            settings::get(&pool).await.unwrap().backup_mirror_last_ok,
+            Some(d("2026-11-18"))
+        );
+        assert_eq!(backup::daily_dates(data.path()).unwrap().len(), 2);
+        assert!(!drive.exists());
+
+        // The drive is plugged back in: it catches up.
+        std::fs::create_dir(&drive).unwrap();
+        assert_eq!(
+            mirror_if_behind(&pool, data.path(), &n.mirror, today).await,
+            Mirrored::Copied(Some(today))
+        );
+        assert!(!n.mirror().failing);
+        assert_eq!(
+            settings::get(&pool).await.unwrap().backup_mirror_last_ok,
+            Some(today)
+        );
+    }
+
+    #[tokio::test]
+    async fn no_mirror_nothing_to_do() {
+        let data = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(backup::dir(data.path())).unwrap();
+        std::fs::write(backup::dir(data.path()).join("todo-2026-11-19.db"), "").unwrap();
+        let pool = db::open_in_memory().await.unwrap();
+        let n = Notifier::new(&Settings::default());
+        assert_eq!(
+            mirror_if_behind(&pool, data.path(), &n.mirror, d("2026-11-19")).await,
+            Mirrored::InStep
+        );
+    }
+
+    #[tokio::test]
+    async fn a_mirror_changed_while_copying_keeps_the_new_one() {
+        let data = tempfile::tempdir().unwrap();
+        let usb = tempfile::tempdir().unwrap();
+        let (pool, n) = mirrored(data.path(), &["2026-11-19"], usb.path(), None).await;
+        // Chosen elsewhere meanwhile (as choose_backup_mirror saves it).
+        let other = tempfile::tempdir().unwrap();
+        {
+            let mut c = pool.acquire().await.unwrap();
+            repo::settings::set_backup_mirror(
+                &mut c,
+                Some(&other.path().display().to_string()),
+                Some(d("2026-11-17")),
+            )
+            .await
+            .unwrap();
+        }
+        mirror_if_behind(&pool, data.path(), &n.mirror, d("2026-11-19")).await;
+        let s = settings::get(&pool).await.unwrap();
+        assert_eq!(
+            s.backup_mirror_dir,
+            Some(other.path().display().to_string())
+        );
+        assert_eq!(s.backup_mirror_last_ok, Some(d("2026-11-17")));
+    }
+
+    #[test]
+    fn saved_mirror_settings_take_effect() {
+        let n = Notifier::new(&Settings::default());
+        assert_eq!(n.mirror().dir, None);
+        let usb = Settings {
+            backup_mirror_dir: Some("/Volumes/USB".into()),
+            backup_mirror_last_ok: Some(d("2026-11-18")),
+            ..Settings::default()
+        };
+        n.update(&usb);
+        assert_eq!(n.mirror().dir, Some(PathBuf::from("/Volumes/USB")));
+        assert_eq!(n.mirror().last_ok, Some(d("2026-11-18")));
+        // The timer copied 11/19 meanwhile; settings read before that keep it.
+        lock(&n.mirror).last_ok = Some(d("2026-11-19"));
+        n.update(&usb);
+        assert_eq!(n.mirror().last_ok, Some(d("2026-11-19")));
+        // Another folder starts with its own day; none clears it.
+        n.update(&Settings {
+            backup_mirror_dir: Some("/Volumes/Other".into()),
+            backup_mirror_last_ok: Some(d("2026-11-17")),
+            ..Settings::default()
+        });
+        assert_eq!(n.mirror().last_ok, Some(d("2026-11-17")));
+        n.update(&Settings::default());
+        assert_eq!(n.mirror().dir, None);
+        assert_eq!(n.mirror().last_ok, None);
     }
 }

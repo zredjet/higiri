@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use chrono::NaiveDate;
 use serde::Serialize;
 
+use super::backup_mirror::BackupMirrorAlert;
 use super::model::{Project, Status, Todo};
 use super::settings::{ReminderFrequency, Settings};
 use super::subtodo::Family;
@@ -52,6 +53,10 @@ pub struct Dashboard {
     pub waiting: Vec<TodoItem>,
     /// プロジェクトの進捗 (active projects).
     pub projects: Vec<ProjectSummary>,
+    /// The daily backups have not reached the mirror for 3 days or more
+    /// (v0.4.0). Filled by get_dashboard from the backups folder; [`build`]
+    /// leaves it null.
+    pub backup_mirror_alert: Option<BackupMirrorAlert>,
 }
 
 /// Whether today falls in the planned period. A missing end (or start) leaves
@@ -161,6 +166,7 @@ pub fn build(
         today_work,
         waiting,
         projects: project_summaries(projects, todos, today, rules),
+        backup_mirror_alert: None,
     }
 }
 
