@@ -477,18 +477,18 @@ v0.4.0 は `docs/implementation-plan-v0.4.0.md` のフェーズ25〜30で作る�
       - `sync_mirror(data_dir, 複製先)`: (1) 複製先がない(フォルダでない)ときは失敗にし、フォルダを作らない(抜いたドライブの場所に作らないため)。(2) 複製先の `todo-YYYY-MM-DD.db.part` を消す。(3) `backups/` の新しい7個のうち、複製先に同じ名前のファイルがないものを `.part` に写し、`sync_all` してから名前を変える(失敗したら `.part` を消す)。(4) 複製先の `todo-YYYY-MM-DD.db` を新しい7個に減らす(`names_to_prune`。`before-restore-…` の名前やほかのファイル、フォルダには触れない)。戻り値は `backups/` のいちばん新しい毎日のバックアップの日付。ファイルの操作は同期なので、非同期の側からは `backup::mirror`(`spawn_blocking`)で呼ぶ。
       - `daily_dates(data_dir)`: `backups/` の毎日のバックアップの日付(新しい順)。
       - `is_within(path, base)`: 両方を `canonicalize` して、大文字・小文字を区別せずに部品で比べる(`..` やリンクも解く)。複製先にデータフォルダとその中を選べないようにするのと、今使っている `todo.db` を復元に選べないようにするのに使う。
-      - 復元は `restore`(一覧の名前)と `restore_file`(選んだファイルの場所)から、中の `restore_from` に分けた。`restore_file` は、データフォルダの今使っている `todo.db` を `BackupError::InUse` で断る(ただのファイルとして写すと、`-wal` に残っている最近の変更がない状態に戻ることがあるため)。選んだファイルを写せないときは `BackupError::Source`。選んだファイルは変えない(作業用のコピーにマイグレーションを当てる)。`backups/` の中のファイルも選べる。
+      - 復元は `restore`(一覧の名前)と `restore_file`(選んだファイルの場所)から、中の `restore_from` に分けた。`restore_file` は、データフォルダの今使っている `todo.db` と、同じフォルダの `todo.db-wal`、`todo.db-shm` を `BackupError::InUse` で断る(ただのファイルとして写すと、`-wal` に残っている最近の変更がない状態に戻ることがあるため。オーケストレーターが決定)。比べるのは `canonicalize` したパス(`is_within`)なので、大文字・小文字の違う名前や、`..`、シンボリックリンク経由で選ばれても断る。選んだファイルを写せないときは `BackupError::Source`。選んだファイルは変えない(作業用のコピーにマイグレーションを当てる)。`backups/` の中のファイルも選べる。
     - `commands/backup.rs`
       - `choose_mirror`: データフォルダとその中は「アプリのデータフォルダの中は選べません。…」で断る。すぐに複製し、成功したときだけ2つのキーを保存する。失敗は「選んだフォルダに複製できませんでした。書き込めるフォルダか確かめてから、もう一度選んでください。」。戻り値は `BackupMirror { dir, last_ok }`(`dir` はダイアログが返したパスのまま)。前の複製先のファイルは消さない。
       - `clear_mirror`: 2つのキーを `null` にする。複製先のファイルは消さない。
       - `restore_backup_file`: `.db` の絞り込みのファイルのダイアログ。戻り値はファイル名。エラーの文は一覧からの復元と同じ(`restore_error`)。今使っている `todo.db` は「今使っているデータのファイルは選べません。バックアップのファイル(todo-2026-11-18.db など)を選んでください。」、読めないファイルは JSON の取り込みと同じ「ファイルを読めませんでした。…」。
       - 動作ログには、選んだ・やめた・復元したことと、失敗の種類(`io::ErrorKind`)だけを書く。パスは書かない(選んだファイルの復元は「a chosen file」と書く)。
     - 常駐のタイマー(`notifier.rs`): `MirrorSettings`(複製先、`last_ok`、その日に失敗を書いたか、前回が失敗だったか)を `Notifier` がメモリに持つ。起きるたびに `mirror_if_behind` が、`backups/` の一覧(DB ではない)と `last_ok` を `backup_mirror::behind` で比べ、そろっていなければ `backup::mirror` で写す。写せたら `set_backup_mirror_last_ok` で保存し、メモリも進める。写せなければ、次に起きたとき(最長10分後)にやり直す。動作ログは、失敗をその日の最初の1回だけ、前回が失敗で今回写せたら「works again」を1回、ふだんの成功は1日1回の「copied」。`Notifier::update` は、同じ複製先なら `last_ok` を新しいほうにし(タイマーが書く前に読んだ設定で戻さない)、違う複製先(か、なし)なら入れ替える。
-    - 起動時の複製は、setup の中では待たず、setup の最後に動かすタイマーの最初の起床(すぐに起きる。`run_daily` のあと)で行う。遅いドライブや、つながらないネットワークのフォルダで、ウィンドウが出るのが遅れないようにするため。
+    - 起動時の複製は、setup の中では待たず、setup の最後に動かすタイマーの最初の起床(すぐに起きる。`run_daily` のあと)で行う(オーケストレーターが決定)。遅いドライブや、つながらないネットワークのフォルダで、ウィンドウが出るのが遅れないようにするため(非機能要件の「起動からダッシュボードまで2秒」も守る)。タイマーはウィンドウを出すかどうかにかかわらず動くので、`--autostart` でトレイだけで起動したときも起動の直後に写す(作業用の HOME で .app を `--autostart` つきで起動して確かめた)。
     - タイマーが写したことは画面に送らない(画面にイベントの権限を付けないため)。設定画面とダッシュボードは、ウィンドウが前面に来たときと画面を開き直したときに取り直すので(TanStack Query の既定)、そこで知らせが消え、最後に複製できた日が進む。
     - ダッシュボード: `Dashboard.backup_mirror_alert`。`dashboard::build` は `null` のままにし、`get_dashboard` の中(`commands/dashboard.rs` の `with_backup_alert`)で `backups/` の一覧と settings から入れる。常駐のタイマーの件数(`dashboard::get`)は一覧を読まない。
     - 画面
-      - `backupText.ts`: `MIRROR_INTRO`、`mirrorDirText`(「複製先: …」)、`mirrorLastOkText`(「最後に複製できた日: 11/19」。まだなければ「まだありません」)、`mirrorAlertText`(日数は `days`。`last_ok` が `null` なら括弧の「最後に複製できた日」を出さない)、`restoredFileText`。Vitest あり。
+      - `backupText.ts`: `MIRROR_INTRO`、`mirrorDirText`(「複製先: …」)、`mirrorLastOkText`(「最後に複製できた日: 11/19」。まだなければ「まだありません」)、`mirrorAlertText`(日数は `days`。`last_ok` が `null` なら括弧の「最後に複製できた日」を出さない。「まだありません」と合わせてオーケストレーターが決定)、`restoredFileText`。Vitest あり。
       - 設定の「データ」のカード: バックアップの文とボタンの下に「バックアップの複製先」のまとまり(`SettingsPage.tsx` の `BackupMirrorSection`)。複製先がないときは説明と「複製先を選ぶ」、あるときは複製先のパス(長いパスは折り返す。`app.css` の `.backup-mirror__dir`)、最後に複製できた日、「複製先を変える」「複製をやめる」。知らせの条件に当たるときは、まとまりの見出しの下にダッシュボードと同じ文の `Alert`(warning。`useDashboard` の `backup_mirror_alert`)。エラーはまとまりの中に出す。「複製をやめる」に確認は挟まない(もう一度選べば戻り、ファイルも消さないため)。
       - 復元のダイアログ(`RestoreDialog`): フッターの「キャンセル」と「復元する」の間に「ファイルを選んで復元」。ファイルを選ばずに閉じたら、復元のダイアログは開いたまま。復元したら知らせ(`restoredFileText`)を出し、すべての一覧を取り直す。
       - ダッシュボード: 見出しのすぐ下に、`backup_mirror_alert` があれば `Alert`(warning、×なし)。

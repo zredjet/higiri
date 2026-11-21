@@ -464,19 +464,33 @@ pub async fn restore(
 /// Replaces all data with the Higiri database `source`, a file the user chose
 /// anywhere (a backup on the mirror, in `backups/`, …), after keeping a copy
 /// of the current data, as [`restore`] does. The file itself is never
-/// changed. The database in use (`todo.db` of the data folder) is refused:
-/// as a plain file it may lack the latest changes (they can still be in its
-/// `-wal` file). Returns the name of the kept copy.
+/// changed. The database in use (`todo.db` of the data folder, and its
+/// `-wal` and `-shm` files) is refused, however it was reached (another case
+/// of the letters, a link): as a plain file it may lack the latest changes
+/// (they can still be in its `-wal` file). Returns the name of the kept copy.
 pub async fn restore_file(
     pool: &SqlitePool,
     data_dir: &Path,
     source: &Path,
     now: DateTime<Utc>,
 ) -> Result<String> {
-    if is_within(source, &data_dir.join(db::DB_FILE_NAME)) {
+    if is_in_use(data_dir, source) {
         return Err(BackupError::InUse);
     }
     restore_from(pool, data_dir, source, now).await
+}
+
+/// Whether `path` is the database in use or one of its `-wal` / `-shm`
+/// files (compared after `canonicalize`, see [`is_within`]).
+fn is_in_use(data_dir: &Path, path: &Path) -> bool {
+    let db = data_dir.join(db::DB_FILE_NAME);
+    let mut files = vec![db.clone()];
+    for suffix in ["-wal", "-shm"] {
+        let mut s = db.as_os_str().to_owned();
+        s.push(suffix);
+        files.push(PathBuf::from(s));
+    }
+    files.iter().any(|f| is_within(path, f))
 }
 
 async fn restore_from(
@@ -1515,11 +1529,43 @@ mod tests {
             restore_file(&pool, tmp.path(), &files.path().join("gone.db"), now).await,
             Err(BackupError::Source(_))
         ));
-        // The database in use.
+        // The database in use, and its -wal and -shm files (there while the
+        // pool is open).
+        for name in ["todo.db", "todo.db-wal", "todo.db-shm"] {
+            let file = tmp.path().join(name);
+            assert!(file.is_file(), "{name}");
+            assert!(
+                matches!(
+                    restore_file(&pool, tmp.path(), &file, now).await,
+                    Err(BackupError::InUse)
+                ),
+                "{name}"
+            );
+        }
+        // Reached through `..` or with other letters (where the folder
+        // ignores case, as on macOS and Windows).
+        let around = tmp.path().join("backups").join("..").join("todo.db");
         assert!(matches!(
-            restore_file(&pool, tmp.path(), &tmp.path().join(db::DB_FILE_NAME), now).await,
+            restore_file(&pool, tmp.path(), &around, now).await,
             Err(BackupError::InUse)
         ));
+        let upper = tmp.path().join("TODO.DB");
+        if upper.exists() {
+            assert!(matches!(
+                restore_file(&pool, tmp.path(), &upper, now).await,
+                Err(BackupError::InUse)
+            ));
+        }
+        // Through a link.
+        #[cfg(unix)]
+        {
+            let link = files.path().join("link.db");
+            std::os::unix::fs::symlink(tmp.path().join("todo.db"), &link).unwrap();
+            assert!(matches!(
+                restore_file(&pool, tmp.path(), &link, now).await,
+                Err(BackupError::InUse)
+            ));
+        }
 
         // Nothing was changed, and no copy of the current data was taken.
         assert_eq!(project_names(&pool).await, ["A"]);
