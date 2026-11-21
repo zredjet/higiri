@@ -11,10 +11,13 @@
 //! (T-10) 「月次締め」 with three children: templates show on no screen until
 //! one is chosen in 「TODOを追加」. A TODO repeating every week (T-12) in
 //! 社内ツール整備, on the day of the week its shifted 日限 falls on.
-//! Three dependencies (T-11), which change no category: 結合テスト計画の作成
+//! Four dependencies (T-11), which change no category: 結合テスト計画の作成
 //! waits for 移行手順書のドラフト (planned after it), 性能試験の環境準備 waits
 //! for API設計書のレビュー対応 (planned to start before it ends: the warning),
-//! and 新メンバーでの試行 waits for its sibling セットアップ手順書の作成.
+//! 新メンバーでの試行 waits for its sibling セットアップ手順書の作成, and (v0.4.0)
+//! 結合テスト計画の作成 also waits for 性能試験の環境準備 (planned to start the
+//! day it ends: no warning), so that dragging API設計書のレビュー対応 later
+//! pushes a later TODO of a later TODO (G-8).
 //! The template's 報告書の作成 waits for its other two children.
 //! Status changes are replayed through `domain::status::transition`, so the
 //! actual dates, waiting fields and change history come out exactly as the app
@@ -67,10 +70,12 @@ struct TodoSpec {
 const REPEATING: &str = "社内ツールの更新確認";
 
 /// (later TODO, TODO to finish first) (T-11).
-const DEPENDENCIES: [(&str, &str); 3] = [
+const DEPENDENCIES: [(&str, &str); 4] = [
     ("結合テスト計画の作成", "移行手順書のドラフト"),
     ("性能試験の環境準備", "API設計書のレビュー対応"),
     ("新メンバーでの試行", "セットアップ手順書の作成"),
+    // 後続TODOのずらし (G-8): API設計書のレビュー対応 → 性能試験の環境準備 → this.
+    ("結合テスト計画の作成", "性能試験の環境準備"),
 ];
 
 const TODOS: [TodoSpec; 16] = [
@@ -561,8 +566,9 @@ mod tests {
             }
         );
 
-        // Three dependencies: two wait for an unfinished TODO; one of them is
-        // planned to start before it ends (the API review: 11/19).
+        // Four dependencies: three TODOs wait for unfinished TODOs; one of
+        // them is planned to start before it ends (the API review: 11/19).
+        // 結合テスト計画の作成 starts the day 性能試験の環境準備 ends: no warning.
         let deps = crate::domain::dependency::Dependencies::new(
             repo::dependencies::prerequisites(&mut c, None)
                 .await
@@ -583,7 +589,11 @@ mod tests {
         assert_eq!(
             shown,
             vec![
-                ("結合テスト計画の作成", vec!["移行手順書のドラフト"], false),
+                (
+                    "結合テスト計画の作成",
+                    vec!["移行手順書のドラフト", "性能試験の環境準備"],
+                    false
+                ),
                 ("性能試験の環境準備", vec!["API設計書のレビュー対応"], true),
                 (
                     "新メンバーでの試行",
@@ -591,6 +601,70 @@ mod tests {
                     false
                 ),
             ]
+        );
+    }
+
+    /// 後続TODOのずらし (G-8) can be tried on the sample (on the mock's day).
+    #[tokio::test]
+    async fn sample_pushes_later_todos_of_later_todos() {
+        let pool = db::open_in_memory().await.unwrap();
+        let today = d("2026-11-19");
+        seed_if_empty(&pool, today).await.unwrap();
+        let mut c = pool.acquire().await.unwrap();
+        let todos = repo::todos::list(&mut c, &TodoFilter::default())
+            .await
+            .unwrap();
+        drop(c);
+        let id = |title: &str| todos.iter().find(|t| t.title == title).unwrap().id;
+        let preview = |title: &'static str, start: &'static str, end: &'static str| {
+            let pool = pool.clone();
+            let todo = id(title);
+            async move {
+                crate::commands::shift::preview(&pool, todo, d(start), d(end))
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|s| {
+                        (
+                            s.title,
+                            s.shifted_start.to_string(),
+                            s.shifted_end.map(|e| e.to_string()).unwrap_or_default(),
+                            s.days,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            }
+        };
+        let line = |title: &str, start: &str, end: &str, days| {
+            (title.to_string(), start.to_string(), end.to_string(), days)
+        };
+
+        // API設計書のレビュー対応 (11/16〜11/19) one day later: 性能試験の環境準備
+        // (11/17〜) lacks 3 days, then 結合テスト計画の作成 (11/20〜) too.
+        assert_eq!(
+            preview("API設計書のレビュー対応", "2026-11-17", "2026-11-20").await,
+            [
+                line("性能試験の環境準備", "2026-11-20", "2026-11-23", 3),
+                line("結合テスト計画の作成", "2026-11-23", "2026-11-30", 3),
+            ]
+        );
+        // 移行手順書のドラフト (〜11/18) has 2 days of room before 11/20.
+        assert_eq!(
+            preview("移行手順書のドラフト", "2026-11-13", "2026-11-20").await,
+            []
+        );
+        assert_eq!(
+            preview("移行手順書のドラフト", "2026-11-14", "2026-11-21").await,
+            [line("結合テスト計画の作成", "2026-11-21", "2026-11-28", 1)]
+        );
+        // セットアップ手順書の作成 (〜12/2) has 1 day before its sibling (12/3〜).
+        assert_eq!(
+            preview("セットアップ手順書の作成", "2026-11-25", "2026-12-03").await,
+            []
+        );
+        assert_eq!(
+            preview("セットアップ手順書の作成", "2026-11-26", "2026-12-04").await,
+            [line("新メンバーでの試行", "2026-12-04", "2026-12-10", 1)]
         );
     }
 

@@ -395,7 +395,7 @@ v0.3.0 は `docs/implementation-plan-v0.3.0.md` のフェーズ17〜24で作る�
       - 選択のダイアログ(`detail/DependencyPickerDialog.tsx`、題は「先行TODOを足す」): 語を打って200msで `search_todos` を引く(変換中は引かない。変換中の Esc ではダイアログを閉じない)。結果は「親 / 子」の名前、プロジェクト名、ステータス。自分と、足してある先行TODOは押せない(「このTODO」「足してあります」)。それ以外は押すと結び、循環・親と自分の子は Rust の文をダイアログの上に出す(開いたまま選び直せる)。
       - 作業中にするときの確認(`StatusDialogs.tsx` の `StartBlockedDialog`。幅は `md`): 題は「先行TODOが終わっていません」、文は「次の2件が、まだ完了も中止もしていません。このまま作業中にしますか。」、終わっていない先行TODOを「名前(プロジェクト名)」で並べ、ボタンは「キャンセル」「作業中にする」。詳細パネルのステータスの選択と、ダッシュボードの「作業に戻す」「着手する」から出す(上のオーケストレーターの決定)。閉じたTODOの再開(完了 → 作業中)では `blocked_by` が空なので出ない。
       - ガントの矢印(`geometry.ts` の `arrowBetween`、`dependencyArrows`。Vitest でモックの座標と照合): 先行TODOの予定のバーの終わりから、後続TODOの予定のバーの始まりへ。後続のバーが `2 * ARROW.gap`(16px)以上右で始まるときは1回曲がり、それより左なら、先行のバーの終わりから出て、先行の行の後続側の縁(下なら下の縁、上なら上の縁)を通り、後続のバーの始まりの左から入る。どちらかが表示されていない(完了・中止を隠している、折りたたんでいる、プロジェクトで絞っている)か予定のバーがないときと、描いている行(見えている行と前後の余分)の範囲に縦でかからないとき、表の左右の外に出るときは描かない。ドラッグ中は動かしている位置で引く。線と矢じりは `--text-muted`、選んでいるTODOにつながる矢印は `--primary-text` で少し太く。矢印は読み上げない(`aria-hidden`。行の読み上げ名で伝える)。クリックは下のバーに通す。凡例に「依存」を足した。
-    - サンプル(`sample.rs`): 依存を3本。結合テスト計画の作成の先行TODOに移行手順書のドラフト(予定が後なので警告なし)、性能試験の環境準備の先行TODOにAPI設計書のレビュー対応(予定開始 11/17 が先行の予定終了 11/19 より前なので警告。ガントの矢印は回り込む)、新メンバーでの試行の先行TODOにセットアップ手順書の作成(兄弟)。テンプレート「月次締め」の報告書の作成は、ほかの2件が先行(`depends_on: [0, 1]`)。日限注意の区分は変わらないので、日報のフィクスチャとダッシュボードの日限注意は変わらない。`json_data.rs` のテストの `add_v0_3_0_rows` は、サンプルの依存も消してから自分の行を入れる。
+    - サンプル(`sample.rs`): 依存を3本(v0.4.0 のフェーズ28で4本目を足した)。結合テスト計画の作成の先行TODOに移行手順書のドラフト(予定が後なので警告なし)、性能試験の環境準備の先行TODOにAPI設計書のレビュー対応(予定開始 11/17 が先行の予定終了 11/19 より前なので警告。ガントの矢印は回り込む)、新メンバーでの試行の先行TODOにセットアップ手順書の作成(兄弟)。テンプレート「月次締め」の報告書の作成は、ほかの2件が先行(`depends_on: [0, 1]`)。日限注意の区分は変わらないので、日報のフィクスチャとダッシュボードの日限注意は変わらない。`json_data.rs` のテストの `add_v0_3_0_rows` は、サンプルの依存も消してから自分の行を入れる。
     - perf(`perf.rs`): 依存を1,000本(`DEPENDENCIES`。後続TODOの id がいつも大きいので循環はない。たいていは id が60以内の近くのTODO(プロジェクトが順に回るので、別のプロジェクトのことが多い)、1割はずっと前のTODO。親と自分の子の組は飛ばす)。テンプレートの子は1つ前の子が先行。`list_dependencies` と、結んで外す(`add_dependency` + `remove_dependency`。循環の検査がすべての依存を読む)を測る。
 - 週報(フェーズ23)
   - コマンドは足していない(41個のまま)。日報の4つのコマンド(`generate_report`、`save_report`、`get_report`、`export_report_file`)が `kind: "weekly"` を受け付ける。`date` は週のどの日でもよく、Rust 側で月曜に寄せる。月報は「月報はまだ作れません。日報か週報を選んでください。」で断る。
@@ -494,6 +494,23 @@ v0.4.0 は `docs/implementation-plan-v0.4.0.md` のフェーズ25〜30で作る�
       - ダッシュボード: 見出しのすぐ下に、`backup_mirror_alert` があれば `Alert`(warning、×なし)。
       - フックは `queries.ts` の `useChooseBackupMirror`、`useClearBackupMirror`(設定とダッシュボードを取り直す)、`useRestoreBackupFile`(すべての一覧を取り直す)。
     - perf(`perf.rs`): 毎日のバックアップ7個を空の複製先に写す時間と、知らせつきの `get_dashboard` を測る。
+- 後続TODOのずらし(フェーズ28)
+  - コマンドは `preview_dependent_shift(todo_id, planned_start, planned_end)` と `shift_with_dependents(todo_id, planned_start, planned_end)` を足して46個。日付は2つとも要る(ドラッグできるのは予定の開始日と終了日が両方あるTODOだけ)。
+  - 作ったもの(フェーズ28)
+    - `domain/shift.rs`: `dependent_shifts(moved, end, todos, dependencies)` が、ずらす後続TODO(`Shift { id, start, end, new_start, new_end, days }`)を依存の向きの順に返す。`reachable(id, dependencies)` は後続をたどった id(状態と日付を問わない。コマンドはこれで読むTODOを絞る)。
+      - 押すのは、ドラッグしたTODOの新しい予定終了が今の予定終了より後のときだけ(前へ動いた・変わらないなら空。画面の「後ろへ動かしたときだけ聞く」と同じ条件を Rust でも見る)。予定開始は何も押さない。
+      - 動くのは、開いている4状態で予定開始のあるTODO。閉じたTODOと予定開始のないTODOは動かさず、その先もたどらない。予定開始だけのTODOは予定開始だけが動き、何も押さない。
+      - 動いた先行TODOの新しい予定終了のうち、いちばん遅い日まで予定開始を後ろへ(同じ日は警告しないので同じ日まで)。予定終了も同じ日数。動いていない先行TODOとの食い違いは見ない(動いた先行TODOとの今の食い違いは、足りない日数に入るので一緒に直る)。
+      - 順番: 待っている先行TODO(動きうるもの)がすべて決まったものから、予定開始の早い順、同じなら id の小さい順。循環の中のTODOとその先は決まらないので動かさない(必ず止まる)。ドラッグしたTODOへ戻る依存は見ない。日数は暦日(`repeat::shift`)。
+    - `commands/todos.rs`: `save_fields(conn, before, after, today, now)`(`update_fields` と `edit_events`。`update_todo` もこれを使う)と `save_planned(conn, before, start, end, today, now)`(`validate::period` で確かめてから予定期間だけを書く)。呼ぶ側のトランザクションの中で何件にも使える(フェーズ29の一括変更でも使う)。
+    - `commands/shift.rs`: 2つのコマンド。中の `plan` が、入力の検査(予定開始が予定終了より後なら `update_todo` と同じ文)、ドラッグしたTODO(なければ NotFound)、すべての依存、`reachable` のTODOを読んで `dependent_shifts` を呼ぶ。`preview` は `DependentShift { id, title, parent_title, project_id, project_name, planned_start, planned_end, shifted_start, shifted_end, days }` の一覧を返し、何も書かない(時計も読まない)。`shift` は1トランザクションで計算し直し、ドラッグしたTODO、続けて後続を `save_planned` で書く(変更履歴は TODO ごとに `planned` の1行、`updated_at` も変わる、日限は変えない)。戻り値は書いたTODOの id(ドラッグしたTODOが先。後続がなければドラッグしたTODOだけ)。ずらしても予定の長さは変わらないので、後続の検査で断ることはない(表の CHECK も開始 ≤ 終了を守る)。
+    - 画面
+      - `geometry.ts` の `endsLater(origin, dropped)`(予定終了が後ろへ動いたか)。Vitest あり。
+      - `useBarDrag.ts`: 離したら `drop`。予定終了が後ろへ動いていなければ今までどおり保存する。動いていれば、バーを離した位置で描いたまま(`hold`)`usePreviewDependentShift` を呼び、空なら保存、空でなければ `question` を出す。答えは `cancelShift`(元の位置に戻し、何も保存しない)、`shiftOnlyThis`(今までの保存)、`shiftWithDependents`(ドラッグしたバーと後続のバーを確認の一覧の位置で描いたまま `useShiftWithDependents`)。確認を引けなかったときと保存の失敗は、元の位置に戻してガントの上に `Alert` を出す(今のドラッグの失敗と同じ)。
+      - 確認のダイアログ(`ShiftDialog.tsx`、幅 `md`。GanttPage が `drag.question` で出す): 題・文・ボタンは設計書のとおり(文言は `shiftText.ts`。Vitest あり)。一覧は依存の向きの順で、名前(子は「親 / 子」)と、ドラッグしたTODOと別のプロジェクトならプロジェクト名(`text-caption`)、その下に「11/22〜11/24 → 11/25〜11/27(3日後ろへ)」(予定開始だけなら「11/22〜 → 11/25〜」)。キャンセル・Esc・× はドラッグの取り消し。CSS は `app.css` の `.shift-list`。
+      - フック(`queries.ts`): `usePreviewDependentShift`(読むだけだが、先に始めた保存(詳細パネルの入力、前のドラッグ)のあとのデータで計算するよう、`TODO_WRITES` の列に並べる mutation にした)、`useShiftWithDependents`(`TODO_WRITES`。プロジェクトと TODO の一覧を取り直す)。開いている詳細パネルのTODOが動いた後続なら、手で変えていない予定の欄が新しい値を取る(今の `mergeDraft`。.app で確かめた)。
+    - サンプル(`sample.rs`): 依存を1本足して4本(結合テスト計画の作成の先行TODOに性能試験の環境準備。予定開始 11/20 が先行の予定終了 11/20 と同じなので警告なし)。API設計書のレビュー対応 → 性能試験の環境準備 → 結合テスト計画の作成 で後続の後続を試せる(`sample_pushes_later_todos_of_later_todos`)。日限注意の区分は変わらないので、日報のフィクスチャとダッシュボードの日限注意は変わらない。
+    - perf(`perf.rs`): 後続をたどったTODOがいちばん多いTODOで、予定終了を1年後へ動かしたときの `preview_dependent_shift`(後続の後続も動くことを確かめる)。
 
 ## 品質の決めごと
 
@@ -526,7 +543,7 @@ v0.4.0 は `docs/implementation-plan-v0.4.0.md` のフェーズ25〜30で作る�
 | Rust の書式の確認(直すときは `cargo fmt --manifest-path src-tauri/Cargo.toml`) | `npm run fmt:rust` |
 | Rust の lint(警告はエラー扱い) | `npm run lint:rust` |
 | まとめて確認(型チェック、Rust の書式、Vitest、cargo test、clippy) | `npm run check` |
-| 性能の確認(TODO 5,000件・作業ログ 20,000件でコマンドの時間を測る。最適化ビルド。検索、営業日の設定、TODO の保存(`get_todo` と `update_todo`)、テンプレート、繰り返し、依存関係、週報、起動の Rust 側、JSON の書き出しと取り込みも測る。計測のデータには子TODO・繰り返し・依存関係も入る) | `npm run test:perf` |
+| 性能の確認(TODO 5,000件・作業ログ 20,000件でコマンドの時間を測る。最適化ビルド。検索、営業日の設定、TODO の保存(`get_todo` と `update_todo`)、テンプレート、繰り返し、依存関係、後続TODOのずらしの確認、週報、起動の Rust 側、JSON の書き出しと取り込みも測る。計測のデータには子TODO・繰り返し・依存関係も入る) | `npm run test:perf` |
 | アプリアイコンを原画から作り直す | `npm run icons` |
 | 配布物のビルド(実行ファイルの ZIP を `release/` に作る) | `npm run build` |
 
@@ -534,4 +551,4 @@ v0.4.0 は `docs/implementation-plan-v0.4.0.md` のフェーズ25〜30で作る�
 - アプリアイコンは D3 案(藍の判子に白いチェック、右上に日限を表す朱のひし形。色は Aizome の `sumi-50`・`ai-700`・`shu-500`)。原画は `src-tauri/icons/source/` の SVG で、`higiri-icon.svg`(全面。PNG と .ico の 48〜256px)、`higiri-icon-small.svg`(16〜32px 用に内側の枠を省き、チェックを太くした簡略版)、`higiri-icon-macos.svg`(Apple のグリッドに合わせた .icns 用)。トレイのアイコンは、Windows が `higiri-icon-small.svg` の 32px(`tray-windows.png`)、macOS がメニューバー用の単色テンプレート画像 `higiri-tray-macos.svg` の 36px(`tray-macos.png`、18pt の2倍)で、どちらも `tray.rs` に埋め込む。`npm run icons`(`scripts/icons.mjs`)で `src-tauri/icons/` を作り直す。生成されたファイルは手で編集しない。
 - `README.md` の画面の画像は `docs/readme/`(v0.3.0 で撮った)。撮り直すときは、`npx tauri build --debug --bundles app` で作った `Higiri.app` の中の実行ファイルを、`HOME` を作業用のフォルダに差し替えて `--sample-data` つきで起動し(利用者の開発用の DB に触れない)、`screencapture -x -o -l <ウィンドウの番号>` で窓だけを撮って、`sips -Z 1600` で縮める。
 - 開発ビルドの DB は、配布版と混ざらないように、データフォルダの下の `dev/todo.db` を使う(macOS は `~/Library/Application Support/com.redjet.higiri/dev/`、Windows は `%APPDATA%\com.redjet.higiri\dev\`)。サンプルデータを入れ直すときは、アプリを閉じてこの `dev` フォルダを消してから `npm run dev:sample` で起動する。
-- サンプルデータはモックの3プロジェクト・11件に、v0.3.0 の機能を試すデータ(子TODOのある親1件と子3件、繰り返しのTODO 1件、依存3本、テンプレート「月次締め」)を足したもの(TODO は16件)。モックと見比べる11件の表示(ダッシュボードの日限注意、日報)は変えていない。日付は「モックの今日(2026-11-19)」が実際の今日になるようにずらして入れる。ステータスの変化は `change_status` と同じ遷移関数で再現するので、変更履歴も残る。
+- サンプルデータはモックの3プロジェクト・11件に、v0.3.0 の機能を試すデータ(子TODOのある親1件と子3件、繰り返しのTODO 1件、依存4本(4本目は v0.4.0 のフェーズ28で後続の後続を試すために足した)、テンプレート「月次締め」)を足したもの(TODO は16件)。モックと見比べる11件の表示(ダッシュボードの日限注意、日報)は変えていない。日付は「モックの今日(2026-11-19)」が実際の今日になるようにずらして入れる。ステータスの変化は `change_status` と同じ遷移関数で再現するので、変更履歴も残る。

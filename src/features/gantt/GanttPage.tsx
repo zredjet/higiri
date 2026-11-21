@@ -39,6 +39,7 @@ import {
   type Scale,
 } from "./geometry";
 import { dragText, dueMarkText, rowLabel } from "./rowLabel";
+import { ShiftDialog } from "./ShiftDialog";
 import { useBarDrag, type DragPreview } from "./useBarDrag";
 
 interface GanttPageProps {
@@ -274,6 +275,17 @@ export function GanttPage({ selectedTodoId, onOpenTodo }: GanttPageProps) {
           ) : null}
         </div>
       </div>
+      {drag.question ? (
+        <ShiftDialog
+          shifts={drag.question.shifts}
+          projectId={
+            layout.rows.find((r) => r.todo?.item.todo.id === drag.question?.todoId)?.todo?.item.todo.project_id ?? null
+          }
+          onCancel={drag.cancelShift}
+          onOnlyThis={drag.shiftOnlyThis}
+          onWithDependents={() => void drag.shiftWithDependents()}
+        />
+      ) : null}
     </>
   );
 }

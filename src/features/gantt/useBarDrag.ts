@@ -1,14 +1,25 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import type { DaySpan } from "../../lib/bindings";
-import { useUpdateTodo } from "../../lib/queries";
+import type { DaySpan, DependentShift } from "../../lib/bindings";
+import { usePreviewDependentShift, useShiftWithDependents, useUpdateTodo } from "../../lib/queries";
 import { fieldsOf } from "../todos/detail/draft";
 import { saveOpenDrafts } from "../todos/detail/useTodoDraft";
-import { dayDelta, dragSpan, isDrag, type DragMode } from "./geometry";
+import { dayDelta, dragSpan, endsLater, isDrag, type DragMode } from "./geometry";
 
 /** The bar being dragged, past the click threshold. */
 export interface DragPreview {
   todoId: number;
   span: DaySpan;
+}
+
+/**
+ * A drop that would make 後続TODO start before the dragged TODO ends (G-8):
+ * the question asked before saving. The bar stays where it was dropped.
+ */
+export interface ShiftQuestion {
+  todoId: number;
+  span: DaySpan;
+  /** From Rust, in the dependencies' order (never empty). */
+  shifts: DependentShift[];
 }
 
 interface Active {
@@ -48,12 +59,21 @@ function ignoreNextClick() {
  * chart draws only the rows in view, and the dragged row may scroll out of
  * view and back while the button is held. For the same reason the pointer is
  * followed on the window; the grabbed grip also takes pointer capture.
+ *
+ * A drop that ends later asks first when 後続TODO would start before it ends
+ * (G-8, `question`): the screen shows the question and answers it with
+ * `cancelShift`, `shiftOnlyThis` or `shiftWithDependents`.
  */
 export function useBarDrag() {
   const { mutateAsync } = useUpdateTodo();
+  const { mutateAsync: previewShift } = usePreviewDependentShift();
+  const { mutateAsync: shiftAll } = useShiftWithDependents();
   const [preview, setPreview] = useState<DragPreview | null>(null);
-  // Dropped spans drawn until saved and fetched again (or put back on failure).
+  // Spans drawn instead of the fetched ones: dropped and asked about, or
+  // being saved, until fetched again (or put back on failure).
   const [saving, setSaving] = useState<ReadonlyMap<number, { span: DaySpan; seq: number }>>(new Map());
+  // With the mark of the hold that draws the dropped bar.
+  const [question, setQuestion] = useState<(ShiftQuestion & { mark: number }) | null>(null);
   const [error, setError] = useState<unknown>(null);
   const stop = useRef<(() => void) | null>(null);
   const seq = useRef(0);
@@ -61,10 +81,31 @@ export function useBarDrag() {
   // Leaving the screen mid-drag drops the drag.
   useEffect(() => () => stop.current?.(), []);
 
+  /** Draws these bars at these spans until `release` with the returned mark. */
+  const hold = useCallback((spans: ReadonlyArray<readonly [number, DaySpan]>) => {
+    const mine = ++seq.current;
+    setSaving((m) => {
+      const next = new Map(m);
+      for (const [id, span] of spans) next.set(id, { span, seq: mine });
+      return next;
+    });
+    return mine;
+  }, []);
+
+  /** Draws the bars as fetched again, unless a later hold took them. */
+  const release = useCallback((ids: readonly number[], mine: number) => {
+    setSaving((m) => {
+      if (!ids.some((id) => m.get(id)?.seq === mine)) return m;
+      const next = new Map(m);
+      for (const id of ids) if (next.get(id)?.seq === mine) next.delete(id);
+      return next;
+    });
+  }, []);
+
+  /** Saves the dragged TODO only (update_todo). */
   const save = useCallback(
     async (todoId: number, span: DaySpan) => {
-      const mine = ++seq.current;
-      setSaving((m) => new Map(m).set(todoId, { span, seq: mine }));
+      const mine = hold([[todoId, span]]);
       try {
         // Resolves after the lists (the chart too) are fetched again.
         await mutateAsync({
@@ -74,16 +115,72 @@ export function useBarDrag() {
       } catch (e) {
         setError(e);
       } finally {
-        setSaving((m) => {
-          if (m.get(todoId)?.seq !== mine) return m;
-          const next = new Map(m);
-          next.delete(todoId);
-          return next;
-        });
+        release([todoId], mine);
       }
     },
-    [mutateAsync],
+    [mutateAsync, hold, release],
   );
+
+  /**
+   * A drop that ends later may push 後続TODO: Rust says which (G-8). None:
+   * saved at once. Some: asked first, the bar staying where it was dropped.
+   */
+  const drop = useCallback(
+    async (todoId: number, origin: DaySpan, span: DaySpan) => {
+      if (!endsLater(origin, span)) return save(todoId, span);
+      const mine = hold([[todoId, span]]);
+      let shifts: DependentShift[];
+      try {
+        shifts = await previewShift({ todoId, start: span.start, end: span.end });
+      } catch (e) {
+        setError(e);
+        release([todoId], mine);
+        return;
+      }
+      if (shifts.length === 0) return save(todoId, span);
+      setQuestion({ todoId, span, shifts, mark: mine });
+    },
+    [save, hold, release, previewShift],
+  );
+
+  /** 「キャンセル」, Esc, ×: the drag is undone, nothing is saved. */
+  const cancelShift = useCallback(() => {
+    if (!question) return;
+    setQuestion(null);
+    release([question.todoId], question.mark);
+  }, [question, release]);
+
+  /** 「このTODOだけ動かす」: saved as any drag. */
+  const shiftOnlyThis = useCallback(() => {
+    if (!question) return;
+    setQuestion(null);
+    void save(question.todoId, question.span);
+  }, [question, save]);
+
+  /**
+   * 「後続もずらす」: the 後続TODO are drawn at their new spans while saving
+   * (Rust works them out again: what it saves is what is fetched next).
+   */
+  const shiftWithDependents = useCallback(async () => {
+    if (!question) return;
+    const { todoId, span, shifts } = question;
+    setQuestion(null);
+    const spans: Array<readonly [number, DaySpan]> = [[todoId, span]];
+    for (const s of shifts) {
+      if (s.shifted_end) spans.push([s.id, { start: s.shifted_start, end: s.shifted_end }]);
+    }
+    const mine = hold(spans);
+    try {
+      await shiftAll({ todoId, start: span.start, end: span.end });
+    } catch (e) {
+      setError(e);
+    } finally {
+      release(
+        spans.map(([id]) => id),
+        mine,
+      );
+    }
+  }, [question, hold, release, shiftAll]);
 
   /** pointerdown on a grip of the bar showing `span`. */
   const begin = useCallback(
@@ -150,7 +247,7 @@ export function useBarDrag() {
         end();
         if (!a.dragging && !a.cancelled) return; // a click: opens the detail
         ignoreNextClick();
-        if (a.dragging && !a.cancelled && !sameSpan(a.span, a.origin)) void save(todoId, a.span);
+        if (a.dragging && !a.cancelled && !sameSpan(a.span, a.origin)) void drop(todoId, a.origin, a.span);
       };
       const onCancel = (ev: PointerEvent) => {
         if (ev.pointerId === pointerId) end();
@@ -172,15 +269,26 @@ export function useBarDrag() {
       window.addEventListener("blur", end);
       stop.current = end;
     },
-    [save],
+    [drop],
   );
 
-  /** The planned span to draw: being dragged, being saved, or as fetched. */
+  /** The planned span to draw: being dragged, asked about or saved, or as fetched. */
   const plannedOf = useCallback(
     (todoId: number, planned: DaySpan | null): DaySpan | null =>
       preview?.todoId === todoId ? preview.span : (saving.get(todoId)?.span ?? planned),
     [preview, saving],
   );
 
-  return { preview, plannedOf, begin, error, clearError: () => setError(null) };
+  return {
+    preview,
+    plannedOf,
+    begin,
+    error,
+    clearError: () => setError(null),
+    /** The question before moving 後続TODO too, while it is asked. */
+    question,
+    cancelShift,
+    shiftOnlyThis,
+    shiftWithDependents,
+  };
 }

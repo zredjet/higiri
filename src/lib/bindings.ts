@@ -67,6 +67,19 @@ export const commands = {
 	removeDependency: (todoId: number, dependsOnId: number, options?: InvokeOptions) => __TAURI_INVOKE<TodoItem>("remove_dependency", { todoId, dependsOnId }, options),
 	/**  The TODOs `todo_id` waits for and those waiting for it. */
 	listDependencies: (todoId: number, options?: InvokeOptions) => __TAURI_INVOKE<DependencyList>("list_dependencies", { todoId }, options),
+	/**
+	 *  The 後続TODO (and theirs) that would start before their 先行TODO ends if
+	 *  `todo_id` were planned `planned_start`〜`planned_end`, each with its new
+	 *  予定期間, in the dependencies' order. Empty: nothing to ask (save it with
+	 *  `update_todo`). Nothing is written.
+	 */
+	previewDependentShift: (todoId: number, plannedStart: string, plannedEnd: string, options?: InvokeOptions) => __TAURI_INVOKE<DependentShift[]>("preview_dependent_shift", { todoId, plannedStart, plannedEnd }, options),
+	/**
+	 *  Plans `todo_id` `planned_start`〜`planned_end` and moves its 後続TODO by
+	 *  the days they lack, worked out again now, in one transaction. Returns the
+	 *  ids of the TODOs moved, the dragged one first.
+	 */
+	shiftWithDependents: (todoId: number, plannedStart: string, plannedEnd: string, options?: InvokeOptions) => __TAURI_INVOKE<number[]>("shift_with_dependents", { todoId, plannedStart, plannedEnd }, options),
 	/**  Work logs and recorded changes of one TODO, newest first. */
 	listTimeline: (todoId: number, options?: InvokeOptions) => __TAURI_INVOKE<TimelineEntry[]>("list_timeline", { todoId }, options),
 	/**  Adds (`id = null`) or updates a work log. */
@@ -349,6 +362,25 @@ export type DependencyList = {
 	depends_on: TodoItem[],
 	/**  後続TODO: the TODOs waiting for it. */
 	dependents: TodoItem[],
+};
+
+/**  A 後続TODO to move with the dragged one (the confirmation's list). */
+export type DependentShift = {
+	id: number,
+	title: string,
+	/**  For a child: shown 「親 / 子」. */
+	parent_title: string | null,
+	/**  The project's name is shown when it is not the dragged TODO's. */
+	project_id: number,
+	project_name: string,
+	/**  The 予定期間 now (a 予定終了 may be missing: only the start moves). */
+	planned_start: string,
+	planned_end: string | null,
+	/**  The 予定期間 once moved. */
+	shifted_start: string,
+	shifted_end: string | null,
+	/**  Calendar days later (1 or more). */
+	days: number,
 };
 
 /**  The 日限 filter of the list. */

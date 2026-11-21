@@ -423,13 +423,47 @@ pub async fn update(
         )?);
     }
 
-    let saved = repo::todos::update_fields(&mut tx, &after, now).await?;
-    for event in events::edit_events(&before, &saved, today, now) {
-        repo::events::insert(&mut tx, id, &event).await?;
-    }
+    let saved = save_fields(&mut tx, &before, &after, today, now).await?;
     let out = item(&mut tx, saved, today).await?;
     tx.commit().await?;
     Ok(out)
+}
+
+/// Writes the editable fields of `after` over the TODO `before` and records
+/// the changes of 日限・予定・実績・確認日, as `update_todo` does: inside the
+/// caller's transaction, so that several TODOs change together (G-8, T-14).
+/// `after` is checked by the caller.
+pub(super) async fn save_fields(
+    conn: &mut SqliteConnection,
+    before: &Todo,
+    after: &Todo,
+    today: NaiveDate,
+    now: DateTime<Utc>,
+) -> CmdResult<Todo> {
+    let saved = repo::todos::update_fields(conn, after, now).await?;
+    for event in events::edit_events(before, &saved, today, now) {
+        repo::events::insert(conn, saved.id, &event).await?;
+    }
+    Ok(saved)
+}
+
+/// Writes the 予定期間 of the TODO `before` (checked as `update_todo` checks
+/// it) and records it (`planned`), inside the caller's transaction.
+pub(super) async fn save_planned(
+    conn: &mut SqliteConnection,
+    before: &Todo,
+    start: Option<NaiveDate>,
+    end: Option<NaiveDate>,
+    today: NaiveDate,
+    now: DateTime<Utc>,
+) -> CmdResult<Todo> {
+    validate::period(start, end, "予定")?;
+    let after = Todo {
+        planned_start: start,
+        planned_end: end,
+        ..before.clone()
+    };
+    save_fields(conn, before, &after, today, now).await
 }
 
 pub async fn change_status_impl(

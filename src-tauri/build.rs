@@ -23,6 +23,8 @@ const APP_COMMANDS: &[&str] = &[
     "add_dependency",
     "remove_dependency",
     "list_dependencies",
+    "preview_dependent_shift",
+    "shift_with_dependents",
     "list_timeline",
     "save_work_log",
     "delete_work_log",

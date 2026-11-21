@@ -19,6 +19,7 @@ pub mod repeats;
 pub mod reports;
 pub mod search;
 pub mod settings;
+pub mod shift;
 pub mod templates;
 pub mod todos;
 mod validate;
@@ -58,6 +59,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             dependencies::add_dependency,
             dependencies::remove_dependency,
             dependencies::list_dependencies,
+            shift::preview_dependent_shift,
+            shift::shift_with_dependents,
             work_logs::list_timeline,
             work_logs::save_work_log,
             work_logs::delete_work_log,
@@ -143,7 +146,7 @@ mod tests {
             .collect();
         allowed.sort();
         assert_eq!(allowed, commands_in_bindings());
-        assert_eq!(allowed.len(), 44);
+        assert_eq!(allowed.len(), 46);
     }
 
     /// Regenerates `src/lib/bindings.ts` and fails when the committed file was

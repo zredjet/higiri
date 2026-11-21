@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-shift-with-dependents"
+description = "Enables the shift_with_dependents command without any pre-configured scope."
+commands.allow = ["shift_with_dependents"]
+
+[[permission]]
+identifier = "deny-shift-with-dependents"
+description = "Denies the shift_with_dependents command without any pre-configured scope."
+commands.deny = ["shift_with_dependents"]

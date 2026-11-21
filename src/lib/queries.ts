@@ -313,6 +313,35 @@ export function useRemoveDependency() {
   });
 }
 
+// ---- 後続TODOのずらし (G-8) ----------------------------------------------------------
+
+/**
+ * The 後続TODO a Gantt drag would move (`[]`: nothing to ask). Read in the
+ * TODO_WRITES line: it sees the saves started before it (the detail panel's
+ * typed dates, an earlier drag) and writes nothing.
+ */
+export function usePreviewDependentShift() {
+  return useMutation({
+    scope: TODO_WRITES,
+    mutationFn: ({ todoId, start, end }: { todoId: number; start: string; end: string }) =>
+      commands.previewDependentShift(todoId, start, end),
+  });
+}
+
+/**
+ * 「後続もずらす」: the dragged TODO's 予定期間 and its 後続TODO's, worked out
+ * again by Rust, in one transaction. Resolves after the lists are fetched again.
+ */
+export function useShiftWithDependents() {
+  const changed = useTodoChanged();
+  return useMutation({
+    scope: TODO_WRITES,
+    mutationFn: ({ todoId, start, end }: { todoId: number; start: string; end: string }) =>
+      commands.shiftWithDependents(todoId, start, end),
+    onSuccess: () => changed(),
+  });
+}
+
 // ---- TODOテンプレート (T-10) ------------------------------------------------------
 
 /** Every template, by name. A TODO is made from one with create_todo (`template_id`). */

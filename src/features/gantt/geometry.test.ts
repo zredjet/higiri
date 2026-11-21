@@ -11,6 +11,7 @@ import {
   dependencyArrows,
   dragLabelX,
   dragSpan,
+  endsLater,
   headerRows,
   holidayLabels,
   holidayNames,
@@ -409,5 +410,20 @@ describe("rows", () => {
     expect(shown).toHaveLength(14);
     expect(visibleRows(many, 0, 440, 2)[0].top).toBe(0);
     expect(visibleRows([], 0, 100)).toEqual([]);
+  });
+});
+
+describe("endsLater", () => {
+  const origin = { start: "2026-11-16", end: "2026-11-20" };
+  it("is true when the end moves later", () => {
+    expect(endsLater(origin, { start: "2026-11-17", end: "2026-11-21" })).toBe(true);
+    expect(endsLater(origin, { start: "2026-11-16", end: "2026-12-01" })).toBe(true);
+    // Across a year.
+    expect(endsLater({ start: "2026-12-28", end: "2026-12-31" }, { start: "2026-12-29", end: "2027-01-01" })).toBe(true);
+  });
+  it("is false when the end stays or moves earlier", () => {
+    expect(endsLater(origin, { start: "2026-11-10", end: "2026-11-20" })).toBe(false);
+    expect(endsLater(origin, { start: "2026-11-18", end: "2026-11-20" })).toBe(false);
+    expect(endsLater(origin, { start: "2026-11-15", end: "2026-11-19" })).toBe(false);
   });
 });

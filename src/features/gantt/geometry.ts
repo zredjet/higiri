@@ -128,6 +128,15 @@ export function dragSpan(span: DaySpan, mode: DragMode, delta: number): DaySpan 
 }
 
 /**
+ * True when a dropped span ends later than before (moving the bar later, or
+ * pulling its right end out): only then may the 後続TODO need moving too
+ * (G-8), which Rust works out (preview_dependent_shift).
+ */
+export function endsLater(origin: DaySpan, dropped: DaySpan): boolean {
+  return dropped.end > origin.end;
+}
+
+/**
  * Grab areas of a planned bar, in px. An end grip reaches `outside` px
  * beyond the bar and up to `inside` px into it, leaving at least `moveMin` px
  * of the bar (all of it when shorter) to move it. `padY` widens every grip

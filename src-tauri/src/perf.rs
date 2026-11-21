@@ -678,6 +678,50 @@ async fn measure(pool: &SqlitePool, today: NaiveDate) -> Vec<(&'static str, Dura
         .await,
     ));
 
+    // 後続TODOのずらし (G-8): the TODO with the most TODOs after it (後続の後続
+    // too), its plan dragged to end a year later, so that every open one with
+    // a 予定開始 is pushed. Nothing is written.
+    let all_deps = {
+        let mut c = pool.acquire().await.unwrap();
+        crate::repo::dependencies::list(&mut c).await.unwrap()
+    };
+    let (head, after) = all_deps
+        .iter()
+        .map(|d| d.depends_on_id)
+        .map(|id| (id, crate::domain::shift::reachable(id, &all_deps).len()))
+        .max_by_key(|&(id, n)| (n, std::cmp::Reverse(id)))
+        .unwrap();
+    let head_start = todos::get(pool, head, today)
+        .await
+        .unwrap()
+        .todo
+        .planned_start
+        .unwrap();
+    let far = shift(today, 365);
+    let moved = crate::commands::shift::preview(pool, head, head_start, far)
+        .await
+        .unwrap();
+    let direct: Vec<i64> = all_deps
+        .iter()
+        .filter(|d| d.depends_on_id == head)
+        .map(|d| d.todo_id)
+        .collect();
+    assert!(
+        moved.iter().any(|s| !direct.contains(&s.id)),
+        "the later TODOs of later TODOs move too"
+    );
+    println!(
+        "dependent shift: TODO {head}, {after} TODOs after it, {} moved",
+        moved.len()
+    );
+    times.push((
+        "preview_dependent_shift",
+        median(runs, || {
+            crate::commands::shift::preview(pool, head, head_start, far)
+        })
+        .await,
+    ));
+
     // What the first screen asks for (App.tsx: settings, projects, the
     // dashboard and its badge, the startup reminder). The screen sends them
     // at once; here they run one after the other.

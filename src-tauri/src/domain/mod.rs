@@ -19,6 +19,7 @@ pub mod report;
 pub mod report_template;
 pub mod search;
 pub mod settings;
+pub mod shift;
 pub mod status;
 pub mod subtodo;
 pub mod template;

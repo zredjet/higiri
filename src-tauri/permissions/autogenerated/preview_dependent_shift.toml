@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-preview-dependent-shift"
+description = "Enables the preview_dependent_shift command without any pre-configured scope."
+commands.allow = ["preview_dependent_shift"]
+
+[[permission]]
+identifier = "deny-preview-dependent-shift"
+description = "Denies the preview_dependent_shift command without any pre-configured scope."
+commands.deny = ["preview_dependent_shift"]
