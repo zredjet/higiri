@@ -130,6 +130,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
 - `bundle.css` の先頭にある Google Fonts の `@import` は外し、IBM Plex Sans JP と IBM Plex Mono をアプリに同梱する。このアプリは外部と通信しない。
 - Aizome にない部品(ガント、詳細パネル、Markdownエディタ、タイムライン)は同じトークンで作る。
 - Aizome のダークテーマでは `--bg-subtle` と `--surface` が同じ色になる。`surface` の上に敷く網掛け(ガントの土日・プロジェクト行・見出し、進捗バーの地、Markdown のコードと表の見出し)は `src/styles/app.css` の `--surface-shade` を使う(ライトは `--bg-subtle`、ダークは `--sumi-850`)。
+- Aizome のタブの並び(`.az-tabs__list`)は横にスクロールする作り(`overflow-x: auto`)で、選んだタブの下線が並びの下へ1px出る(`bottom: -1px`)。スクロールバーを常に出す環境(Windows、マウスをつないだ Mac)で並びの右に細い縦のスクロールバーが出ていたので、`src/styles/app.css` で `overflow-y: hidden` にしている(v0.4.0 の公開のあとに直した)。
 - 色だけで状態を伝えない。区分名やステータス名を必ず文字で添える。
 - 文言は `docs/aizome/README.md` の「文章の基本」に従う(です・ます調、ボタンは動詞、「!」と絵文字は使わない)。モックにある文言はそのまま使う。
 - Markdown の表示は HTML を無害化し、リンクは OS の既定ブラウザで開く。

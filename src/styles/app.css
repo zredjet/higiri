@@ -196,6 +196,17 @@ body,
   gap: var(--space-1);
 }
 
+/* ---------- Tabs ---------- */
+/* Aizome's tab row scrolls sideways (overflow-x: auto), which makes it a
+   scroll box both ways, and the selected tab's underline reaches 1px below it
+   (bottom: -1px, over the row's border). Where scrollbars always show
+   (Windows, a Mac with a mouse), that 1px gave the row a thin vertical
+   scrollbar on its right. The row never scrolls up and down, so that 1px is
+   clipped instead, as it already was with overlay scrollbars. */
+.az-tabs__list {
+  overflow-y: hidden;
+}
+
 /* ---------- Shared bits ---------- */
 .tabular {
   font-variant-numeric: tabular-nums;
