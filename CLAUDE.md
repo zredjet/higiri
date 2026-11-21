@@ -14,23 +14,26 @@
 | 場所 | 中身 |
 | --- | --- |
 | `docs/README.md` | 資料の一覧、優先順位、写しを作るときに分かっている注意点 |
-| `docs/requirements-design.md` | 要件49件、非機能要件、リリース段階、アーキテクチャ、DDL、主要ロジック、画面構成、コマンド一覧、未決事項。v1.1 の詳細(「v1.1の詳細」の節)、v0.3.0 の詳細(「v0.3.0の詳細」の節)と v0.4.0 の詳細(「v0.4.0の詳細」の節) |
+| `docs/requirements-design.md` | 要件52件、非機能要件、リリース段階、アーキテクチャ、DDL、主要ロジック、画面構成、コマンド一覧、未決事項。v1.1 の詳細(「v1.1の詳細」の節)、v0.3.0 の詳細(「v0.3.0の詳細」の節)、v0.4.0 の詳細(「v0.4.0の詳細」の節)と v0.5.0 の詳細(「v0.5.0の詳細」の節) |
 | `docs/implementation-plan.md` | MVPまでのフェーズ分けと、各フェーズの完了条件 |
 | `docs/implementation-plan-v1.1.md` | v1.1 のフェーズ分け(フェーズ10〜16)と、各フェーズの完了条件。進め方(オーケストレーター方式) |
 | `docs/implementation-plan-v0.3.0.md` | v0.3.0 のフェーズ分け(フェーズ17〜24)と、各フェーズの完了条件。進め方は v1.1 と同じ(作業のブランチは `dev-0.3.0`) |
 | `docs/implementation-plan-v0.4.0.md` | v0.4.0 のフェーズ分け(フェーズ25〜30)と、各フェーズの完了条件。進め方は v0.3.0 と同じ(作業のブランチは `dev-0.4.0`) |
+| `docs/implementation-plan-v0.5.0.md` | v0.5.0 のフェーズ分け(フェーズ31〜36)と、各フェーズの完了条件。進め方は v0.4.0 と同じ(作業のブランチは `dev-0.5.0`) |
 | `docs/ui-mock/` | 6画面のモック。見た目は `screenshots/`、正確な値と文言は `.dc.html` |
 | `docs/aizome/` | デザインシステム Aizome の方針、トークン、部品のCSS・型定義・参考実装 |
 
 ## 作る範囲
 
-v0.4.0 までを作る。設計書の「段階」が「将来」のもの(時間管理、月報、ウィンドウを開かずにTODOを追加する T-13)は作らない。データ構造の備え(`reports.kind` の `monthly`)は設計書どおり入れたままにする。
+v0.5.0 までを作る。設計書の「段階」が「将来」のもの(時間管理、月報、ウィンドウを開かずにTODOを追加する T-13)は作らない。データ構造の備え(`reports.kind` の `monthly`)は設計書どおり入れたままにする。
 
-MVP(v1.0。公開した版は v0.1.0)、v1.1(v0.2.0)と v0.3.0 は完成している。v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作った。仕様は設計書の「v1.1の詳細」、決めごとは下の「v1.1 の決めごと」にある。
+MVP(v1.0。公開した版は v0.1.0)、v1.1(v0.2.0)、v0.3.0 と v0.4.0 は完成している。v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作った。仕様は設計書の「v1.1の詳細」、決めごとは下の「v1.1 の決めごと」にある。
 
 v0.3.0(サブTODO、TODOテンプレート、繰り返しTODO、TODO間の依存関係、週報)は `docs/implementation-plan-v0.3.0.md` のフェーズ17〜24で作った。仕様は設計書の「v0.3.0の詳細」、決めごとは下の「v0.3.0 の決めごと」にある。
 
-v0.4.0(表示倍率、バックアップの複製先、後続TODOのずらし、一括変更)は `docs/implementation-plan-v0.4.0.md` のフェーズ25〜30で作る。仕様は設計書の「v0.4.0の詳細」、決めごとは下の「v0.4.0 の決めごと」にある。
+v0.4.0(表示倍率、バックアップの複製先、後続TODOのずらし、一括変更)は `docs/implementation-plan-v0.4.0.md` のフェーズ25〜30で作った。仕様は設計書の「v0.4.0の詳細」、決めごとは下の「v0.4.0 の決めごと」にある。
+
+v0.5.0(CLI `higiri-cli`、Claude Code の Skill、CLI に出さないプロジェクトの設定)は `docs/implementation-plan-v0.5.0.md` のフェーズ31〜36で作る。仕様は設計書の「v0.5.0の詳細」、決めごとは下の「v0.5.0 の決めごと」にある。
 
 段階は、v0.3.0 からアプリの版番号(v0.3.0 など)で呼ぶ。「v2」の呼び名は使わない(利用者が決定)。「MVP」「v1.1」は、これまでの資料のまま使う。
 
@@ -48,7 +51,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
 ```
 
 - 判定と集計は Rust 側に置く。画面側で日限注意の区分や残り日数を計算し直さない。
-- `domain/` の関数は現在時刻を自分で取らない。今日の日付(と現在時刻)は引数で受け取る。時計を読むのは `commands/` と常駐のタイマー(`src-tauri/src/notifier.rs`)だけで、どちらも `commands::clock` を使う。通知の時刻はローカルの時刻なので、UTC からの変換には `clock::zone()`(PC のタイムゾーン)を渡す。
+- `domain/` の関数は現在時刻を自分で取らない。今日の日付(と現在時刻)は引数で受け取る。時計を読むのは `commands/` と常駐のタイマー(`src-tauri/src/notifier.rs`)だけで、どちらも `commands::clock` を使う(v0.5.0 の CLI の `cli/` も `commands::clock` を使う)。通知の時刻はローカルの時刻なので、UTC からの変換には `clock::zone()`(PC のタイムゾーン)を渡す。
 - 日限注意の判定は `classify(todo, today, &rules)` の1か所。ダッシュボード、リマインド、一覧のバッジ、日報のすべてがこれを使う。`rules`(`domain::urgency::Rules`)は `soon_days`、`follow_up_days`、`WorkCalendar` を持ち、`Rules::from_settings` で設定から作る。日数(`assess`)と確認日の初期値も `Rules` で数える。
 - ステータス変更は必ず `change_status` を通す。実績日の自動入力と `todo_events` への記録を1トランザクションで行う。`update_todo` でステータスを直接書き換えない。
 - 画面から呼べるのは設計書のコマンド一覧にあるものだけ。足すときは理由を添えて相談する。
@@ -85,7 +88,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
 
   - 入力をそのまま入れる列(`waiting_on`、`follow_up_date`、`close_reason`)は、空に戻したときだけ `auto` に入る。入力した値は `waiting_on` / `follow_up_date` / `reason` のキーに入る。
   - 例: 作業中から待ちにした行は `{"waiting_on":"認証担当の回答","follow_up_date":"2026-11-20","auto":{"waiting_since":"2026-11-19"}}`。完了から再開した行は `{"auto":{"actual_end":null,"closed_at":null}}`。
-- `settings` は1キー1行で、値は JSON。キーは `reminder_frequency`(`"every_launch"` / `"once_per_day"`)、`soon_days`(数値)、`follow_up_days`(数値)、`last_reminded_on`(`"YYYY-MM-DD"` か `null`)、`theme`(`"light"` / `"dark"` / `"system"`)。読めない値は既定値として扱う。v1.1 で足したキーは「v1.1 の決めごと」に、v0.3.0 で足したキー(`weekly_report_template`)は「v0.3.0 の決めごと」に、v0.4.0 で足したキー(`zoom` など)は「v0.4.0 の決めごと」にある。
+- `settings` は1キー1行で、値は JSON。キーは `reminder_frequency`(`"every_launch"` / `"once_per_day"`)、`soon_days`(数値)、`follow_up_days`(数値)、`last_reminded_on`(`"YYYY-MM-DD"` か `null`)、`theme`(`"light"` / `"dark"` / `"system"`)。読めない値は既定値として扱う。v1.1 で足したキーは「v1.1 の決めごと」に、v0.3.0 で足したキー(`weekly_report_template`)は「v0.3.0 の決めごと」に、v0.4.0 で足したキー(`zoom` など)は「v0.4.0 の決めごと」に、v0.5.0 で足すキー(`cli_hidden_projects`)は「v0.5.0 の決めごと」にある。
 - JSON の書き出し(フェーズ15)の表は、`projects`、`todos`、`work_logs`、`todo_events`、`reports`、`todo_templates`、`todo_repeats`、`todo_dependencies` の順(`json_data.rs` の `TABLES`)。`todo_events.note`、`todo_templates.body`、`todo_repeats.rule` と settings の値は、保存してある JSON の文をそのまま JSON の値として埋め込む。`schema_version` は v0.3.0 で2になった。取り込みでは、`schema_version` が1のファイル(v0.2.0 までの書き出し)は v0.3.0 の3つの表のキーがなくてよく(空として扱う)、2以上でどれかがなければ `Malformed`。
 - 接続のたびに外部キー制約を有効にし、WALモードにする。
 - 適用済みのマイグレーションファイルは書き換えない。変更は新しいファイルを足す。
@@ -534,6 +537,31 @@ v0.4.0 は `docs/implementation-plan-v0.4.0.md` のフェーズ25〜30で作る�
       - フックは `queries.ts` の `usePreviewBulkChange` と `useApplyBulkChange`(`TODO_WRITES` の列。プロジェクトと TODO の一覧を取り直す)。
     - 確かめたこと: サンプルデータの .app で、日限をずらす(完了のTODOが理由つきで除かれる)、先行TODOが終わっていないTODOを作業中にする確認、社内ツール整備の全件を完了(子2件も一緒に完了、繰り返しの次の回1件、すでに完了の2件を除く)、Shift での範囲の選択(キーボードの Shift+スペース)、150%・幅1280の帯とダイアログ。
     - perf(`perf.rs`): 先頭の1,000件(`BULK`。全部のステータス、親と子、繰り返しを含む)で `preview_bulk_change`(日限をずらす・完了・作業中)、日限を+7日して−7日に戻す `apply_bulk_change`、未着手・作業中の1,000件を保留にして戻す `apply_bulk_change`。足した変更履歴は計測のあとに消す(あとの JSON の計測を変えないため)。開いている1,000件を完了にする保存は、`VACUUM INTO` で作った写しの DB で1回だけ測る。
+
+## v0.5.0 の決めごと
+
+v0.5.0 は `docs/implementation-plan-v0.5.0.md` のフェーズ31〜36で作る。仕様の詳細は設計書の「v0.5.0の詳細」にある。フェーズごとに作ったもの(ファイルの場所と細かい決めごと)は、各フェーズの終わりにここへ足す。
+
+- 作業のブランチは `dev-0.5.0`(リリースのタグ `v0.5.0` と同じ名前にしない)。
+- 表と画面のコマンド(48個)は変えない。`capabilities/default.json` も変わらない。`bindings.ts` は、下の settings のキーの分(`Settings` と `SettingsInput`)だけが変わる。
+- Claude Code とは、CLI と Skill でつなぐ。MCP は作らない(後から同じ CLI に足せる)。利用者が決定。
+- CLI は同じ Cargo のパッケージの2つ目の実行ファイル `higiri-cli`(`src-tauri/src/bin/higiri-cli.rs`、中身は `src-tauri/src/cli/`)。読み書きは画面のコマンドと同じ内側の関数だけを通し、`cli/` に SQL を書かない。時計は `commands::clock`。
+- CLI に許す書き込みは、TODO の追加(子TODOも)、項目の変更(タイトル、優先度、日限、予定期間、確認日)、ステータスの変更、作業ログの追加、メモへの書き足しだけ。削除、復元、JSON の取り込み、設定、プロジェクトの作成・編集は入れない。利用者が決定。
+- メモは、CLI からは末尾に書き足すこと(`append-memo`)だけができる。書き換えと消すことはできない(メモの変更は変更履歴に残らないため)。利用者が決定。
+- AI に渡すデータ: 一覧・まとめ・検索には、メモと作業ログの本文を出さない(1件の `show` だけが出す)。加えて、CLI に出さないプロジェクトを設定画面で選べる。利用者が決定。
+- `settings` に足すキー
+
+  | キー | 値 | 既定値 | フェーズ |
+  | --- | --- | --- | --- |
+  | `cli_hidden_projects` | CLI に出さないプロジェクトの id の配列(小さい順、重複なし) | `[]` | 32 |
+
+  - `update_settings` の入力(`SettingsInput`)に入れる。保存のときに、ないプロジェクトの id を除く。プロジェクトを削除したら、同じトランザクションでその id を外す(id が使い回されることがあるため)。
+  - 復元と JSON の取り込みでは、ファイルの値に入れ替わる(プロジェクトの id と一緒に動く値なので、`KEPT_ON_REPLACE` に入れない)。
+  - 出さないプロジェクトの TODO は、CLI のどのサブコマンドにも出さず、件数にも数えない。断るときの `kind` は `hidden`。別のプロジェクトの先行TODO・後続TODOが出さないプロジェクトにあれば、id とタイトルを出さず `{ hidden: true }` にする。
+- CLI はマイグレーションを当てない。DB の版が CLI と合わなければ断る。書く前に、その日の毎日のバックアップがなければ作る。
+- 画面で確認のダイアログを挟む操作(先行TODOが終わっていないTODOを作業中にする、開いている子のある親を閉じる)は、CLI では付け足しの引数がなければ `needs_confirmation` で断る。
+- 日限注意の区分と日数の文は Rust が作って出力に入れる。Claude Code に数え直させない。
+- アプリのウィンドウが前面に来たら(`focus`)一覧を取り直す(TanStack Query の `focusManager`)。CLI の変更を画面に出すため。
 
 ## 品質の決めごと
 
