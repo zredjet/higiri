@@ -462,7 +462,7 @@ v0.4.0 は `docs/implementation-plan-v0.4.0.md` のフェーズ25〜30で作る�
     - macOS(WKWebView の `pageZoom`)では、倍率を上げると CSS の幅が減って並びが組み直されることを確かめた(150%・幅1280でダッシュボードの件数のカードが5列から3列+2列に折り返す)。Windows(WebView2 の `ICoreWebView2Controller::put_ZoomFactor`)はブラウザの拡大と同じ仕組みで、`devicePixelRatio` が変わって組み直される(実機ではまだ見ていない)。
     - 画面: 設定の「表示」のカードの「配色」の下に「表示倍率」の `Select`(`src/features/settings/zoomText.ts` の `zoomOptions`。「70%」〜「150%」、100は「100%(標準)」。説明は `ZOOM_DESCRIPTION`。Vitest あり)。選んだらすぐ `useUpdateSettings` で保存し、Rust が反映する。`settingsInputOf` に `zoom` を足した。
     - 幅の備え(`src/styles/app.css`。Aizome の写しは変えていない): 150% では幅1280のウィンドウが853px、最小の960×600が640×400px 相当になる。
-      - `.app__main > *` に `min-width: 528px`(ガントの名前の欄302pxと1週間分の日付)。それより狭いと `.app__main`(`overflow: auto`)の中で横にスクロールする。サイドナビと詳細パネルは動かない。
+      - `.app__main > *` に `min-width: 528px`(ガントの名前の欄302pxと1週間分の日付)。それより狭いと `.app__main`(`overflow: auto`)の中で横にスクロールする。サイドナビと詳細パネルは動かない。528px は余白と枠を含めた幅(`box-sizing: border-box`。フェーズ30で足した。含めないと、150%・幅1280(ページの幅549px)で、内側に余白のある `Alert` と一覧の操作の帯だけがほかより11〜13px広くなり、ページ全体が横にスクロールしていた)。
       - 1280px 未満(`max-width: 1279.98px`)では、詳細パネルを右に重ねて出す(`position: absolute`、幅440px、`max-width: calc(100% - サイドナビの幅)`、`--shadow-lg`、`z-index` はガントの見出しの sticky より1つ上)。並べて出すと一覧とガントが数列分しか残らないため。TODO一覧の表には `min-width: 840px` を付け、セルを何行にも折らずに表の枠の中で横にスクロールさせる(ダッシュボードの日限注意の表は、もとから横にスクロールする)。表の外側の要素に `todo-table` のクラスを足した(`TodoTable.tsx`)。1280px 以上(100%の既定の大きさ)は今までと同じ(パネルは横に並び、一覧の列は詰まる)。
       - ガントの画面(`.app__main--fill`)は `overflow: hidden` をやめた。高さが足りないとき(150%では見出し・絞り込み・凡例で半分ほどを使う)は画面が縦にスクロールし、ガントは `min-height: 240px` を保つ。
       - 起動時リマインドの一覧(`max(88px, min(400px, 50vh, 100vh - 300px))`)、検索の結果(`max(96px, min(480px, 55vh, 100vh - 250px))`)、先行TODOの選択の結果(`max(96px, min(320px, 100vh - 330px))`)は、背の低いウィンドウでは一覧の高さを先に縮める。「確認しました」などのボタンが、ダイアログの中をスクロールしなくても見えるようにするため。ほかのダイアログは、Aizome のとおり画面の高さを超えると中がスクロールする。
@@ -565,7 +565,7 @@ v0.4.0 は `docs/implementation-plan-v0.4.0.md` のフェーズ25〜30で作る�
 | Rust の書式の確認(直すときは `cargo fmt --manifest-path src-tauri/Cargo.toml`) | `npm run fmt:rust` |
 | Rust の lint(警告はエラー扱い) | `npm run lint:rust` |
 | まとめて確認(型チェック、Rust の書式、Vitest、cargo test、clippy) | `npm run check` |
-| 性能の確認(TODO 5,000件・作業ログ 20,000件でコマンドの時間を測る。最適化ビルド。検索、営業日の設定、TODO の保存(`get_todo` と `update_todo`)、テンプレート、繰り返し、依存関係、後続TODOのずらしの確認、一括変更の確認と保存、週報、起動の Rust 側、JSON の書き出しと取り込みも測る。計測のデータには子TODO・繰り返し・依存関係も入る) | `npm run test:perf` |
+| 性能の確認(TODO 5,000件・作業ログ 20,000件でコマンドの時間を測る。最適化ビルド。検索、営業日の設定、TODO の保存(`get_todo` と `update_todo`)、テンプレート、繰り返し、依存関係、後続TODOのずらしの確認、一括変更の確認と保存、週報、起動の Rust 側、毎日のバックアップと複製先への複製、JSON の書き出しと取り込みも測る。計測のデータには子TODO・繰り返し・依存関係も入る) | `npm run test:perf` |
 | アプリアイコンを原画から作り直す | `npm run icons` |
 | 配布物のビルド(実行ファイルの ZIP を `release/` に作る) | `npm run build` |
 

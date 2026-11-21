@@ -65,7 +65,10 @@ body,
  * of a 1280px window is 853px, and of the smallest window (960×600) 640×400.
  * - The pages keep at least 528px (the Gantt chart's names and a week of
  *   days). Narrower than that, the page scrolls sideways inside .app__main,
- *   so the side nav and the detail panel stay where they are.
+ *   so the side nav and the detail panel stay where they are. The 528px
+ *   counts the padding and the border: a padded block (an alert, the bulk
+ *   bar) would otherwise be wider than the page at 150% of 1280px (549px)
+ *   and make the whole page scroll sideways by a few pixels.
  * - Below 1280px the detail panel lies over the right of the page instead of
  *   squeezing it (it would leave the list and the chart a few columns), and
  *   the TODO list keeps its columns (it scrolls sideways in its frame, as the
@@ -73,6 +76,7 @@ body,
  *   From 1280px (100% of the default window) both stay as they were.
  */
 .app__main > * {
+  box-sizing: border-box;
   min-width: 528px;
 }
 
