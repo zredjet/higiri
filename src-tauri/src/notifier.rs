@@ -8,11 +8,14 @@
 //! 1. reads the clock with `commands::clock`;
 //! 2. takes the day's backup with `backup::run_daily` when the date changed
 //!    since the last wake (one a day, the newest 7 kept, as at startup);
-//! 3. copies the daily backups to the backup mirror (v0.4.0, C-3) when the
-//!    newest one has not reached it ([`mirror_if_behind`]): right after the
-//!    startup's backup (the first wake), after a new day's backup, and again
-//!    at every wake while the mirror cannot be written (a drive plugged back
-//!    in catches up the same day);
+//! 3. starts copying the daily backups to the backup mirror (v0.4.0, C-3)
+//!    when the newest one has not reached it ([`mirror_if_behind`]): right
+//!    after the startup's backup (the first wake), after a new day's backup,
+//!    and again at every wake while the mirror cannot be written (a drive
+//!    plugged back in catches up the same day). The copy runs in a task of its
+//!    own, one at a time ([`run_alone`]), and the wake does not wait for it: a
+//!    network folder that hangs for minutes never delays a notification or
+//!    the wait until the next wake;
 //! 4. when a notification time is due ([`tick`]): counts 日限注意 with the
 //!    dashboard's own count, notifies when there is at least one, and saves
 //!    `last_notified_at` either way, so a time with none is not notified later.
@@ -25,7 +28,9 @@
 //! new values over with [`Notifier::update`], which also wakes the task so it
 //! computes the wait again.
 
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -320,6 +325,35 @@ pub async fn mirror_if_behind(
     }
 }
 
+/// Clears the "running" flag when the job ends, a panic included.
+struct Running(Arc<AtomicBool>);
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+/// Runs `job` in a task of its own and returns at once, unless the job
+/// started before is still running: then this one is skipped (the next wake
+/// tries again). Returns whether it started. The resident timer runs the copy
+/// to the backup mirror this way, so a copy that hangs (a network folder that
+/// does not answer) holds up neither the notifications nor the next wake.
+pub fn run_alone<Fut>(running: &Arc<AtomicBool>, job: Fut) -> bool
+where
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    if running.swap(true, Ordering::AcqRel) {
+        return false;
+    }
+    let done = Running(Arc::clone(running));
+    tauri::async_runtime::spawn(async move {
+        let _done = done;
+        job.await;
+    });
+    true
+}
+
 /// Shows an OS notification. Errors are logged by the callers that need it.
 pub fn show<R: Runtime>(
     app: &AppHandle<R>,
@@ -346,6 +380,7 @@ pub fn spawn<R: Runtime>(
     let wake = Arc::clone(&notifier.wake);
     let shared = Arc::clone(&notifier.settings);
     let mirror = Arc::clone(&notifier.mirror);
+    let mirroring = Arc::new(AtomicBool::new(false));
     tauri::async_runtime::spawn(async move {
         let mut backup_day = backup_day;
         loop {
@@ -353,7 +388,11 @@ pub fn spawn<R: Runtime>(
             let zone = clock::zone();
             let today = now.with_timezone(&zone).date_naive();
             backup_if_new_day(&pool, &data_dir, &mut backup_day, today).await;
-            mirror_if_behind(&pool, &data_dir, &mirror, today).await;
+            // Not waited for (see run_alone).
+            let (p, d, m) = (pool.clone(), data_dir.clone(), Arc::clone(&mirror));
+            run_alone(&mirroring, async move {
+                mirror_if_behind(&p, &d, &m, today).await;
+            });
             let wait = match check(&shared, &pool, now, &zone).await {
                 Ok(t) => {
                     if let Some(m) = t.message {
@@ -770,5 +809,79 @@ mod tests {
         n.update(&Settings::default());
         assert_eq!(n.mirror().dir, None);
         assert_eq!(n.mirror().last_ok, None);
+    }
+
+    /// Waits (up to a second) until the running job has finished.
+    async fn finished(running: &AtomicBool) {
+        for _ in 0..100 {
+            if !running.load(Ordering::Acquire) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("the job did not finish");
+    }
+
+    #[tokio::test]
+    async fn a_copy_that_hangs_holds_up_neither_the_wake_nor_the_notification() {
+        let pool = sample().await;
+        let n = Notifier::new(&Settings::default());
+        let running = Arc::new(AtomicBool::new(false));
+        // A copy to a network folder that does not answer until released.
+        let (release, hang) = tokio::sync::oneshot::channel::<()>();
+        let started = tokio::time::timeout(Duration::from_secs(1), async {
+            run_alone(&running, async move {
+                let _ = hang.await;
+            })
+        })
+        .await
+        .expect("starting the copy returns at once");
+        assert!(started);
+        // While it hangs, the wake goes on: the 9:00 time is notified with the
+        // wait computed from the clock read before the copy started.
+        let t = tokio::time::timeout(
+            Duration::from_secs(5),
+            wake(&n, &pool, ts(2026, 11, 19, 0, 30)),
+        )
+        .await
+        .expect("the notification check does not wait for the copy");
+        assert!(t.message.is_some());
+        assert_eq!(t.wait, MAX_WAIT);
+        // The next wakes skip the copy while the first one still runs.
+        assert!(!run_alone(&running, async {}));
+        assert!(!run_alone(&running, async {}));
+
+        release.send(()).unwrap();
+        finished(&running).await;
+        // Then the next wake starts one again.
+        assert!(run_alone(&running, async {}));
+        finished(&running).await;
+    }
+
+    #[tokio::test]
+    async fn a_copy_that_panics_does_not_stop_the_next_ones() {
+        let running = Arc::new(AtomicBool::new(false));
+        assert!(run_alone(&running, async {
+            panic!("a copy that fails badly");
+        }));
+        finished(&running).await;
+        assert!(run_alone(&running, async {}));
+        finished(&running).await;
+    }
+
+    #[tokio::test]
+    async fn the_mirror_task_copies_as_the_wake_did() {
+        let data = tempfile::tempdir().unwrap();
+        let usb = tempfile::tempdir().unwrap();
+        let (pool, n) = mirrored(data.path(), &["2026-11-19"], usb.path(), None).await;
+        let running = Arc::new(AtomicBool::new(false));
+        let (p, dir, m) = (pool.clone(), data.path().to_owned(), Arc::clone(&n.mirror));
+        let today = d("2026-11-19");
+        assert!(run_alone(&running, async move {
+            mirror_if_behind(&p, &dir, &m, today).await;
+        }));
+        finished(&running).await;
+        assert!(usb.path().join("todo-2026-11-19.db").is_file());
+        assert_eq!(n.mirror().last_ok, Some(d("2026-11-19")));
     }
 }
