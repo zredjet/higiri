@@ -19,8 +19,17 @@ v0.5.0 はデータの形を変えていないので、v0.4.0 や v0.3.0 に戻�
 
 下の「Assets」から、使う OS の ZIP をダウンロードして展開します。インストーラーはありません。
 
-- Windows(64ビット): `Higiri_<版>_windows_x64.zip` を展開し、`Higiri.exe` を実行します。同じフォルダの `higiri-cli.exe` は、コマンドラインの道具です。
+- Windows(64ビット): `Higiri_<版>_windows_x64.zip` を展開し、`Higiri.exe` と `higiri-cli.exe` を決まったフォルダ(`%LOCALAPPDATA%\Programs\Higiri` など)に置いて、`Higiri.exe` を実行します。`higiri-cli.exe` は、コマンドラインの道具です。
 - macOS(Apple Silicon): `Higiri_<版>_macos_arm64.zip` を展開し、`Higiri.app` を「アプリケーション」フォルダに移して開きます。コマンドラインの道具 `higiri-cli` は、`Higiri.app` の中(`Higiri.app/Contents/MacOS/higiri-cli`)にあります。
+
+ダウンロードから起動までをコマンドで行う手順は、README の「コマンドで入れる・新しい版に入れ替える」にあります。
+
+## 新しい版に入れ替えるとき
+
+- 先に Higiri を終了してください(macOS はメニューバー、Windows はタスクバーの右下の Higiri のアイコンから「終了」)。×で閉じただけでは、動き続けています。
+- macOS は、前の `Higiri.app` をゴミ箱に移してから、新しい `Higiri.app` を「アプリケーション」フォルダに入れます。Windows は、前の版と同じフォルダに上書きします。どちらも、データはそのまま残ります。
+- 同じ場所に入れれば、`higiri-cli` のリンク(macOS)と `Path` の設定(Windows)、自動起動の登録は、そのまま使えます。
+- Claude Code で使っているときは、`higiri-cli install-skill` をもう一度実行して、Skill を新しい版にしてください。
 
 ## 初めて開くとき
 
@@ -32,7 +41,7 @@ v0.5.0 はデータの形を変えていないので、v0.4.0 や v0.3.0 に戻�
 ## higiri-cli を使うとき
 
 - Claude Code などから `higiri-cli` の名前で呼べるように、CLI のある場所を PATH に足してください。手順は README の「higiri-cli を使えるようにする」にあります。アプリと CLI は、同じ ZIP に入っているものを使ってください。
-- Claude Code で使うときは、`higiri-cli install-skill` を実行してください。Higiri を新しい版にしたときも、もう一度実行してください。確認の出方と、読むときの確認をなくす設定は、README の「Claude Code で使う」にあります。
+- Claude Code で使うときは、`higiri-cli install-skill` を実行してください。確認の出方と、読むときの確認をなくす設定は、README の「Claude Code で使う」にあります。
 - higiri-cli の出力を Claude Code などの AI に読ませると、TODO のタイトル、待っている相手、メモ(1件を開いたとき)などが、その AI の提供元に送られます。AI に渡したくないプロジェクトは、設定画面の「CLIに出すプロジェクト」でオフにしてください。仕事のデータで使うときは、AI に渡してよいかを勤務先の決まりで確かめてください。
 
 ## 通知と自動起動

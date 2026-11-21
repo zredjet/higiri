@@ -65,7 +65,7 @@
 
 [Releases](../../releases/latest) から ZIP をダウンロードし、展開して使います。インストーラーはありません。
 
-- Windows(64ビット): `Higiri_<版>_windows_x64.zip`。展開した `Higiri.exe` を実行します。同じフォルダの `higiri-cli.exe` はコマンドラインの道具です(下の「higiri-cli を使えるようにする」)。
+- Windows(64ビット): `Higiri_<版>_windows_x64.zip`。展開した `Higiri.exe` と `higiri-cli.exe` を決まったフォルダ(`%LOCALAPPDATA%\Programs\Higiri` など)に置き、`Higiri.exe` を実行します。`higiri-cli.exe` はコマンドラインの道具です(下の「higiri-cli を使えるようにする」)。新しい版も同じフォルダに上書きすると、PATH と自動起動の設定をそのまま使えます。
 - macOS(Apple Silicon): `Higiri_<版>_macos_arm64.zip`。展開した `Higiri.app` を「アプリケーション」フォルダに移して開きます。コマンドラインの道具 `higiri-cli` は `Higiri.app` の中(`Higiri.app/Contents/MacOS/higiri-cli`)にあります。
 
 どちらも有料の署名を受けていないため、初めて開くときに確認が出ます。
@@ -79,6 +79,49 @@ v0.4.0 と v0.5.0 はデータの形を変えていないので、v0.4.0 や v0.
 
 v0.3.0 で一度開いたデータは、v0.2.0 では開けません(データは消えません)。v0.2.0 に戻すときは、v0.3.0 を初めて開く前の日のバックアップが要ります。v0.3.0 で作ったバックアップと JSON も、v0.2.0 では読み込めません。
 
+### コマンドで入れる・新しい版に入れ替える
+
+ZIP のダウンロードから起動までを、コマンドで行う手順です。新しい版に入れ替えるときは、先に Higiri を終了してください。データは別の場所にあるので、入れ替えても残ります。`0.5.0` の所は、入れる版に変えてください。
+
+**macOS**(ターミナル)
+
+1. Higiri を動かしていれば、メニューバーの Higiri のアイコンから「終了」を選びます。×で閉じただけでは、メニューバーに残って動き続けます。
+2. ZIP をダウンロードして展開します。
+
+   ```bash
+   V=0.5.0
+   curl -L -o ~/Downloads/Higiri_${V}_macos_arm64.zip "https://github.com/zredjet/higiri/releases/download/v${V}/Higiri_${V}_macos_arm64.zip"
+   ditto -x -k ~/Downloads/Higiri_${V}_macos_arm64.zip ~/Downloads/Higiri-${V}
+   ```
+
+3. 前の版をゴミ箱に移し(初めて入れるときは1行目を飛ばします)、新しい版を「アプリケーション」フォルダに入れて開きます。
+
+   ```bash
+   mv /Applications/Higiri.app ~/.Trash/Higiri-$(date +%Y%m%d%H%M%S).app
+   mv ~/Downloads/Higiri-${V}/Higiri.app /Applications/
+   open /Applications/Higiri.app
+   ```
+
+4. 初めて入れたときは、下の「higiri-cli を使えるようにする」で `higiri-cli` へのリンクを作ります。入れ替えたときは、前に作ったリンクがそのまま使えます。
+
+**Windows**(PowerShell)
+
+1. Higiri を動かしていれば、タスクバーの右下の Higiri のアイコン(隠れているときは「^」の中)から「終了」を選びます。×で閉じただけでは、そこに残って動き続けます。
+2. ZIP をダウンロードし、`%LOCALAPPDATA%\Programs\Higiri` に展開して起動します。前の版があれば上書きします。
+
+   ```powershell
+   $v = "0.5.0"
+   $dir = "$env:LOCALAPPDATA\Programs\Higiri"
+   $zip = "$env:USERPROFILE\Downloads\Higiri_${v}_windows_x64.zip"
+   curl.exe -L -o $zip "https://github.com/zredjet/higiri/releases/download/v$v/Higiri_${v}_windows_x64.zip"
+   Expand-Archive $zip -DestinationPath $dir -Force
+   Start-Process "$dir\Higiri.exe"
+   ```
+
+3. 初めて入れたときは、下の「higiri-cli を使えるようにする」で、このフォルダを `Path` に足します。前の版を別のフォルダ(ダウンロードのフォルダなど)に置いていたときは、そのフォルダを `Path` から外し、古い `Higiri.exe` と `higiri-cli.exe` を消してください。古いほうの CLI が呼ばれるのを防ぐためです。
+
+どちらも、最後に新しく開いたターミナルで `higiri-cli --version` を実行し、入れた版が出ることを確かめます。Claude Code で使っているときは、`higiri-cli install-skill` をもう一度実行して、Skill を新しい版にします。
+
 ### 通知と自動起動
 
 - 通知が届かないときは、OS の通知の設定で Higiri が許可されているかを確かめてください。設定画面の「通知を試す」で、通知が届くかを確かめられます。
@@ -91,7 +134,7 @@ v0.3.0 で一度開いたデータは、v0.2.0 では開けません(データ�
 
 Claude Code などから `higiri-cli` の名前で呼べるように、CLI のある場所を PATH に足します。アプリと CLI は、同じ ZIP に入っているものを使ってください(版が違うと、CLI がデータを開かないことがあります)。CLI は、アプリを一度起動してデータができてから使えます。
 
-- Windows: スタートメニューで「環境変数」と入力して「アカウントの環境変数を編集」を開き、ユーザー環境変数の `Path` に、`Higiri.exe` のあるフォルダ(`higiri-cli.exe` も同じフォルダにあります)を足します。開いていたターミナルと Claude Code は、開き直すと反映されます。
+- Windows: スタートメニューで「環境変数」と入力して「アカウントの環境変数を編集」を開き、ユーザー環境変数の `Path` に、`Higiri.exe` のあるフォルダ(上の手順なら `%LOCALAPPDATA%\Programs\Higiri`。`higiri-cli.exe` も同じフォルダにあります)を足します。開いていたターミナルと Claude Code は、開き直すと反映されます。
 - macOS: `~/.local/bin` などの PATH の通ったフォルダに、`Higiri.app` の中の `higiri-cli` へのシンボリックリンクを作ります。`Higiri.app` を「アプリケーション」フォルダに移してから作ってください(移すとリンクが切れるため)。
 
   ```bash
