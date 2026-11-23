@@ -14,7 +14,7 @@
 | 場所 | 中身 |
 | --- | --- |
 | `docs/README.md` | 資料の一覧、優先順位、写しを作るときに分かっている注意点 |
-| `docs/requirements-design.md` | 要件52件、非機能要件、リリース段階、アーキテクチャ、DDL、主要ロジック、画面構成、コマンド一覧、未決事項。v1.1 の詳細(「v1.1の詳細」の節)、v0.3.0 の詳細(「v0.3.0の詳細」の節)、v0.4.0 の詳細(「v0.4.0の詳細」の節)と v0.5.0 の詳細(「v0.5.0の詳細」の節) |
+| `docs/requirements-design.md` | 要件53件、非機能要件、リリース段階、アーキテクチャ、DDL、主要ロジック、画面構成、コマンド一覧、未決事項。v1.1 の詳細(「v1.1の詳細」の節)、v0.3.0 の詳細(「v0.3.0の詳細」の節)、v0.4.0 の詳細(「v0.4.0の詳細」の節)、v0.5.0 の詳細(「v0.5.0の詳細」の節)と v0.6.0 の詳細(「v0.6.0の詳細」の節) |
 | `docs/implementation-plan.md` | MVPまでのフェーズ分けと、各フェーズの完了条件 |
 | `docs/implementation-plan-v1.1.md` | v1.1 のフェーズ分け(フェーズ10〜16)と、各フェーズの完了条件。進め方(オーケストレーター方式) |
 | `docs/implementation-plan-v0.3.0.md` | v0.3.0 のフェーズ分け(フェーズ17〜24)と、各フェーズの完了条件。進め方は v1.1 と同じ(作業のブランチは `dev-0.3.0`) |
@@ -25,7 +25,7 @@
 
 ## 作る範囲
 
-v0.5.0 までを作る。設計書の「段階」が「将来」のもの(時間管理、月報、ウィンドウを開かずにTODOを追加する T-13)は作らない。データ構造の備え(`reports.kind` の `monthly`)は設計書どおり入れたままにする。
+v0.6.0 までを作る。設計書の「段階」が「将来」のもの(時間管理、月報、ウィンドウを開かずにTODOを追加する T-13)は作らない。データ構造の備え(`reports.kind` の `monthly`)は設計書どおり入れたままにする。
 
 MVP(v1.0。公開した版は v0.1.0)、v1.1(v0.2.0)、v0.3.0 と v0.4.0 は完成している。v1.1 は `docs/implementation-plan-v1.1.md` のフェーズ10〜16で作った。仕様は設計書の「v1.1の詳細」、決めごとは下の「v1.1 の決めごと」にある。
 
@@ -33,7 +33,9 @@ v0.3.0(サブTODO、TODOテンプレート、繰り返しTODO、TODO間の依存
 
 v0.4.0(表示倍率、バックアップの複製先、後続TODOのずらし、一括変更)は `docs/implementation-plan-v0.4.0.md` のフェーズ25〜30で作った。仕様は設計書の「v0.4.0の詳細」、決めごとは下の「v0.4.0 の決めごと」にある。
 
-v0.5.0(CLI `higiri-cli`、Claude Code の Skill、CLI に出さないプロジェクトの設定)は `docs/implementation-plan-v0.5.0.md` のフェーズ31〜36で作る。仕様は設計書の「v0.5.0の詳細」、決めごとは下の「v0.5.0 の決めごと」にある。
+v0.5.0(CLI `higiri-cli`、Claude Code の Skill、CLI に出さないプロジェクトの設定)は `docs/implementation-plan-v0.5.0.md` のフェーズ31〜36で作った。仕様は設計書の「v0.5.0の詳細」、決めごとは下の「v0.5.0 の決めごと」にある。
+
+v0.6.0(プロジェクトの並べ替え、日付の欄の未入力の見分け)は小さいので、作業計画のファイルを作らずに `dev-0.6.0` でまとめて作る。仕様は設計書の「v0.6.0の詳細」、決めごとは下の「v0.6.0 の決めごと」にある。
 
 段階は、v0.3.0 からアプリの版番号(v0.3.0 など)で呼ぶ。「v2」の呼び名は使わない(利用者が決定)。「MVP」「v1.1」は、これまでの資料のまま使う。
 
@@ -114,7 +116,7 @@ SQLite(アプリのデータフォルダ内の todo.db)
   - 設定の保存(`useUpdateSettings`)も同じ考え方で、`scope`(`SETTINGS_WRITES`)で1本の列に並べ、送る直前に `get_settings` で今の設定を読み、呼び出し側が渡した変える項目だけを重ねて `update_settings` に送る。変える項目は `Partial<SettingsInput>` か、今の設定を受け取る関数(`SettingsChange`)。`SettingsInput` を設定から作るのは `queries.ts` の `settingsInputOf`。見出しの欄を離れたときの保存と、その直後にほかのカードで押したスイッチの保存が、互いに古い値で上書きしないため(フェーズ14)。
 - 入力の検証は Rust 側で行い、返ってきた `AppError.message` を表示する(`src/lib/errors.ts` の `errorMessage`)。フォームには `noValidate` を付け、ブラウザ標準の英語の吹き出しを出さない。
 - 一覧の絞り込み・並べ替え(`domain/listing.rs`)、ステータスの選択肢(`TodoItem.next_statuses`)、タイムラインの文(`domain/timeline.rs`)は Rust 側で作る。画面は受け取ったものを並べるだけ。
-- 日付の入力は `src/components/DateField.tsx` を使う(空を null にし、macOS の WebKit が空欄に今日の日付を出すのを薄く表示する)。
+- 日付の入力は `src/components/DateField.tsx` を使う(空を null にし、空の欄に `data-empty` を付ける。v0.6.0 からは、フォーカスのない空の欄を「未入力」と点線の枠で出す。下の「v0.6.0 の決めごと」)。
 - Enter で確定する入力は `src/lib/keys.ts` の `isComposing` で日本語変換中の Enter を除く。
 - 詳細パネルの項目は `useTodoDraft` で入力が止まって1秒後に `update_todo` で保存する。閉じるときと別のTODOに切り替えるときにも保存する。ステータスを変える前にも保存してから `change_status` を呼ぶ。
   - 項目ごとに「手で変えて、まだ保存していないか」(`touched`)を持つ。TODO がほかで変わったとき(ガントのドラッグ)は、手で変えていない項目だけが新しい値を取る。保存では手で変えた項目だけを、その時点の TODO に重ねて送る(どちらも `src/features/todos/detail/draft.ts` の `mergeDraft`)。保存が終わったら、送ったあとに打ち直していない項目は手で変えた印を外し、保存された値を出す(`settleSave`。タイトルの前後の空白が除かれるなど)。
@@ -633,6 +635,16 @@ v0.5.0 は `docs/implementation-plan-v0.5.0.md` のフェーズ31〜36で作る�
     - Claude Code での確認(2.1.319、`claude -p`): 作業用の HOME にサンプルデータの DB を作り(デバッグ版の .app を `--sample-data` で起動)、その HOME と `--dev` で本物の CLI を呼ぶ `bin/higiri-cli` を PATH の先頭に置き、作業用のプロジェクトの `.claude/skills/higiri/` に `install-skill` で書いた SKILL.md を置いた。デスクトップアプリの中から動かすときは、環境変数を空にしてから `claude` を起動する(中継の URL やセッションの番号を引き継がないため)。書くサブコマンドの確認は、`-p` では断られる(`permission_denied`)ことで確かめ、利用者が許した場合は `--allowedTools "Bash(higiri-cli log *)"` で再現した。
     - Claude Code の確認の出方(Claude Code 2.1.319 の資料と `-p` で確かめた): `allowed-tools` を持つ Skill は、呼ぶときに Skill を実行してよいかの確認(「Execute skill: higiri」)が出る(`allowed-tools` のない Skill では出ない)。`allowed-tools` が効くのは Skill を呼んだ1回の依頼の中だけで、同じ会話の次の依頼で Claude が Skill を呼び直さずに読むサブコマンドを呼ぶと、確認が出る。オーケストレーターの決定で、SKILL.md の `allowed-tools` は読む5つのまま(テストと完了条件も変えない)にし、確認をなくしたいときに `~/.claude/settings.json` の `permissions.allow` に足す6行(`Skill(higiri)` と読む5つ)を README に書いた。書くサブコマンドは足さないこと、`show` を足すとメモと作業ログの本文も確認なしに AI に渡ることも書いた。`install-skill` は settings.json に何も書かない。その6行を `--settings` で渡すと、Skill の実行と2回目の依頼の読み取りに確認が出ず、書くサブコマンドには確認が出ることを `-p` で確かめた。
 
+## v0.6.0 の決めごと
+
+v0.6.0 は、作業計画のファイルを作らずに `dev-0.6.0` でまとめて作る。仕様の詳細は設計書の「v0.6.0の詳細」にある。
+
+- 作業のブランチは `dev-0.6.0`(リリースのタグ `v0.6.0` と同じ名前にしない)。
+- 表は変えない(マイグレーションを足さない)。`schema_version` は2のまま。settings のキーも足さない。
+- v0.6.0 で足すコマンドは `reorder_projects(ids)` の1つで、コマンドは全部で49個(v0.5.0 までの48個と合わせて)。CLI は変えない。
+- 日付の欄の未入力(利用者が決定): 未入力でフォーカスのない欄は、枠を点線にし、日付の代わりに「未入力」を薄い文字で出す。入力済みの欄と、フォーカスのある欄の見た目は変えない。CSS だけで作り(`src/styles/app.css`)、Aizome の写しと部品の DOM は変えない。
+- プロジェクトの並べ替え(利用者が決定): 設定画面のカードの「上へ」「下へ」のボタンで、稼働中のプロジェクトを並べ替える。サイドナビのドラッグは入れない。並び順は `projects.sort_order` に入れ、アーカイブしたプロジェクトは前後をそのまま残す(元に戻すと前の位置に戻る)。`updated_at` は変えない。
+
 ## 品質の決めごと
 
 - `domain/` は単体テストを書く。日付の境界(当日、N日後ちょうど、月またぎ・年またぎ)と、遷移表の全行を押さえる。
@@ -644,7 +656,7 @@ v0.5.0 は `docs/implementation-plan-v0.5.0.md` のフェーズ31〜36で作る�
 
 ## 進め方
 
-- `docs/implementation-plan.md`(MVP、フェーズ0〜8)、`docs/implementation-plan-v1.1.md`(v1.1、フェーズ10〜16)、`docs/implementation-plan-v0.3.0.md`(v0.3.0、フェーズ17〜24)、`docs/implementation-plan-v0.4.0.md`(v0.4.0、フェーズ25〜30)、`docs/implementation-plan-v0.5.0.md`(v0.5.0、フェーズ31〜36)のフェーズ順に進め、フェーズの終わりにテスト結果と、利用者に画面で確認してほしい操作の一覧を報告して止まる。
+- `docs/implementation-plan.md`(MVP、フェーズ0〜8)、`docs/implementation-plan-v1.1.md`(v1.1、フェーズ10〜16)、`docs/implementation-plan-v0.3.0.md`(v0.3.0、フェーズ17〜24)、`docs/implementation-plan-v0.4.0.md`(v0.4.0、フェーズ25〜30)、`docs/implementation-plan-v0.5.0.md`(v0.5.0、フェーズ31〜36)のフェーズ順に進め(v0.6.0 は小さいのでフェーズに分けない)、フェーズの終わりにテスト結果と、利用者に画面で確認してほしい操作の一覧を報告して止まる。
 - v1.1、v0.3.0、v0.4.0、v0.5.0 はオーケストレーター方式で進める。フェーズごとにサブセッションが作業してコミットし、オーケストレーターが差分を確かめてから利用者に報告する(`implementation-plan-v1.1.md`、`implementation-plan-v0.3.0.md`、`implementation-plan-v0.4.0.md`、`implementation-plan-v0.5.0.md` の「進め方」)。
 - 設計書と違う実装にしたいとき、設計書に書いていないことを決める必要があるときは、理由と選択肢を添えて先に相談する。
 - 利用者への報告とUIの文言は日本語。コード内の識別子は英語。
