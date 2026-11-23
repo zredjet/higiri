@@ -15,6 +15,7 @@ pub mod holidays;
 pub mod listing;
 pub mod model;
 pub mod notify;
+pub mod project_order;
 pub mod repeat;
 pub mod report;
 pub mod report_template;

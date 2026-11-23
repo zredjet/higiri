@@ -8,6 +8,7 @@ const APP_COMMANDS: &[&str] = &[
     "update_project",
     "archive_project",
     "delete_project",
+    "reorder_projects",
     "list_todos",
     "get_todo",
     "create_todo",

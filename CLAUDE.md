@@ -644,6 +644,12 @@ v0.6.0 は、作業計画のファイルを作らずに `dev-0.6.0` でまとめ
 - v0.6.0 で足すコマンドは `reorder_projects(ids)` の1つで、コマンドは全部で49個(v0.5.0 までの48個と合わせて)。CLI は変えない。
 - 日付の欄の未入力(利用者が決定): 未入力でフォーカスのない欄は、枠を点線にし、日付の代わりに「未入力」を薄い文字で出す。入力済みの欄と、フォーカスのある欄の見た目は変えない。CSS だけで作り(`src/styles/app.css`)、Aizome の写しと部品の DOM は変えない。
 - プロジェクトの並べ替え(利用者が決定): 設定画面のカードの「上へ」「下へ」のボタンで、稼働中のプロジェクトを並べ替える。サイドナビのドラッグは入れない。並び順は `projects.sort_order` に入れ、アーカイブしたプロジェクトは前後をそのまま残す(元に戻すと前の位置に戻る)。`updated_at` は変えない。
+- 作ったもの
+  - 日付の欄(`src/styles/app.css` の「Date inputs」): `.az-input:has(> input[type="date"][data-empty="true"]:not(:focus))` で、枠を `border-style: dashed` にし、入力欄の文字を透明にして、枠の `::before`(`position: absolute; inset: 0; padding: inherit`)に「未入力」(`--text-subtle`)を出す。入力欄は疑似要素より上にあるので、クリックはそのまま入力欄に届く。v0.5.0 までの `input[type="date"][data-empty="true"]:not(:focus)` の薄い文字は、`:has()` を読めない環境のために残した。Chromium では、カレンダーのアイコンは透明にならずに残る。
+  - `domain/project_order.rs`: `reordered(all, active)`。`all` はすべてのプロジェクトを今の並び(`sort_order`、`id`)で `(id, archived)` にしたもの、`active` は稼働中のプロジェクトの新しい順。稼働中のプロジェクトがいる位置に新しい順で入れ、アーカイブしたものはその位置に残す。稼働中のプロジェクトがちょうど1回ずつでなければ `OrderChanged`。
+  - `repo::projects::set_sort_order(id, sort_order)`(`updated_at` は変えない)。
+  - `commands/projects.rs`: `reorder_projects(ids)`(中は `reorder`。時計は読まない)。`begin_write` のトランザクションで全プロジェクトを読み、`reordered` の順に1から番号を振り、変わる行だけを書く。`OrderChanged` は「プロジェクトの一覧が変わっています。画面を開き直してから、もう一度並べ替えてください。」(`ORDER_CHANGED`、validation)。テストは、並び・番号・`updated_at`、新しいプロジェクトが最後、アーカイブしたものを元に戻すと前の位置、番号の重なり(JSON の取り込みなど)、断ったときに何も変わらないこと、TODO一覧とダッシュボードの順。
+  - 画面: 設定画面の「プロジェクトの並び」のカード(`src/features/settings/ProjectOrderCard.tsx`。「データ」の下、「CLIに出すプロジェクト」の上)。Aizome の `Table`(列は「プロジェクト」と「並べ替え」)で、行ごとに「上へ」「下へ」の ghost のボタン(上への矢印は `chevron-down` を `.icon-up` で回す。読み上げ名は日報のテンプレートの節と同じ書き方)。文言と小さな計算は `projectOrder.ts`(`activeProjects`、`moved`、`shownOrder`。Vitest あり)。押すと、押したあとの並び(`pending`)を出したまま `useReorderProjects` で保存する。フックは `scope`(`PROJECT_ORDER_WRITES`)で1本の列に並べ、毎回すべての並びを送るので、最後に押した並びが残る。保存のあとはプロジェクトと TODO の一覧を取り直し、取り直し終えてから `pending` を消す(`mutate` の `onSettled` は最後に押した分だけ動く)。失敗したら保存されている並びに戻し、カードの上にエラーを出す。先頭(最後)に動かして押したボタンが押せなくなったときは、同じ行のもう一方のボタンにフォーカスを移す(キーボードで続けて動かせるように。フォーカスが押したボタンにあったときだけ)。
 
 ## 品質の決めごと
 

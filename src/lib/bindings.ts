@@ -15,6 +15,11 @@ export const commands = {
 	archiveProject: (id: number, archived: boolean, options?: InvokeOptions) => __TAURI_INVOKE<Project>("archive_project", { id, archived }, options),
 	/**  Deletes a project with all its TODOs and records. The screen confirms first. */
 	deleteProject: (id: number, options?: InvokeOptions) => __TAURI_INVOKE<null>("delete_project", { id }, options),
+	/**
+	 *  Saves the order of the active projects (P-4, v0.6.0). `ids` names every
+	 *  active project, in the new order.
+	 */
+	reorderProjects: (ids: number[], options?: InvokeOptions) => __TAURI_INVOKE<null>("reorder_projects", { ids }, options),
 	/**  TODOs with their 日限注意 category, warnings and day counts. */
 	listTodos: (query: TodoQuery, options?: InvokeOptions) => __TAURI_INVOKE<TodoList>("list_todos", { query }, options),
 	getTodo: (id: number, options?: InvokeOptions) => __TAURI_INVOKE<TodoItem>("get_todo", { id }, options),

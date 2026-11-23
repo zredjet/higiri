@@ -45,6 +45,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             projects::update_project,
             projects::archive_project,
             projects::delete_project,
+            projects::reorder_projects,
             todos::list_todos,
             todos::get_todo,
             todos::create_todo,
@@ -151,7 +152,7 @@ mod tests {
             .collect();
         allowed.sort();
         assert_eq!(allowed, commands_in_bindings());
-        assert_eq!(allowed.len(), 48);
+        assert_eq!(allowed.len(), 49);
     }
 
     /// Regenerates `src/lib/bindings.ts` and fails when the committed file was

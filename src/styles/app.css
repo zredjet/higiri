@@ -1033,9 +1033,35 @@ body,
 
 /* ---------- Date inputs ---------- */
 /* WebKit on macOS shows today's date in an empty date input; dim it like a
-   placeholder so an empty field does not look filled in. */
+   placeholder so an empty field does not look filled in. This stays the look
+   where :has() is not supported. */
 input[type="date"][data-empty="true"]:not(:focus) {
   color: var(--text-subtle);
+}
+
+/* v0.6.0: an empty DateField without focus gets a dashed frame and shows
+   「未入力」 in place of what the WebView draws there (today's date on macOS,
+   年/月/日 on Windows). The text sits under the transparent input, so clicks
+   reach the input; with focus the field looks as before. */
+.az-input:has(> input[type="date"][data-empty="true"]:not(:focus)) {
+  border-style: dashed;
+}
+
+.az-input:has(> input[type="date"][data-empty="true"]:not(:focus)) > input {
+  color: transparent;
+}
+
+.az-input:has(> input[type="date"][data-empty="true"]:not(:focus))::before {
+  content: "未入力";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding: inherit;
+  color: var(--text-subtle);
+  font-size: 14px;
+  line-height: 22px;
+  pointer-events: none;
 }
 
 /* ---------- Dashboard ---------- */
@@ -1362,6 +1388,12 @@ input[type="date"][data-empty="true"]:not(:focus) {
 /* CLIに出すプロジェクト (v0.5.0): the switch at the right of its cell, under the column's name. */
 .cli-projects__switch {
   justify-content: flex-end;
+}
+
+/* プロジェクトの並び (v0.6.0): the up and down buttons at the right of the row. */
+.project-order__tools {
+  display: inline-flex;
+  gap: var(--space-1);
 }
 
 /* 表示: the 表示倍率 select is as wide as its longest label needs. */

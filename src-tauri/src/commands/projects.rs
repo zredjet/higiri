@@ -1,5 +1,5 @@
 //! プロジェクト: list_projects, create_project, update_project,
-//! archive_project, delete_project.
+//! archive_project, delete_project, reorder_projects (v0.6.0).
 
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::Deserialize;
@@ -7,9 +7,10 @@ use sqlx::SqlitePool;
 use tauri::State;
 
 use super::clock;
-use super::error::CmdResult;
+use super::error::{AppError, CmdResult};
 use super::validate;
 use crate::domain::model::Project;
+use crate::domain::project_order;
 use crate::domain::urgency::Rules;
 use crate::domain::views::{ProjectSummary, project_summaries};
 use crate::repo;
@@ -73,6 +74,14 @@ pub async fn archive_project(
 #[specta::specta]
 pub async fn delete_project(pool: State<'_, SqlitePool>, id: i64) -> CmdResult<()> {
     delete(&pool, id).await
+}
+
+/// Saves the order of the active projects (P-4, v0.6.0). `ids` names every
+/// active project, in the new order.
+#[tauri::command]
+#[specta::specta]
+pub async fn reorder_projects(pool: State<'_, SqlitePool>, ids: Vec<i64>) -> CmdResult<()> {
+    reorder(&pool, &ids).await
 }
 
 // ---- implementation ----------------------------------------------------------
@@ -156,6 +165,31 @@ pub async fn delete(pool: &SqlitePool, id: i64) -> CmdResult<()> {
     if hidden.contains(&id) {
         let kept: Vec<i64> = hidden.into_iter().filter(|&h| h != id).collect();
         repo::settings::set_cli_hidden_projects(&mut tx, &kept).await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+pub(crate) const ORDER_CHANGED: &str =
+    "プロジェクトの一覧が変わっています。画面を開き直してから、もう一度並べ替えてください。";
+
+/// Puts the active projects in the order of `ids`; archived ones keep their
+/// places (`project_order::reordered`). Every project is numbered from 1, and
+/// only the numbers that change are written, in one transaction.
+pub async fn reorder(pool: &SqlitePool, ids: &[i64]) -> CmdResult<()> {
+    let mut tx = db::begin_write(pool).await?;
+    let projects = repo::projects::list(&mut tx, true).await?;
+    let all: Vec<(i64, bool)> = projects
+        .iter()
+        .map(|p| (p.id, p.archived_at.is_some()))
+        .collect();
+    let order =
+        project_order::reordered(&all, ids).map_err(|_| AppError::validation(ORDER_CHANGED))?;
+    for (place, &id) in (1..).zip(&order) {
+        let current = projects.iter().find(|p| p.id == id).map(|p| p.sort_order);
+        if current != Some(place) {
+            repo::projects::set_sort_order(&mut tx, id, place).await?;
+        }
     }
     tx.commit().await?;
     Ok(())
@@ -275,5 +309,146 @@ mod tests {
             settings::get(&pool).await.unwrap().cli_hidden_projects,
             vec![a.id]
         );
+    }
+
+    async fn names(pool: &SqlitePool, include_archived: bool) -> Vec<String> {
+        list(pool, include_archived, d("2026-11-19"))
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|s| s.project.name)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn reorder_puts_the_active_projects_in_the_given_order() {
+        let pool = db::open_in_memory().await.unwrap();
+        let now = ts(2026, 11, 19, 0, 0);
+        let a = create(&pool, input("A", None), now).await.unwrap();
+        let b = create(&pool, input("B", None), now).await.unwrap();
+        let c = create(&pool, input("C", None), now).await.unwrap();
+
+        reorder(&pool, &[c.id, a.id, b.id]).await.unwrap();
+        assert_eq!(names(&pool, false).await, ["C", "A", "B"]);
+        // Numbered from 1; `updated_at` stays.
+        let mut conn = pool.acquire().await.unwrap();
+        let saved = repo::projects::list(&mut conn, true).await.unwrap();
+        let orders: Vec<i64> = saved.iter().map(|p| p.sort_order).collect();
+        assert_eq!(orders, [1, 2, 3]);
+        assert!(saved.iter().all(|p| p.updated_at == now));
+        drop(conn);
+
+        // A new project goes last.
+        create(&pool, input("D", None), now).await.unwrap();
+        assert_eq!(names(&pool, false).await, ["C", "A", "B", "D"]);
+    }
+
+    #[tokio::test]
+    async fn reorder_keeps_the_place_of_archived_projects() {
+        let pool = db::open_in_memory().await.unwrap();
+        let now = ts(2026, 11, 19, 0, 0);
+        let a = create(&pool, input("A", None), now).await.unwrap();
+        let x = create(&pool, input("X", None), now).await.unwrap();
+        let b = create(&pool, input("B", None), now).await.unwrap();
+        let c = create(&pool, input("C", None), now).await.unwrap();
+        archive(&pool, x.id, true, now).await.unwrap();
+
+        reorder(&pool, &[c.id, b.id, a.id]).await.unwrap();
+        assert_eq!(names(&pool, false).await, ["C", "B", "A"]);
+        assert_eq!(names(&pool, true).await, ["C", "X", "B", "A"]);
+
+        // Restored, X comes back second.
+        archive(&pool, x.id, false, now).await.unwrap();
+        assert_eq!(names(&pool, false).await, ["C", "X", "B", "A"]);
+    }
+
+    #[tokio::test]
+    async fn reorder_settles_clashing_numbers() {
+        let pool = db::open_in_memory().await.unwrap();
+        let now = ts(2026, 11, 19, 0, 0);
+        let a = create(&pool, input("A", None), now).await.unwrap();
+        let b = create(&pool, input("B", None), now).await.unwrap();
+        let c = create(&pool, input("C", None), now).await.unwrap();
+        // As a hand-edited JSON file may leave it: every number the same.
+        sqlx::query("UPDATE projects SET sort_order = 0")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        reorder(&pool, &[b.id, c.id, a.id]).await.unwrap();
+        assert_eq!(names(&pool, false).await, ["B", "C", "A"]);
+    }
+
+    #[tokio::test]
+    async fn reorder_refuses_a_stale_list_and_changes_nothing() {
+        let pool = db::open_in_memory().await.unwrap();
+        let now = ts(2026, 11, 19, 0, 0);
+        let a = create(&pool, input("A", None), now).await.unwrap();
+        let b = create(&pool, input("B", None), now).await.unwrap();
+        let x = create(&pool, input("X", None), now).await.unwrap();
+        archive(&pool, x.id, true, now).await.unwrap();
+
+        for ids in [
+            vec![b.id],
+            vec![b.id, a.id, a.id],
+            vec![b.id, a.id, x.id],
+            vec![b.id, a.id, 999],
+        ] {
+            let e = reorder(&pool, &ids).await.unwrap_err();
+            assert_eq!(e.kind, ErrorKind::Validation);
+            assert_eq!(e.message, ORDER_CHANGED);
+            assert_eq!(names(&pool, true).await, ["A", "B", "X"]);
+        }
+    }
+
+    #[tokio::test]
+    async fn the_order_shows_in_the_todo_list_and_the_dashboard() {
+        use crate::commands::dashboard;
+        use crate::commands::todos::{self, NewTodoInput};
+        use crate::domain::model::Priority;
+
+        let pool = db::open_in_memory().await.unwrap();
+        let now = ts(2026, 11, 19, 0, 0);
+        let today = d("2026-11-19");
+        let a = create(&pool, input("A", None), now).await.unwrap();
+        let b = create(&pool, input("B", None), now).await.unwrap();
+        for p in [&a, &b] {
+            todos::create(
+                &pool,
+                NewTodoInput {
+                    project_id: p.id,
+                    title: format!("{} のTODO", p.name),
+                    priority: Some(Priority::Medium),
+                    due_date: None,
+                    planned_start: None,
+                    planned_end: None,
+                    memo_md: None,
+                    parent_id: None,
+                    template_id: None,
+                },
+                today,
+                now,
+            )
+            .await
+            .unwrap();
+        }
+
+        reorder(&pool, &[b.id, a.id]).await.unwrap();
+        let list = todos::list(&pool, &Default::default(), today)
+            .await
+            .unwrap();
+        let titles: Vec<&str> = list
+            .rows
+            .iter()
+            .map(|r| r.item.todo.title.as_str())
+            .collect();
+        assert_eq!(titles, ["B のTODO", "A のTODO"]);
+        let board = dashboard::get(&pool, today).await.unwrap();
+        let progress: Vec<&str> = board
+            .projects
+            .iter()
+            .map(|p| p.project.name.as_str())
+            .collect();
+        assert_eq!(progress, ["B", "A"]);
     }
 }

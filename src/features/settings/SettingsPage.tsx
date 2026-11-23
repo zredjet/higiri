@@ -39,6 +39,7 @@ import {
 } from "./backupText";
 import { CLI_PROJECTS_TEXT, cliProjectRows, cliSwitchLabel, hiddenAfter, type CliProjectRow } from "./cliProjects";
 import { ImportDialog } from "./ImportDialog";
+import { ProjectOrderCard } from "./ProjectOrderCard";
 import { ReportTemplateCard } from "./ReportTemplateCard";
 import { RestoreDialog } from "./RestoreDialog";
 import { TodoTemplateCard } from "./TodoTemplateCard";
@@ -97,6 +98,7 @@ export function SettingsPage() {
       <TodoTemplateCard />
       <DisplayCard />
       <DataCard settings={settings.data} />
+      <ProjectOrderCard />
       {settings.data ? <CliProjectsCard settings={settings.data} /> : null}
       <ArchivedProjectsCard />
     </div>

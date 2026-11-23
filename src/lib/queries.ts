@@ -97,6 +97,22 @@ export function useDeleteProject() {
   });
 }
 
+const PROJECT_ORDER_WRITES = { id: "project-order-writes" };
+
+/**
+ * Saves the order of the active projects (P-4, v0.6.0). Each save sends the whole order and they run one at a
+ * time in the order they were made, so the last one is what stays. The save ends once the lists are read
+ * again, so the card can show the saved order right after it.
+ */
+export function useReorderProjects() {
+  const invalidate = useInvalidateProjectData();
+  return useMutation({
+    mutationFn: (ids: readonly number[]) => commands.reorderProjects([...ids]),
+    scope: PROJECT_ORDER_WRITES,
+    onSuccess: invalidate,
+  });
+}
+
 /** The input of update_settings that keeps every setting as it is. */
 export function settingsInputOf(s: Settings): SettingsInput {
   return {

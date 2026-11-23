@@ -24,6 +24,7 @@
     "allow-update-project",
     "allow-archive-project",
     "allow-delete-project",
+    "allow-reorder-projects",
     "allow-list-todos",
     "allow-get-todo",
     "allow-create-todo",

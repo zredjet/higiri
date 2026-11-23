@@ -159,6 +159,20 @@ pub async fn set_archived(
     .into_project()
 }
 
+/// Writes a project's place in the display order (v0.6.0). `updated_at` stays:
+/// the order is not part of the project.
+pub async fn set_sort_order(conn: &mut SqliteConnection, id: i64, sort_order: i64) -> Result<()> {
+    let done = sqlx::query("UPDATE projects SET sort_order = ?2 WHERE id = ?1")
+        .bind(id)
+        .bind(sort_order)
+        .execute(&mut *conn)
+        .await?;
+    if done.rows_affected() == 0 {
+        return Err(not_found(id));
+    }
+    Ok(())
+}
+
 /// Deletes a project. Its TODOs, work logs and events go with it (ON DELETE CASCADE).
 pub async fn delete(conn: &mut SqliteConnection, id: i64) -> Result<()> {
     let done = sqlx::query("DELETE FROM projects WHERE id = ?1")
